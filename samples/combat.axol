@@ -1,0 +1,23 @@
+(t Entity hp atk def)
+
+(f make_entity [s i i i -> Entity] name hp atk def
+  (S Entity hp hp atk atk def def))
+
+(f apply_dmg [Entity i -> Entity] ent amt
+  (Q (>= amt 0))
+  (v oh (@ ent hp))
+  (v raw (- amt (@ ent def)))
+  (v dmg (? (< raw 0) 0 raw))
+  (m! (@ ent hp) (max 0 (- oh dmg)))
+  (G (<= (@ ent hp) oh))
+  ent)
+
+(f is_alive [Entity -> b] ent
+  (> (@ ent hp) 0))
+
+(v hero (make_entity "Hero" 100 25 10))
+(v goblin (make_entity "Goblin" 30 15 5))
+
+(v goblin2 (apply_dmg goblin (@ hero atk)))
+(print "Goblin HP after hero attack:" (@ goblin2 hp))
+(print "Goblin alive?" (is_alive goblin2))

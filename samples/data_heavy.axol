@@ -1,0 +1,22 @@
+(v heroes (A
+  (S Unit name "Knight" hp 120 atk 30 def 20)
+  (S Unit name "Mage" hp 80 atk 50 def 10)
+  (S Unit name "Rogue" hp 90 atk 40 def 15)))
+
+(v skills (H
+  "slash" (S Skill dmg 25 cost 10)
+  "fireball" (S Skill dmg 50 cost 30)
+  "backstab" (S Skill dmg 35 cost 15)))
+
+(f total_hp [*Unit -> i] units
+  (m sum 0)
+  (F u units (m! sum (+ sum (@ u hp))))
+  sum)
+
+(f strongest [*Unit -> Unit] units
+  (m best (# units 0))
+  (F u units (? (> (@ u atk) (@ best atk)) (m! best u) unit))
+  best)
+
+(print "Total HP:" (total_hp heroes))
+(print "Strongest:" (@ (strongest heroes) name))

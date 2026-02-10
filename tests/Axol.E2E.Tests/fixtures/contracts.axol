@@ -1,0 +1,8 @@
+(f safe_div [i i -> i] a b
+  (Q (!= b 0))
+  (v r (/ a b))
+  (G (>= r 0))
+  r)
+(! (= (safe_div 10 2) 5))
+(! (= (safe_div 100 10) 10))
+(print "OK")
