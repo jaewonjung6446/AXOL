@@ -1,0 +1,4 @@
+@damage_calc
+s atk=[0] def_val=[0]
+: scale=transform(atk;M=[1.5])
+: reduce=merge(atk def_val;w=[1 -0.5])->dmg
