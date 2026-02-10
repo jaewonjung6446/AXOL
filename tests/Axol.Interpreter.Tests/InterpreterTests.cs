@@ -201,6 +201,46 @@ public class InterpreterTests
         Assert.Equal(10L, Assert.IsType<IntVal>(result).Value);
     }
 
+    // --- Positional struct fields ---
+
+    [Fact]
+    public void PositionalStruct_Basic()
+    {
+        // Define type then use positional construction
+        var (result, _) = Run("(t Point x y) (v p (S Point 10 20)) (@ p x)");
+        Assert.Equal(10L, Assert.IsType<IntVal>(result).Value);
+    }
+
+    [Fact]
+    public void PositionalStruct_SecondField()
+    {
+        var (result, _) = Run("(t Point x y) (v p (S Point 10 20)) (@ p y)");
+        Assert.Equal(20L, Assert.IsType<IntVal>(result).Value);
+    }
+
+    [Fact]
+    public void PositionalStruct_ThreeFields()
+    {
+        var (result, _) = Run("(t Vec3 x y z) (v v (S Vec3 1 2 3)) (+ (@ v x) (+ (@ v y) (@ v z)))");
+        Assert.Equal(6L, Assert.IsType<IntVal>(result).Value);
+    }
+
+    [Fact]
+    public void PositionalStruct_StillWorksNamed()
+    {
+        // Named mode should still work even with type def present
+        var (result, _) = Run("(t Point x y) (v p (S Point x 10 y 20)) (@ p y)");
+        Assert.Equal(20L, Assert.IsType<IntVal>(result).Value);
+    }
+
+    [Fact]
+    public void PositionalStruct_WithoutTypeDef_UsesNamed()
+    {
+        // Without type definition, falls back to named mode
+        var (result, _) = Run("(v p (S Point x 10 y 20)) (@ p x)");
+        Assert.Equal(10L, Assert.IsType<IntVal>(result).Value);
+    }
+
     [Fact]
     public void IndexAccess()
     {

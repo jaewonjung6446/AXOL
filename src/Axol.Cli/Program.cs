@@ -11,7 +11,7 @@ var fileArg = new Argument<FileInfo>("file", "AXOL source file");
 var runCmd = new Command("run", "Run an AXOL program") { fileArg };
 runCmd.SetHandler(file =>
 {
-    var source = File.ReadAllText(file.FullName);
+    var source = ReadAndPreprocess(file);
     var result = RunPipeline(source, file.Name, execute: true);
     System.Environment.ExitCode = result ? 0 : 1;
 }, fileArg);
@@ -19,7 +19,7 @@ runCmd.SetHandler(file =>
 var checkCmd = new Command("check", "Parse and type-check only") { fileArg };
 checkCmd.SetHandler(file =>
 {
-    var source = File.ReadAllText(file.FullName);
+    var source = ReadAndPreprocess(file);
     var result = RunPipeline(source, file.Name, execute: false);
     if (result)
         Console.WriteLine("{\"status\":\"ok\"}");
@@ -29,11 +29,19 @@ checkCmd.SetHandler(file =>
 var tokensCmd = new Command("tokens", "Count tokens in a file") { fileArg };
 tokensCmd.SetHandler(file =>
 {
-    var source = File.ReadAllText(file.FullName);
+    var source = ReadAndPreprocess(file);
     var lexer = new AxolLexer(source, file.Name);
     var tokens = lexer.Tokenize();
     var count = tokens.Count(t => t.Kind != Axol.Core.Tokens.TokenKind.Eof);
     Console.WriteLine($"{{\"file\":\"{file.Name}\",\"tokens\":{count},\"chars\":{source.Length}}}");
+}, fileArg);
+
+var expandCmd = new Command("expand", "Expand .axoli (indent mode) to standard AXOL") { fileArg };
+expandCmd.SetHandler(file =>
+{
+    var raw = File.ReadAllText(file.FullName);
+    var expanded = IndentPreprocessor.Process(raw);
+    Console.WriteLine(expanded);
 }, fileArg);
 
 var replCmd = new Command("repl", "Interactive REPL");
@@ -84,8 +92,16 @@ replCmd.SetHandler(() =>
     }
 });
 
-var rootCmd = new RootCommand("AXOL - AI-optimized programming language") { runCmd, checkCmd, tokensCmd, replCmd };
+var rootCmd = new RootCommand("AXOL - AI-optimized programming language") { runCmd, checkCmd, tokensCmd, expandCmd, replCmd };
 return await rootCmd.InvokeAsync(args);
+
+static string ReadAndPreprocess(FileInfo file)
+{
+    var raw = File.ReadAllText(file.FullName);
+    if (file.Extension.Equals(".axoli", StringComparison.OrdinalIgnoreCase))
+        return IndentPreprocessor.Process(raw);
+    return raw;
+}
 
 static bool RunPipeline(string source, string fileName, bool execute)
 {

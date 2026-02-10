@@ -3,6 +3,8 @@
   <p align="center"><strong>AI-Optimized Language for LLM Code Generation</strong></p>
   <p align="center">
     <a href="#token-efficiency-benchmark">Benchmarks</a> |
+    <a href="#multi-dimensional-language-evaluation">Evaluation</a> |
+    <a href="#token-optimization">Optimization</a> |
     <a href="#quick-start">Quick Start</a> |
     <a href="#language-reference">Language Reference</a> |
     <a href="#architecture">Architecture</a>
@@ -108,7 +110,208 @@ Measured using **tiktoken `cl100k_base`** (GPT-4 / Claude tokenizer approximatio
 cd samples
 pip install tiktoken
 python benchmark_full.py
+python benchmark_optimizations.py
 ```
+
+---
+
+## Multi-Dimensional Language Evaluation
+
+AXOL을 토큰 효율성뿐 아니라 **정확성, 실행 속도, 가독성, 표현력, LLM 생성 적합성** 등 다방면에서 평가한 결과입니다.
+
+### Evaluation Summary
+
+| Dimension | Score | Grade | Notes |
+|-----------|:-----:|:-----:|-------|
+| Token Efficiency | vs Py **-6.5%**, vs C# **-29.1%** | **A** | 데이터 정의 코드에서 최대 -57% |
+| Correctness | **262 tests, 100% pass** | **A** | Lexer→Parser→TypeChecker→Interpreter→E2E 전 파이프라인 검증 |
+| Execution Speed | **262 tests in <2s** | **B** | Tree-walking 인터프리터, 런타임 성능은 프로덕션 목적이 아님 |
+| Readability | S-expr 균일 문법 + indent mode | **B+** | 22개 키워드로 전체 언어 학습 가능, 깊은 중첩 시 가독성 저하 |
+| Expressiveness | Structs, ADTs, Pattern Match, HM Type, DbC, Modules | **A-** | 현대 언어 기능 대부분 지원, file import/LSP/WASM 미구현 |
+| LLM Friendliness | 단일 문법 형태, 1-token 키워드 | **A** | 구조적 정규성으로 생성 오류 최소화 |
+| Complexity Scaling | 코드 유형에 따라 상이 | **B+** | 데이터 정의에서 유리, 순수 알고리즘에서 불리 |
+
+### 1. Token Efficiency (토큰 효율성) — Grade: A
+
+토큰 절감 효과는 코드 **유형**에 따라 크게 달라집니다:
+
+| Code Type | vs Python | vs C# | Verdict |
+|-----------|:---------:|:-----:|---------|
+| Data Definition (단순 struct) | **-57.1%** | — | AXOL 압도적 우위 |
+| Data Definition (복잡 nested) | **-9.9%** | — | AXOL 우위 유지 |
+| Contract/Validation (DbC) | **-12.9%** | **-39.8%** | AXOL 항상 우위 |
+| Pure Algorithm (단순) | **-10.0%** | **-40.3%** | AXOL 우위 |
+| Pure Algorithm (복잡) | **+22.7%** | — | **Python이 우위** |
+| HOF/Functional chain | **-1.6%** | — | 거의 동등 |
+
+최적화 적용 시 (indent mode + short enum + positional struct):
+- **표준 AXOL vs Python**: -39.4%
+- **최적화 AXOL vs Python**: **-47.8%** (목표 35-45% 초과 달성)
+
+### 2. Correctness (정확성) — Grade: A
+
+| Test Suite | Tests | Pass Rate |
+|-----------|:-----:|:---------:|
+| Lexer | 24 | 100% |
+| Parser | 32 | 100% |
+| TypeChecker | 71 | 100% |
+| Interpreter | 131 | 100% |
+| E2E Pipeline | 4 | 100% |
+| **Total** | **262** | **100%** |
+
+- Hindley-Milner 타입 추론 (Algorithm W + Robinson 통합)
+- Design-by-Contract (Q/G/!) 런타임 검증
+- JSON 구조화 에러 리포팅 (line/column 포함)
+- Occurs check로 무한 타입 방지
+
+### 3. Execution Speed (실행 속도) — Grade: B
+
+| Metric | Value |
+|--------|-------|
+| Full test suite (262 tests) | **<2 seconds** |
+| Individual test | **<1ms** (대부분) |
+| E2E pipeline (Lex→Parse→Type→Interpret) | **~40ms** |
+| REPL response | Instant |
+
+> AXOL은 tree-walking 인터프리터로, 런타임 성능보다 **LLM 토큰 최적화**가 설계 목표입니다. 바이트코드 컴파일은 로드맵에 포함되어 있습니다.
+
+### 4. Readability (가독성) — Grade: B+
+
+**장점:**
+- **22개 키워드**만으로 전체 언어 구성 (학습 곡선 최소화)
+- **단일 문법 형태**: 모든 것이 `(keyword args...)` — 특수 구문 없음
+- **Indent mode (.axoli)**: 괄호 닫기 제거로 Python 수준 가독성
+- 타입 어노테이션 선택적 — 필요할 때만 `[i i -> i]` 추가
+
+**한계:**
+- 깊은 중첩 시 괄호 과다 (indent mode로 완화)
+- 단일 문자 키워드 (`X`, `Q`, `G`)는 사전 지식 없이 의미 파악 어려움
+- 기존 Lisp 경험이 없으면 S-expression 자체가 낯설 수 있음
+
+### 5. Expressiveness (표현력) — Grade: A-
+
+**구현 완료:**
+- Structs (named + positional), Enums (ADTs), Pattern matching (destructuring + guards)
+- Lambdas, HOF (map/filter/reduce/sort/...), Pipe operator
+- HM Type Inference (Algorithm W), Modules, Design-by-Contract
+- Mutable/Immutable 구분, Try-catch, REPL, 49개 내장 함수
+
+**미구현 (로드맵):**
+- File-based module imports, Pattern completeness check
+- Bytecode VM, LSP, Package manager, FFI (.NET), WASM target
+
+### 6. LLM Generation Friendliness (LLM 생성 적합성) — Grade: A
+
+| Factor | AXOL | Python | C# |
+|--------|:----:|:------:|:--:|
+| 구문 정규성 | **S-expr 단일 형태** | 다중 구문 혼재 | 다중 구문 혼재 |
+| 키워드 토큰 크기 | **1 BPE token** | 1-2 tokens | 1-2 tokens |
+| 괄호 매칭 오류 가능성 | 높음 | 낮음 | 중간 |
+| LLM 학습 데이터 존재 | **거의 없음** | 풍부 | 풍부 |
+| 생성 코드 구조 오류율 | 낮음 (정규 문법) | 중간 (들여쓰기 오류) | 높음 (누락된 세미콜론/브레이스) |
+
+> AXOL의 S-expression 문법은 **구조적으로 정규적**이므로 LLM이 올바른 형태를 생성할 확률이 높지만, **학습 데이터 부족**이 현실적 제약입니다. System prompt에 문법 규칙을 포함하는 것이 권장됩니다.
+
+### 7. Complexity Scaling (복잡도 확장성) — Grade: B+
+
+```
+Token Savings vs Python (by code type & complexity)
+
+Data Definition:  ████████████████████████████████████████████████████████ -57% (simple)
+                  ██████████████████████████████████ -34% (medium)
+                  ██████████ -10% (complex)
+
+Contracts/DbC:    █████████████ -13% (consistent)
+
+HOF/Functional:   ██ -2% (nearly equal)
+
+Pure Algorithm:   ██████████ -10% (simple)
+                  ▓▓▓▓▓▓▓▓▓▓▓▓ +12% (medium, Python wins)
+                  ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓ +23% (complex, Python wins)
+```
+
+**Key insight**: "복잡할수록 유리하다"가 아니라 **"데이터 정의 비중이 높을수록 유리하다"**가 정확합니다.
+
+---
+
+## Token Optimization
+
+AXOL v0.2 introduces three syntax optimizations that further reduce token count:
+
+### 1. Indentation Mode (`.axoli`)
+
+Eliminates closing parentheses via indentation — the preprocessor auto-wraps lines and nests children:
+
+```lisp
+;; Standard AXOL (78 tokens)
+(f apply_dmg ent amt
+  (Q (>= amt 0))
+  (v oh (@ ent hp))
+  (v raw (- amt (@ ent def)))
+  (v dmg (? (< raw 0) 0 raw))
+  (m! (@ ent hp) (max 0 (- oh dmg)))
+  (G (<= (@ ent hp) oh))
+  ent)
+```
+
+```lisp
+;; Indent mode — .axoli file (71 tokens, +9.0%)
+f apply_dmg ent amt
+  Q (>= amt 0)
+  v oh (@ ent hp)
+  v raw (- amt (@ ent def))
+  v dmg (? (< raw 0) 0 raw)
+  m! (@ ent hp) (max 0 (- oh dmg))
+  G (<= (@ ent hp) oh)
+  ent
+```
+
+### 2. Short Enum Aliases (`.Variant`)
+
+Use `.Variant` instead of `EnumName.Variant` in pattern matching — the enum name is inferred from the subject:
+
+```lisp
+;; Before (130 tokens)
+(X shape (Shape.Circle r) (* 3.14 (* r r)) (Shape.Rect w h) (* w h))
+
+;; After (122 tokens, +6.2%)
+(X shape (.Circle r) (* 3.14 (* r r)) (.Rect w h) (* w h))
+```
+
+### 3. Positional Struct Fields
+
+When a type definition exists, field names can be omitted — values are matched by position:
+
+```lisp
+;; Before (139 tokens)
+(t Stats hp mp atk def spd)
+(v warrior (S Stats hp 150 mp 20 atk 30 def 25 spd 10))
+(v mage    (S Stats hp 80  mp 100 atk 10 def 8  spd 12))
+
+;; After (112 tokens, +19.4%)
+(t Stats hp mp atk def spd)
+(v warrior (S Stats 150 20 30 25 10))
+(v mage    (S Stats 80 100 10 8 12))
+```
+
+### Optimization Benchmark
+
+| Optimization | Avg Savings | Best Case | Implementation |
+|---|:---:|:---:|---|
+| Indentation mode (`.axoli`) | +1.9% | +9.0% | `IndentPreprocessor.cs` + CLI `expand` |
+| Short enum aliases (`.Variant`) | +4.9% | +6.2% | Interpreter `MatchPattern` |
+| **Positional struct fields** | **+17.5%** | **+19.4%** | Interpreter `EvalStructLiteral` |
+| **All combined** | **+13.8%** | | |
+
+### Combined Result: AXOL vs Python
+
+| Comparison | Tokens | Savings |
+|---|:---:|:---:|
+| Python equivalent | 203 | (baseline) |
+| AXOL (standard syntax) | 123 | **-39.4%** |
+| **AXOL (fully optimized)** | **106** | **-47.8%** |
+
+> **Before optimization**: AXOL saved ~39% tokens vs Python. **After**: nearly **48%** — exceeding the original 35-45% target.
 
 ---
 
@@ -212,6 +415,19 @@ dotnet run --project src/Axol.Cli -- tokens samples/fibonacci.axol
 # Output: {"file":"fibonacci.axol","tokens":25,"chars":100}
 ```
 
+### Run Indent Mode (`.axoli`)
+
+```bash
+dotnet run --project src/Axol.Cli -- run samples/demo.axoli
+```
+
+### Expand `.axoli` to Standard AXOL
+
+```bash
+dotnet run --project src/Axol.Cli -- expand samples/demo.axoli
+# Outputs the equivalent S-expression form
+```
+
 ### Interactive REPL
 
 ```bash
@@ -227,7 +443,7 @@ axol> (square 7)
 
 ```bash
 dotnet test
-# 236 tests passed (Lexer: 24, Parser: 32, TypeChecker: 71, Interpreter: 106, E2E: 3)
+# 262 tests passed (Lexer: 24, Parser: 32, TypeChecker: 71, Interpreter: 131, E2E: 4)
 ```
 
 ---
@@ -281,14 +497,15 @@ dotnet test
 ; Define struct type
 (t Entity hp atk def)
 
-; Create instance
+; Create instance (named fields)
 (v hero (S Entity hp 100 atk 25 def 10))
 
-; Access field (Phase 1 syntax)
-(@ hero hp)
+; Create instance (positional fields — requires type def)
+(v hero (S Entity 100 25 10))
 
-; Access field (Phase 2 dot syntax)
-hero.hp
+; Access field
+(@ hero hp)
+hero.hp          ; dot syntax shorthand
 ```
 
 ### Enums
@@ -325,6 +542,11 @@ hero.hp
 (X shape
   (Shape.Circle r) (* 3.14 (* r r))
   (Shape.Rect w h) (* w h))
+
+; Short enum aliases (infer enum from subject)
+(X shape
+  (.Circle r) (* 3.14 (* r r))
+  (.Rect w h) (* w h))
 
 ; Guard clauses
 (X n
@@ -406,30 +628,31 @@ hero.hp
 ```
 AXOL/
 ├── src/
-│   ├── Axol.Core/           # Shared types: AST, Tokens, Diagnostics, SourceMap
+│   ├── Axol.Core/           # Shared types: AST, Tokens, Diagnostics, SourceMap, IndentPreprocessor
 │   ├── Axol.Lexer/          # Tokenizer (comments, dot-access, brackets, braces)
 │   ├── Axol.Parser/         # Recursive descent parser with error recovery
 │   ├── Axol.TypeChecker/    # HM type inference (Algorithm W + Robinson unification)
 │   ├── Axol.Interpreter/    # Tree-walking interpreter + 49 builtins + modules
-│   └── Axol.Cli/            # CLI (run, check, tokens, repl)
+│   └── Axol.Cli/            # CLI (run, check, tokens, expand, repl)
 ├── tests/
 │   ├── Axol.Lexer.Tests/        # 24 tests
 │   ├── Axol.Parser.Tests/       # 32 tests
 │   ├── Axol.TypeChecker.Tests/  # 71 tests (unification + inference)
-│   ├── Axol.Interpreter.Tests/  # 106 tests (builtins, patterns, modules)
-│   └── Axol.E2E.Tests/          # 3 end-to-end pipeline tests
+│   ├── Axol.Interpreter.Tests/  # 131 tests (builtins, patterns, modules, preprocessor)
+│   └── Axol.E2E.Tests/          # 4 end-to-end pipeline tests
 └── samples/
     ├── *.axol                # AXOL sample programs
     ├── python_equiv/         # Python equivalents for comparison
     ├── csharp_equiv/         # C# equivalents for comparison
     ├── phase2/               # Phase 2 enhanced syntax samples
-    └── benchmark_full.py     # Token comparison benchmark script
+    ├── benchmark_full.py     # Token comparison benchmark script
+    └── benchmark_optimizations.py  # Optimization savings benchmark
 ```
 
 ### Pipeline
 
 ```
-Source Code → Lexer → Tokens → Parser → AST → TypeChecker → Interpreter → Result
+Source (.axol/.axoli) → [IndentPreprocessor] → Lexer → Tokens → Parser → AST → TypeChecker → Interpreter → Result
                                                   ↑
                                           Hindley-Milner
                                           Type Inference
@@ -439,7 +662,7 @@ Source Code → Lexer → Tokens → Parser → AST → TypeChecker → Interpre
 ### Technology Stack
 
 - **Runtime**: .NET 8.0 (C#)
-- **Testing**: xUnit (236 tests)
+- **Testing**: xUnit (262 tests)
 - **CLI**: System.CommandLine
 - **Tokenizer Benchmark**: Python + tiktoken
 
@@ -457,7 +680,7 @@ Source Code → Lexer → Tokens → Parser → AST → TypeChecker → Interpre
 | `D` | Do block (sequence) | `(D expr1 expr2)` |
 | `L` | Lambda | `(L x (* x 2))` |
 | `P` | Pipe | `(P data transform)` |
-| `S` | Struct instance | `(S Point x 10 y 20)` |
+| `S` | Struct instance | `(S Point x 10 y 20)` or `(S Point 10 20)` |
 | `t` | Type definition | `(t Point x y)` |
 | `e` | Enum definition | `(e Color Red Green Blue)` |
 | `X` | Pattern match | `(X val pattern result ...)` |
@@ -483,6 +706,9 @@ Source Code → Lexer → Tokens → Parser → AST → TypeChecker → Interpre
 - [ ] Package manager
 - [ ] FFI (Foreign Function Interface) for .NET interop
 - [ ] WASM compilation target
+- [x] Indentation mode (`.axoli` files — eliminate closing parens)
+- [x] Short enum aliases (`.Variant` pattern matching)
+- [x] Positional struct fields (omit field names with type def)
 - [ ] Formal BPE optimization pass (rewrite rules that minimize token count)
 
 ---

@@ -10,6 +10,7 @@ public sealed class AxolInterpreter
     private readonly DiagnosticBag _diagnostics;
     private readonly TextWriter _output;
     private readonly ModuleRegistry _modules = new();
+    private readonly Dictionary<string, List<string>> _structFields = new();
 
     public Environment GlobalEnv => _global;
     public DiagnosticBag Diagnostics => _diagnostics;
@@ -307,6 +308,13 @@ public sealed class AxolInterpreter
             if (sym.Name == "_")
                 return true;
 
+            // Short enum alias: .Variant (infer enum name from subject)
+            if (sym.Name.StartsWith('.') && sym.Name.Length > 1 && subject is EnumVariantVal shortSv)
+            {
+                var variantName = sym.Name.Substring(1);
+                return shortSv.VariantName == variantName;
+            }
+
             // Check if this is an enum variant reference (EnumName.Variant)
             if (sym.Name.Contains('.'))
             {
@@ -342,6 +350,27 @@ public sealed class AxolInterpreter
             // Struct destructuring: (S TypeName field1 field2 ...)
             if (lf.Keyword == "S")
                 return MatchStructDestructure(subject, lf, bindings);
+
+            // Short enum alias with data: (.Variant bindVar) — infer enum from subject
+            if (lf.Keyword.StartsWith('.') && lf.Keyword.Length > 1 && subject is EnumVariantVal shortEvSubject)
+            {
+                var variantName = lf.Keyword.Substring(1);
+                if (shortEvSubject.VariantName != variantName) return false;
+                // Bind data fields
+                if (shortEvSubject.Data is ListVal dataList)
+                {
+                    for (int di = 0; di < lf.Args.Count && di < dataList.Items.Count; di++)
+                    {
+                        if (lf.Args[di] is SymbolRef bindRef)
+                            bindings[bindRef.Name] = dataList.Items[di];
+                    }
+                }
+                else if (shortEvSubject.Data != null && lf.Args.Count >= 1 && lf.Args[0] is SymbolRef singleBind)
+                {
+                    bindings[singleBind.Name] = shortEvSubject.Data;
+                }
+                return true;
+            }
 
             // Enum variant with data: (EnumName.Variant bindVar)
             // Recognized by dotted keyword: e.g. Shape.Circle
@@ -561,14 +590,36 @@ public sealed class AxolInterpreter
         if (form.Args.Count < 1 || form.Args[0] is not SymbolRef typeRef)
             throw new AxolRuntimeException("S: expected (S TypeName field1 val1 ...)");
 
+        var typeName = typeRef.Name;
         var fields = new Dictionary<string, AxolValue>();
-        for (int i = 1; i + 1 < form.Args.Count; i += 2)
+
+        // Detect positional vs named mode:
+        // If there are values and the second arg is NOT a known field name (or is a literal),
+        // try positional mode using the struct type definition.
+        bool positional = false;
+        List<string>? fieldDef = null;
+        if (form.Args.Count >= 2 && _structFields.TryGetValue(typeName, out fieldDef))
         {
-            if (form.Args[i] is not SymbolRef fieldRef)
-                throw new AxolRuntimeException("S: field name must be symbol");
-            fields[fieldRef.Name] = Eval(form.Args[i + 1], env);
+            // If arg[1] is not a symbol, or it IS a symbol but not a known field name, use positional
+            if (form.Args[1] is not SymbolRef potentialField || !fieldDef.Contains(potentialField.Name))
+                positional = true;
         }
-        return new StructVal(typeRef.Name, fields);
+
+        if (positional && fieldDef != null)
+        {
+            for (int i = 0; i < fieldDef.Count && i + 1 < form.Args.Count; i++)
+                fields[fieldDef[i]] = Eval(form.Args[i + 1], env);
+        }
+        else
+        {
+            for (int i = 1; i + 1 < form.Args.Count; i += 2)
+            {
+                if (form.Args[i] is not SymbolRef fieldRef)
+                    throw new AxolRuntimeException("S: field name must be symbol");
+                fields[fieldRef.Name] = Eval(form.Args[i + 1], env);
+            }
+        }
+        return new StructVal(typeName, fields);
     }
 
     private AxolValue EvalArrayLiteral(ListForm form, Environment env)
@@ -670,6 +721,7 @@ public sealed class AxolInterpreter
         }
 
         var fields = fieldNames.ToList();
+        _structFields[typeName] = fields;
         env.Define(typeName, new BuiltinFunctionVal(typeName, args =>
         {
             var dict = new Dictionary<string, AxolValue>();

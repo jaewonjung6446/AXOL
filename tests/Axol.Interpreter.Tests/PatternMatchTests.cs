@@ -162,4 +162,42 @@ public class PatternMatchTests
         var (result, _) = Run("(X nil nil \"nil\" _ \"not nil\")");
         Assert.Equal("nil", Assert.IsType<StrVal>(result).Value);
     }
+
+    // --- Short enum aliases (.Variant) ---
+
+    [Fact]
+    public void ShortEnumAlias_SimpleMatch()
+    {
+        var (result, _) = Run("(e Color Red Green Blue) (v c Color.Red) (X c .Red \"red\" .Green \"green\" _ \"other\")");
+        Assert.Equal("red", Assert.IsType<StrVal>(result).Value);
+    }
+
+    [Fact]
+    public void ShortEnumAlias_NoMatch_FallsToWildcard()
+    {
+        var (result, _) = Run("(e Color Red Green Blue) (v c Color.Blue) (X c .Red \"red\" .Green \"green\" _ \"other\")");
+        Assert.Equal("other", Assert.IsType<StrVal>(result).Value);
+    }
+
+    [Fact]
+    public void ShortEnumAlias_DataBearing()
+    {
+        var (result, _) = Run("(e Shape (Circle r) (Rect w h)) (v s (Shape.Circle 5)) (X s (.Circle r) (* r r) _ 0)");
+        Assert.Equal(25L, Assert.IsType<IntVal>(result).Value);
+    }
+
+    [Fact]
+    public void ShortEnumAlias_DataBearing_MultiField()
+    {
+        var (result, _) = Run("(e Shape (Circle r) (Rect w h)) (v s (Shape.Rect 3 4)) (X s (.Rect w h) (* w h) _ 0)");
+        Assert.Equal(12L, Assert.IsType<IntVal>(result).Value);
+    }
+
+    [Fact]
+    public void ShortEnumAlias_MixedWithFull()
+    {
+        // Can use .Short and Full.Name in the same match
+        var (result, _) = Run("(e Dir N S E W) (v d Dir.S) (X d Dir.N \"north\" .S \"south\" _ \"other\")");
+        Assert.Equal("south", Assert.IsType<StrVal>(result).Value);
+    }
 }

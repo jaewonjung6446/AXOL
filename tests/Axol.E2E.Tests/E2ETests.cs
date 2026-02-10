@@ -1,3 +1,4 @@
+using Axol.Core;
 using Axol.Core.Diagnostics;
 using Axol.Interpreter;
 using Axol.Lexer;
@@ -13,6 +14,11 @@ public class E2ETests
         var dir = AppContext.BaseDirectory;
         var path = Path.Combine(dir, relativePath);
         var source = File.ReadAllText(path);
+
+        // Auto-preprocess .axoli files
+        if (path.EndsWith(".axoli", StringComparison.OrdinalIgnoreCase))
+            source = IndentPreprocessor.Process(source);
+
         var writer = new StringWriter();
         var lexer = new AxolLexer(source, path);
         var tokens = lexer.Tokenize();
@@ -46,5 +52,12 @@ public class E2ETests
         var output = RunFile(Path.Combine("fixtures", "types.axol"));
         var expected = "i\ns\nb\n*\n%";
         Assert.Equal(expected, output);
+    }
+
+    [Fact]
+    public void IndentMode_AxoliFile()
+    {
+        var output = RunFile(Path.Combine("fixtures", "indent_mode.axoli"));
+        Assert.Equal("30", output);
     }
 }
