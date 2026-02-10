@@ -24,7 +24,8 @@ class _VecBase:
         return self.data.shape[0]
 
     def to_list(self) -> list:
-        return self.data.tolist()
+        from axol.core.backend import to_numpy
+        return to_numpy(self.data).tolist()
 
     def __repr__(self) -> str:
         name = type(self).__name__
@@ -33,10 +34,12 @@ class _VecBase:
     def __eq__(self, other: object) -> bool:
         if type(self) is not type(other):
             return NotImplemented
-        return np.array_equal(self.data, other.data)  # type: ignore[union-attr]
+        from axol.core.backend import to_numpy
+        return np.array_equal(to_numpy(self.data), to_numpy(other.data))  # type: ignore[union-attr]
 
     def __hash__(self) -> int:
-        return hash((type(self).__name__, self.data.tobytes()))
+        from axol.core.backend import to_numpy
+        return hash((type(self).__name__, to_numpy(self.data).tobytes()))
 
 
 # ---------------------------------------------------------------------------

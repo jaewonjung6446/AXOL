@@ -50,8 +50,14 @@ Instead of traditional control flow (if/else, for loops, function calls), Axol r
 - [Architecture](#architecture)
 - [Quick Start](#quick-start)
 - [DSL Syntax](#dsl-syntax)
+- [Compiler Optimizer](#compiler-optimizer)
+- [GPU Backend](#gpu-backend)
+- [Module System](#module-system)
+- [Tool-Use API](#tool-use-api)
+- [Web Frontend](#web-frontend)
 - [Token Cost Comparison](#token-cost-comparison)
 - [Runtime Performance](#runtime-performance)
+- [Performance Benchmarks](#performance-benchmarks)
 - [API Reference](#api-reference)
 - [Examples](#examples)
 - [Test Suite](#test-suite)
@@ -263,26 +269,36 @@ The encryption compatibility of all 5 Axol operations has been **mathematically 
 ## Architecture
 
 ```
+                                          +-------------+
+  .axol source -----> Parser (dsl.py) --> | Program     |
+                         |                | + optimize()|
+                         v                +------+------+
+                    Module System               |
+                    (module.py)                  v
+                      - import             +-----------+    +-----------+
+                      - use()              |  Engine   |--->|  Verify   |
+                      - compose()          |(program.py)|    |(verify.py)|
+                                           +-----------+    +-----------+
+                                                |
+                    +-----------+    +----------+----------+
+                    |  Backend  |<---|    Operations       |
+                    |(backend.py)|    | (operations.py)     |
+                    | numpy/cupy|    +---------------------+
+                    | /jax      |               |
+                    +-----------+    +-----------+----------+
+                                    |      Types           |
+                                    |   (types.py)         |
+                    +-----------+   +----------------------+
+                    |Encryption |
+                    |(encryption.py)
                     +-----------+
-  .axol source ---->|  Parser   |----> Program object
-                    | (dsl.py)  |         |
-                    +-----------+         |
-                                          v
+
                     +-----------+    +-----------+
-                    |  Verify   |<---|  Engine   |
-                    |(verify.py)|    |(program.py)|
+                    | Tool API  |    |  Server   |
+                    |(api/)     |    |(server/)  |
+                    | dispatch  |    | FastAPI   |
+                    | tools     |    | HTML/JS   |
                     +-----------+    +-----------+
-                                          |
-                         uses             |
-                    +-----------+         |
-                    |Operations |<--------+
-                    | (ops.py)  |
-                    +-----------+
-                         |
-                    +-----------+
-                    |  Types    |
-                    |(types.py) |
-                    +-----------+
 ```
 
 ### Module Overview
@@ -291,9 +307,15 @@ The encryption compatibility of all 5 Axol operations has been **mathematically 
 |--------|-------------|
 | `axol.core.types` | 7 vector types (`BinaryVec`, `IntVec`, `FloatVec`, `OneHotVec`, `GateVec`, `TransMatrix`) + `StateBundle` |
 | `axol.core.operations` | 5 primitive operations: `transform`, `gate`, `merge`, `distance`, `route` |
-| `axol.core.program` | Execution engine: `Program`, `Transition`, `run_program` |
+| `axol.core.program` | Execution engine: `Program`, `Transition`, `run_program`, `UseOp` |
 | `axol.core.verify` | State verification with exact/cosine/euclidean matching |
-| `axol.core.dsl` | DSL parser: `parse(source) -> Program` |
+| `axol.core.dsl` | DSL parser: `parse(source) -> Program` with `import`/`use()` support |
+| `axol.core.optimizer` | 3-pass compiler optimizer: transform fusion, dead state elimination, constant folding |
+| `axol.core.backend` | Pluggable array backend: `numpy` (default), `cupy`, `jax` |
+| `axol.core.encryption` | Similarity transformation encryption: `encrypt_program`, `decrypt_state` |
+| `axol.core.module` | Module system: `Module`, `ModuleRegistry`, `compose()`, schema validation |
+| `axol.api` | Tool-Use API for AI agents: `dispatch(request)`, `get_tool_definitions()` |
+| `axol.server` | FastAPI web server + vanilla HTML/JS visual debugger frontend |
 
 ---
 
@@ -316,6 +338,9 @@ pip install -e ".[dev]"
 - NumPy >= 1.24.0
 - pytest >= 7.4.0 (dev)
 - tiktoken >= 0.5.0 (dev, for token analysis)
+- fastapi >= 0.100.0, uvicorn >= 0.23.0 (optional, for web frontend)
+- cupy-cuda12x >= 12.0.0 (optional, for GPU)
+- jax[cpu] >= 0.4.0 (optional, for JAX backend)
 
 ### Hello World - DSL
 
@@ -441,6 +466,191 @@ s v=[1 2 3]
 
 ---
 
+## Compiler Optimizer
+
+`optimize()` applies three passes to reduce program size and pre-compute constants:
+
+```python
+from axol.core import parse, optimize, run_program
+
+program = parse(source)
+optimized = optimize(program)   # fuse + eliminate + fold
+result = run_program(optimized)
+```
+
+### Pass 1: Transform Fusion
+
+Consecutive `TransformOp` on the same key chain are fused into a single matrix multiplication:
+
+```
+# Before: 2 transitions, 2 matrix multiplications per iteration
+: t1=transform(v;M=[0 1 0;0 0 1;1 0 0])
+: t2=transform(v;M=[2 0 0;0 2 0;0 0 2])
+
+# After: 1 transition, 1 matrix multiplication (M_fused = M1 @ M2)
+: t1+t2=transform(v;M_fused)
+```
+
+- Does not cross `CustomOp` boundaries
+- Fixed-point iteration handles 3+ chains
+- Pipeline with 2 transforms: **transition count -50%, execution time -45%**
+
+### Pass 2: Dead State Elimination
+
+Removes initial state vectors never read by any transition:
+
+```
+s used=[1 0]  unused=[99 99]   # unused is never referenced
+: t=transform(used;M=[...])
+
+# After optimization: unused is removed from initial state
+```
+
+- Conservative with `CustomOp` (preserves all state)
+- `terminal_key` is always treated as "read"
+
+### Pass 3: Constant Folding
+
+Pre-computes transforms on immutable keys (keys that are never written):
+
+```
+s constant=[1 0 0]
+: t=transform(constant;M=[0 1 0;0 0 1;1 0 0])->result
+
+# After: transition eliminated, result=[0,1,0] stored in initial state
+```
+
+---
+
+## GPU Backend
+
+Pluggable array backend supporting `numpy` (default), `cupy` (NVIDIA GPU), and `jax`:
+
+```python
+from axol.core import set_backend, get_backend_name
+
+set_backend("numpy")   # default - CPU
+set_backend("cupy")    # NVIDIA GPU (requires cupy installed)
+set_backend("jax")     # Google JAX (requires jax installed)
+```
+
+Install optional backends:
+
+```bash
+pip install axol[gpu]   # cupy-cuda12x
+pip install axol[jax]   # jax[cpu]
+```
+
+All existing code works transparently - the backend switch is global and affects all vector/matrix operations.
+
+---
+
+## Module System
+
+Reusable, composable programs with schemas, imports, and sub-module execution.
+
+### Module Definition
+
+```python
+from axol.core.module import Module, ModuleSchema, VecSchema, ModuleRegistry
+
+schema = ModuleSchema(
+    inputs=[VecSchema("atk", "float", 1), VecSchema("def_val", "float", 1)],
+    outputs=[VecSchema("dmg", "float", 1)],
+)
+module = Module(name="damage_calc", program=program, schema=schema)
+```
+
+### Registry & File Loading
+
+```python
+registry = ModuleRegistry()
+registry.load_from_file("damage_calc.axol")
+registry.resolve_import("heal", relative_to="main.axol")
+```
+
+### DSL Import & Use Syntax
+
+```
+@main
+import damage_calc from "damage_calc.axol"
+s atk=[50] def_val=[10]
+: calc=use(damage_calc;in=atk,def_val;out=dmg)
+```
+
+### Program Composition
+
+```python
+from axol.core.module import compose
+combined = compose(program_a, program_b, name="combined")
+```
+
+---
+
+## Tool-Use API
+
+JSON-callable interface for AI agents to parse, run, and verify Axol programs:
+
+```python
+from axol.api import dispatch
+
+# Parse
+result = dispatch({"action": "parse", "source": "@prog\ns v=[1]\n: t=transform(v;M=[2])"})
+# -> {"program_name": "prog", "state_keys": ["v"], "transition_count": 1, "has_terminal": false}
+
+# Run
+result = dispatch({"action": "run", "source": "...", "optimize": True})
+# -> {"final_state": {"v": [2.0]}, "steps_executed": 1, "terminated_by": "pipeline_end"}
+
+# Inspect step-by-step
+result = dispatch({"action": "inspect", "source": "...", "step": 1})
+
+# List operations
+result = dispatch({"action": "list_ops"})
+
+# Verify expected output
+result = dispatch({"action": "verify", "source": "...", "expected": {"v": [2.0]}})
+```
+
+AI agent tool definitions (JSON Schema) are available via `get_tool_definitions()`.
+
+---
+
+## Web Frontend
+
+FastAPI server with a vanilla HTML/JS visual debugger:
+
+```bash
+pip install axol[server]    # fastapi + uvicorn
+python -m axol.server       # http://localhost:8080
+```
+
+### Features
+
+| Panel | Description |
+|-------|-------------|
+| **DSL Editor** | Syntax editing with example dropdown |
+| **Execution** | Run/Optimize buttons, result summary (steps, time, terminated_by) |
+| **Trace Viewer** | Step-by-step state table with prev/next/play controls |
+| **State Chart** | Chart.js time-series graph (X=step, Y=vector values) |
+| **Encryption Demo** | Original vs encrypted matrix heatmaps, encrypt/run/decrypt workflow |
+| **Performance** | Optimizer before/after comparison, token cost analysis |
+
+### API Endpoints
+
+```
+POST /api/parse       - Parse DSL source
+POST /api/run         - Parse + execute + full trace
+POST /api/optimize    - Optimizer before/after comparison
+POST /api/encrypt     - Encrypt program + run + decrypt
+GET  /api/examples    - Built-in example programs
+GET  /api/ops         - Operation descriptions
+POST /api/token-cost  - Token count analysis (Axol vs Python vs C#)
+POST /api/module/run  - Run program with sub-modules
+```
+
+---
+
 ## Token Cost Comparison
 
 Measured with `tiktoken` cl100k_base tokenizer (used by GPT-4 and Claude).
@@ -510,15 +720,77 @@ For large-scale vector operations (matrix multiplication), Axol's NumPy backend 
 
 ---
 
+## Performance Benchmarks
+
+Auto-generated by `pytest tests/test_performance_report.py -v -s`. Full results in [PERFORMANCE_REPORT.md](PERFORMANCE_REPORT.md).
+
+### Token Efficiency (Axol vs Python vs C#)
+
+| Program | Axol | Python | C# | vs Python | vs C# |
+|---------|------|--------|----|-----------|-------|
+| Counter (0->5) | 11 | 45 | 78 | **76% saved** | **86% saved** |
+| 3-State FSM | 14 | 52 | 89 | **73% saved** | **84% saved** |
+| HP Decay | 14 | 58 | 95 | **76% saved** | **85% saved** |
+| Combat Pipeline | 14 | 55 | 92 | **75% saved** | **85% saved** |
+| Matrix Chain | 21 | 60 | 98 | **65% saved** | **79% saved** |
+
+Average: **74% fewer tokens than Python**, **85% fewer tokens than C#**.
+
+### Execution Time by Dimension
+
+| Dimension | Avg Time |
+|-----------|----------|
+| 4 | 0.25 ms |
+| 100 | 0.17 ms |
+| 1,000 | 1.41 ms |
+
+### Optimizer Impact
+
+| Program | Before | After | Time Reduction |
+|---------|--------|-------|----------------|
+| Pipeline (2 transforms) | 2 transitions | 1 transition | **-45%** |
+| Counter (loop) | 2 transitions | 2 transitions | - |
+| FSM (loop) | 2 transitions | 2 transitions | - |
+
+Transform fusion is most effective on pipeline programs with consecutive matrix operations.
+
+### Encryption Overhead
+
+| Program | Plaintext | Encrypted | Overhead |
+|---------|-----------|-----------|----------|
+| Pipeline (1 pass) | 0.12 ms | 0.12 ms | **~0%** |
+| 3-State FSM (loop) | 0.62 ms | 276.8 ms | +44,633% |
+
+Pipeline mode: negligible overhead. Loop mode: high overhead because the encrypted terminal condition cannot trigger early exit, causing execution to run until `max_iterations`.
+
+### Scaling (N-state Automaton)
+
+| States | Tokens | Execution Time |
+|--------|--------|---------------|
+| 5 | 28 | 1.6 ms |
+| 20 | 388 | 4.3 ms |
+| 50 | 2,458 | 12.9 ms |
+| 100 | 9,908 | 27.9 ms |
+| 200 | 39,808 | 59.2 ms |
+
+Tokens grow **O(N)** thanks to sparse matrix notation (vs O(N^2) for Python/C#). Execution time grows ~O(N^2) due to matrix multiplication, but remains under 60ms for 200-state programs.
+
+---
+
 ## API Reference
 
-### `parse(source: str) -> Program`
+### `parse(source, registry=None, source_path=None) -> Program`
 
 Parse Axol DSL source text into an executable `Program` object.
 
 ```python
 from axol.core import parse
 program = parse("@test\ns v=[1 2 3]\n: t=transform(v;M=[1 0 0;0 1 0;0 0 1])")
+
+# With module registry for import/use support
+from axol.core.module import ModuleRegistry
+registry = ModuleRegistry()
+program = parse(source, registry=registry, source_path="main.axol")
 ```
 
 ### `run_program(program: Program) -> ExecutionResult`
@@ -533,6 +805,36 @@ result.steps_executed  # Total number of transition steps
 result.terminated_by   # "pipeline_end" | "terminal_condition" | "max_iterations"
 result.trace           # List of TraceEntry for debugging
 result.verification    # VerifyResult if expected_state was set
+```
+
+### `optimize(program, *, fuse=True, eliminate_dead=True, fold_constants=True) -> Program`
+
+Optimize a program without mutating the original.
+
+```python
+from axol.core import optimize
+optimized = optimize(program)                          # all passes
+optimized = optimize(program, fold_constants=False)    # selective passes
+```
+
+### `set_backend(name) / get_backend() / to_numpy(arr)`
+
+Switch the array computation backend.
+
+```python
+from axol.core import set_backend, get_backend, to_numpy
+set_backend("cupy")     # switch to GPU
+xp = get_backend()      # returns cupy module
+arr = to_numpy(gpu_arr) # convert back to numpy
+```
+
+### `dispatch(request) -> dict`
+
+Tool-Use API entry point for AI agents.
+
+```python
+from axol.api import dispatch
+result = dispatch({"action": "run", "source": "...", "optimize": True})
 ```
 
 ### Vector Types
@@ -630,11 +932,32 @@ s s=onehot(0,100)
 ## Test Suite
 
 ```bash
-# Run all tests (170 tests)
+# Run all tests (260 tests)
 pytest tests/ -v
 
-# DSL parser tests only
-pytest tests/test_dsl.py -v
+# Core tests
+pytest tests/test_types.py tests/test_operations.py tests/test_program.py tests/test_dsl.py -v
+
+# Optimizer tests (18 tests)
+pytest tests/test_optimizer.py -v
+
+# Backend tests (13 tests, cupy/jax skipped if not installed)
+pytest tests/test_backend.py -v
+
+# Tool-Use API tests (20 tests)
+pytest tests/test_api.py -v
+
+# Module system tests (18 tests)
+pytest tests/test_module.py -v
+
+# Encryption proof-of-concept (21 tests)
+pytest tests/test_encryption.py -v -s
+
+# Server endpoint tests (13 tests, requires fastapi)
+pytest tests/test_server.py -v
+
+# Performance report (generates PERFORMANCE_REPORT.md)
+pytest tests/test_performance_report.py -v -s
 
 # Token cost comparison
 pytest tests/test_token_cost.py -v -s
@@ -642,14 +965,11 @@ pytest tests/test_token_cost.py -v -s
 # Three-language benchmark (Python vs C# vs Axol)
 pytest tests/test_benchmark_trilingual.py -v -s
 
-# Runtime performance
-pytest tests/test_compare_python.py -v -s
-
-# Encryption proof-of-concept (21 tests)
-pytest tests/test_encryption.py -v -s
+# Start web frontend
+python -m axol.server   # http://localhost:8080
 ```
 
-Current test count: **170 tests**, all passing.
+Current test count: **260 tests**, all passing (4 skipped: cupy/jax not installed).
 
 ---
 
@@ -663,11 +983,13 @@ Current test count: **170 tests**, all passing.
 - [x] Phase 2: Sparse matrix notation
 - [x] Phase 2: Token cost benchmarks (Python, C#, Axol)
 - [x] Phase 2: Matrix encryption proof-of-concept (all 5 ops verified, 21 tests)
-- [ ] Phase 3: Compiler optimizations (operation fusion, dead state elimination)
-- [ ] Phase 3: GPU backend (CuPy / JAX)
-- [ ] Phase 4: AI agent integration (tool-use API)
-- [ ] Phase 4: Visual debugger for state traces
-- [ ] Phase 5: Multi-program composition and module system
+- [x] Phase 3: Compiler optimizer (transform fusion, dead state elimination, constant folding)
+- [x] Phase 3: GPU backend (numpy/cupy/jax pluggable)
+- [x] Phase 4: Tool-Use API for AI agents (parse/run/inspect/verify/list_ops)
+- [x] Phase 4: Encryption module (encrypt_program, decrypt_state)
+- [x] Phase 5: Module system (registry, import/use DSL, compose, schema validation)
+- [x] Frontend: FastAPI + vanilla HTML/JS visual debugger (trace viewer, state chart, encryption demo)
+- [x] Performance benchmarks (token cost, runtime scaling, optimizer effect, encryption overhead)
 
 ---
 

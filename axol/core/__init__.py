@@ -13,6 +13,8 @@ from axol.core.operations import transform, gate, merge, distance, route
 from axol.core.program import Program, Transition, run_program
 from axol.core.verify import verify_states, VerifySpec, VerifyResult
 from axol.core.dsl import parse, ParseError
+from axol.core.optimizer import optimize
+from axol.core.backend import get_backend, set_backend, get_backend_name, to_numpy
 
 __all__ = [
     "BinaryVec", "IntVec", "FloatVec", "OneHotVec", "GateVec",
@@ -21,4 +23,6 @@ __all__ = [
     "Program", "Transition", "run_program",
     "verify_states", "VerifySpec", "VerifyResult",
     "parse", "ParseError",
+    "optimize",
+    "get_backend", "set_backend", "get_backend_name", "to_numpy",
 ]

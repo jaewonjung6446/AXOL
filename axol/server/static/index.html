@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Axol DSL — Visual Debugger</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <div class="app">
+    <!-- Header -->
+    <div class="header">
+      <h1>AXOL DSL</h1>
+      <div class="controls">
+        <select id="examples">
+          <option value="">-- Examples --</option>
+        </select>
+        <button id="btn-run" onclick="runProgram()">Run</button>
+        <button id="btn-optimize" class="secondary" onclick="optimizeProgram()">Optimize</button>
+        <button id="btn-encrypt" class="warning" onclick="encryptProgram()">Encrypt</button>
+      </div>
+    </div>
+
+    <!-- DSL Editor -->
+    <div class="panel editor-panel">
+      <div class="panel-header">DSL Editor</div>
+      <div class="panel-body">
+        <textarea id="editor" spellcheck="false" placeholder="@program_name
+s key=[values]
+: transition=op(args)
+? terminal condition">@counter
+s count=[0] one=[1]
+: tick=merge(count one;w=[1 1])->count
+? done count>=5</textarea>
+      </div>
+    </div>
+
+    <!-- Execution Panel -->
+    <div class="panel execution-panel">
+      <div class="panel-header">
+        <span>Execution</span>
+        <div class="tabs">
+          <button class="tab active" onclick="showTab('exec-result', this)">Result</button>
+          <button class="tab" onclick="showTab('exec-encrypt', this)">Encrypt</button>
+          <button class="tab" onclick="showTab('exec-perf', this)">Perf</button>
+        </div>
+      </div>
+      <div class="panel-body">
+        <div id="exec-result" class="tab-content active">
+          <div id="result-summary" class="result-grid"></div>
+          <div id="result-state"></div>
+          <div id="result-error"></div>
+        </div>
+        <div id="exec-encrypt" class="tab-content">
+          <div id="encrypt-result"></div>
+        </div>
+        <div id="exec-perf" class="tab-content">
+          <div id="perf-result"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Trace Viewer -->
+    <div class="panel trace-panel">
+      <div class="panel-header">
+        <span>Trace</span>
+        <div class="trace-controls">
+          <button class="secondary" onclick="traceStep(-1)">&lt;</button>
+          <span id="trace-step-label" class="step-label">-</span>
+          <button class="secondary" onclick="traceStep(1)">&gt;</button>
+          <button class="secondary" onclick="tracePlay()">Play</button>
+        </div>
+      </div>
+      <div class="panel-body">
+        <table class="trace-table">
+          <thead>
+            <tr><th>#</th><th>Transition</th><th>State</th></tr>
+          </thead>
+          <tbody id="trace-body"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Chart Panel -->
+    <div class="panel chart-panel">
+      <div class="panel-header">
+        <span>State Chart</span>
+        <select id="chart-key" onchange="updateChart()"></select>
+      </div>
+      <div class="panel-body">
+        <div class="chart-container">
+          <canvas id="state-chart"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

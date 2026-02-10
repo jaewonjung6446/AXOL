@@ -168,7 +168,12 @@ def _apply(op: Operation, state: StateBundle) -> StateBundle:
         s = op.fn(state)
 
     else:
-        raise TypeError(f"Unknown operation type: {type(op)}")
+        # Check for UseOp from the module system
+        from axol.core.module import UseOp, _apply_use_op
+        if isinstance(op, UseOp):
+            s = _apply_use_op(op, state)
+        else:
+            raise TypeError(f"Unknown operation type: {type(op)}")
 
     return s
 

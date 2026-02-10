@@ -12,6 +12,7 @@ Grammar:
 
 from __future__ import annotations
 
+import os
 import re
 from typing import Callable
 
@@ -50,8 +51,18 @@ class ParseError(Exception):
 # Public API
 # ---------------------------------------------------------------------------
 
-def parse(source: str) -> Program:
-    """Parse Axol DSL source text into a Program object."""
+def parse(
+    source: str,
+    registry: object | None = None,
+    source_path: str | None = None,
+) -> Program:
+    """Parse Axol DSL source text into a Program object.
+
+    Args:
+        source: DSL source code.
+        registry: Optional ModuleRegistry for resolving imports.
+        source_path: Optional path of the source file (for relative imports).
+    """
     lines = _strip_lines(source)
     if not lines:
         raise ParseError("Empty program")
@@ -64,6 +75,32 @@ def parse(source: str) -> Program:
         raise ParseError("Program must start with '@name'", num)
     name = _parse_header(line, num)
     idx += 1
+
+    # --- schema lines (optional) ---
+    schema_inputs = []
+    schema_outputs = []
+    while idx < len(lines) and lines[idx][1].startswith("schema "):
+        num, line = lines[idx]
+        direction, specs = _parse_schema_line(line, num)
+        if direction == "in":
+            schema_inputs.extend(specs)
+        elif direction == "out":
+            schema_outputs.extend(specs)
+        idx += 1
+
+    # --- import lines (optional) ---
+    imports: dict[str, str] = {}  # alias -> module_name
+    while idx < len(lines) and lines[idx][1].startswith("import "):
+        num, line = lines[idx]
+        alias, mod_name, mod_path = _parse_import_line(line, num)
+        imports[alias] = mod_name
+        # Resolve imports via registry if available
+        if registry is not None:
+            try:
+                _resolve_import(registry, mod_name, mod_path, source_path)
+            except Exception as e:
+                raise ParseError(f"Failed to resolve import '{mod_name}': {e}", num)
+        idx += 1
 
     # --- state lines ---
     state_vectors: dict[str, _VecBase] = {}
@@ -79,7 +116,7 @@ def parse(source: str) -> Program:
     transitions: list[Transition] = []
     while idx < len(lines) and lines[idx][1].startswith(":"):
         num, line = lines[idx]
-        transitions.append(_parse_transition(line, num))
+        transitions.append(_parse_transition(line, num, registry=registry, imports=imports))
         idx += 1
 
     if not transitions:
@@ -225,7 +262,12 @@ def _split_args(text: str, sep: str = ";") -> list[str]:
 # Transition
 # ---------------------------------------------------------------------------
 
-def _parse_transition(line: str, line_num: int) -> Transition:
+def _parse_transition(
+    line: str,
+    line_num: int,
+    registry: object | None = None,
+    imports: dict[str, str] | None = None,
+) -> Transition:
     """Parse ': name=op_call(...)  (->out_key)?'"""
     body = line[1:].strip()  # strip leading ':'
 
@@ -260,11 +302,17 @@ def _parse_transition(line: str, line_num: int) -> Transition:
         out_key = after_paren[2:].strip()
 
     op_str = rest[:close_idx + 1].strip()
-    operation = _parse_op_call(op_str, out_key, line_num)
+    operation = _parse_op_call(op_str, out_key, line_num, registry=registry, imports=imports)
     return Transition(name=name, operation=operation)
 
 
-def _parse_op_call(op_str: str, out_key: str | None, line_num: int):
+def _parse_op_call(
+    op_str: str,
+    out_key: str | None,
+    line_num: int,
+    registry: object | None = None,
+    imports: dict[str, str] | None = None,
+):
     """Parse 'op_name(args)' into an Operation descriptor."""
     m = re.match(r'^(\w+)\((.+)\)$', op_str, re.DOTALL)
     if not m:
@@ -283,6 +331,8 @@ def _parse_op_call(op_str: str, out_key: str | None, line_num: int):
         return _parse_distance_op(args_str, out_key, line_num)
     elif op_name == "route":
         return _parse_route_op(args_str, out_key, line_num)
+    elif op_name == "use":
+        return _parse_use_op(args_str, line_num, registry=registry, imports=imports)
     else:
         raise ParseError(f"Unknown operation: '{op_name}'", line_num)
 
@@ -380,6 +430,130 @@ def _parse_route_op(args: str, out_key: str | None, line_num: int) -> RouteOp:
         raise ParseError("route requires R= parameter", line_num)
 
     return RouteOp(key=key, router=router, out_key=out_key or "_route")
+
+
+# ---------------------------------------------------------------------------
+# Schema parsing
+# ---------------------------------------------------------------------------
+
+def _parse_schema_line(line: str, line_num: int) -> tuple[str, list[tuple[str, str, int]]]:
+    """Parse 'schema in|out name:type[dim] ...'
+
+    Returns (direction, [(name, type, dim), ...]).
+    """
+    body = line[len("schema"):].strip()
+    parts = body.split(None, 1)
+    if len(parts) < 2:
+        raise ParseError("Schema line needs 'in' or 'out' followed by specs", line_num)
+
+    direction = parts[0]
+    if direction not in ("in", "out"):
+        raise ParseError(f"Schema direction must be 'in' or 'out', got '{direction}'", line_num)
+
+    specs = []
+    for m in re.finditer(r'(\w+):(\w+)\[(\d+)\]', parts[1]):
+        specs.append((m.group(1), m.group(2), int(m.group(3))))
+
+    return direction, specs
+
+
+# ---------------------------------------------------------------------------
+# Import parsing
+# ---------------------------------------------------------------------------
+
+def _parse_import_line(line: str, line_num: int) -> tuple[str, str, str | None]:
+    """Parse 'import alias from \"path\"' or 'import name'.
+
+    Returns (alias, module_name, path_or_None).
+    """
+    body = line[len("import"):].strip()
+
+    # import name from "path"
+    m = re.match(r'^(\w+)\s+from\s+"([^"]+)"$', body)
+    if m:
+        alias = m.group(1)
+        path = m.group(2)
+        # Extract module name from path (without .axol extension)
+        mod_name = os.path.splitext(os.path.basename(path))[0] if '/' in path or '\\' in path or '.' in path else path
+        return alias, mod_name, path
+
+    # import name
+    m = re.match(r'^(\w+)$', body)
+    if m:
+        return m.group(1), m.group(1), None
+
+    raise ParseError(f"Invalid import: '{body}'", line_num)
+
+
+def _resolve_import(registry: object, mod_name: str, mod_path: str | None, source_path: str | None) -> None:
+    """Resolve and register an import in the registry."""
+    from axol.core.module import ModuleRegistry
+    if not isinstance(registry, ModuleRegistry):
+        return
+    if registry.has(mod_name):
+        return
+    if mod_path and source_path:
+        base_dir = os.path.dirname(source_path)
+        full_path = os.path.join(base_dir, mod_path)
+        if not full_path.endswith(".axol"):
+            full_path += ".axol"
+        if os.path.isfile(full_path):
+            registry.load_from_file(full_path, name=mod_name)
+            return
+    registry.resolve_import(mod_name, source_path)
+
+
+# ---------------------------------------------------------------------------
+# Use op parsing
+# ---------------------------------------------------------------------------
+
+def _parse_use_op(args_str: str, line_num: int, registry: object | None = None, imports: dict[str, str] | None = None):
+    """Parse 'use(module_name;in=k1,k2;out=o1)' into a UseOp."""
+    from axol.core.module import UseOp, ModuleRegistry
+
+    parts = _split_args(args_str)
+    if len(parts) < 1:
+        raise ParseError("use() requires at least a module name", line_num)
+
+    module_ref = parts[0].strip()
+    # Resolve alias
+    if imports and module_ref in imports:
+        module_name = imports[module_ref]
+    else:
+        module_name = module_ref
+
+    input_mapping: dict[str, str] = {}
+    output_mapping: dict[str, str] = {}
+
+    for part in parts[1:]:
+        part = part.strip()
+        if part.startswith("in="):
+            pairs = part[3:].split(",")
+            for p in pairs:
+                p = p.strip()
+                if ":" in p:
+                    mod_key, parent_key = p.split(":", 1)
+                    input_mapping[mod_key.strip()] = parent_key.strip()
+                else:
+                    input_mapping[p] = p
+        elif part.startswith("out="):
+            pairs = part[4:].split(",")
+            for p in pairs:
+                p = p.strip()
+                if ":" in p:
+                    mod_key, parent_key = p.split(":", 1)
+                    output_mapping[mod_key.strip()] = parent_key.strip()
+                else:
+                    output_mapping[p] = p
+
+    reg = registry if isinstance(registry, ModuleRegistry) else None
+
+    return UseOp(
+        module_name=module_name,
+        input_mapping=input_mapping,
+        output_mapping=output_mapping,
+        registry=reg,
+    )
 
 
 # ---------------------------------------------------------------------------
