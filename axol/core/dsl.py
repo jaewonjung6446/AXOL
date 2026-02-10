@@ -1,0 +1,492 @@
+"""Axol DSL parser — compact text format to Program objects.
+
+Grammar:
+    program     := header state_lines+ transition_lines+ terminal?
+    header      := '@' NAME NEWLINE
+    state_line  := 's' (NAME '=' value)+ NEWLINE
+    value       := '[' NUMBER+ ']' | 'onehot(' INT ',' INT ')' | 'zeros(' INT ')' | 'ones(' INT ')'
+    transition  := ':' NAME '=' op_call ('->' NAME)? NEWLINE
+    op_call     := 'transform(' ... ')' | 'gate(' ... ')' | 'merge(' ... ')' | ...
+    terminal    := '?' NAME condition
+"""
+
+from __future__ import annotations
+
+import re
+from typing import Callable
+
+import numpy as np
+
+from axol.core.types import (
+    FloatVec,
+    GateVec,
+    OneHotVec,
+    TransMatrix,
+    StateBundle,
+    _VecBase,
+)
+from axol.core.program import (
+    TransformOp,
+    GateOp,
+    MergeOp,
+    DistanceOp,
+    RouteOp,
+    CustomOp,
+    Transition,
+    Program,
+)
+
+
+class ParseError(Exception):
+    """Raised when DSL source cannot be parsed."""
+
+    def __init__(self, message: str, line_num: int | None = None):
+        self.line_num = line_num
+        prefix = f"line {line_num}: " if line_num is not None else ""
+        super().__init__(f"{prefix}{message}")
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
+def parse(source: str) -> Program:
+    """Parse Axol DSL source text into a Program object."""
+    lines = _strip_lines(source)
+    if not lines:
+        raise ParseError("Empty program")
+
+    idx = 0
+    num, line = lines[idx]
+
+    # --- header ---
+    if not line.startswith("@"):
+        raise ParseError("Program must start with '@name'", num)
+    name = _parse_header(line, num)
+    idx += 1
+
+    # --- state lines ---
+    state_vectors: dict[str, _VecBase] = {}
+    while idx < len(lines) and lines[idx][1].startswith("s "):
+        num, line = lines[idx]
+        state_vectors.update(_parse_state(line, num))
+        idx += 1
+
+    if not state_vectors:
+        raise ParseError("Program must have at least one state line ('s ...')")
+
+    # --- transitions ---
+    transitions: list[Transition] = []
+    while idx < len(lines) and lines[idx][1].startswith(":"):
+        num, line = lines[idx]
+        transitions.append(_parse_transition(line, num))
+        idx += 1
+
+    if not transitions:
+        raise ParseError("Program must have at least one transition (':' ...)")
+
+    # --- optional terminal ---
+    terminal_key: str | None = None
+    if idx < len(lines) and lines[idx][1].startswith("?"):
+        num, line = lines[idx]
+        t_key, t_transition = _parse_terminal(line, state_vectors, num)
+        terminal_key = t_key
+        transitions.append(t_transition)
+        idx += 1
+
+    # Build initial StateBundle
+    initial = StateBundle(vectors=dict(state_vectors))
+
+    # Auto-coerce FloatVec → GateVec for keys referenced by GateOps
+    for t in transitions:
+        if isinstance(t.operation, GateOp):
+            gk = t.operation.gate_key
+            if gk in initial.vectors and not isinstance(initial[gk], GateVec):
+                vec = initial[gk]
+                vals = vec.data.astype(np.float32)
+                if np.all((vals == 0.0) | (vals == 1.0)):
+                    initial[gk] = GateVec.from_list(vals.tolist())
+
+    # Add terminal gate if needed
+    if terminal_key is not None and terminal_key not in initial.vectors:
+        initial[terminal_key] = GateVec.zeros(1)
+
+    return Program(
+        name=name,
+        initial_state=initial,
+        transitions=transitions,
+        terminal_key=terminal_key,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Line preprocessing
+# ---------------------------------------------------------------------------
+
+def _strip_lines(source: str) -> list[tuple[int, str]]:
+    """Return (1-based line number, stripped content) for non-empty, non-comment lines."""
+    result = []
+    for i, raw in enumerate(source.splitlines(), 1):
+        stripped = raw.strip()
+        if stripped and not stripped.startswith("#"):
+            result.append((i, stripped))
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Header
+# ---------------------------------------------------------------------------
+
+def _parse_header(line: str, line_num: int) -> str:
+    name = line[1:].strip()
+    if not name or not re.match(r'^[A-Za-z_]\w*$', name):
+        raise ParseError(f"Invalid program name: '{name}'", line_num)
+    return name
+
+
+# ---------------------------------------------------------------------------
+# State
+# ---------------------------------------------------------------------------
+
+def _parse_state(line: str, line_num: int) -> dict[str, _VecBase]:
+    """Parse 's key=value key2=value2 ...'"""
+    body = line[1:].strip()  # strip leading 's'
+    result: dict[str, _VecBase] = {}
+
+    # Match key=value pairs; values can contain nested parens or brackets
+    for m in re.finditer(r'([A-Za-z_]\w*)=((?:\[[^\]]*\])|(?:\w+\([^)]*\)))', body):
+        key = m.group(1)
+        val_str = m.group(2)
+        result[key] = _parse_value(val_str, line_num)
+
+    if not result:
+        raise ParseError("State line has no key=value pairs", line_num)
+    return result
+
+
+def _parse_value(token: str, line_num: int) -> _VecBase:
+    """Parse a value token into a VecBase."""
+    token = token.strip()
+
+    # onehot(idx, n)
+    m = re.match(r'^onehot\((\d+)\s*,\s*(\d+)\)$', token)
+    if m:
+        idx, n = int(m.group(1)), int(m.group(2))
+        return OneHotVec.from_index(idx, n)
+
+    # zeros(n)
+    m = re.match(r'^zeros\((\d+)\)$', token)
+    if m:
+        return FloatVec.zeros(int(m.group(1)))
+
+    # ones(n)
+    m = re.match(r'^ones\((\d+)\)$', token)
+    if m:
+        return FloatVec.ones(int(m.group(1)))
+
+    # [number number ...]
+    m = re.match(r'^\[([^\]]*)\]$', token)
+    if m:
+        nums = _parse_numbers(m.group(1))
+        return FloatVec.from_list(nums)
+
+    raise ParseError(f"Invalid value: '{token}'", line_num)
+
+
+def _parse_numbers(text: str) -> list[float]:
+    """Parse space-separated numbers."""
+    parts = text.split()
+    return [float(x) for x in parts]
+
+
+def _split_args(text: str, sep: str = ";") -> list[str]:
+    """Split on *sep* respecting bracket nesting ([...] and (...))."""
+    parts: list[str] = []
+    depth_sq = 0  # [...]
+    depth_rn = 0  # (...)
+    start = 0
+    for i, ch in enumerate(text):
+        if ch == '[':
+            depth_sq += 1
+        elif ch == ']':
+            depth_sq -= 1
+        elif ch == '(':
+            depth_rn += 1
+        elif ch == ')':
+            depth_rn -= 1
+        elif ch == sep and depth_sq == 0 and depth_rn == 0:
+            parts.append(text[start:i])
+            start = i + 1
+    parts.append(text[start:])
+    return parts
+
+
+# ---------------------------------------------------------------------------
+# Transition
+# ---------------------------------------------------------------------------
+
+def _parse_transition(line: str, line_num: int) -> Transition:
+    """Parse ': name=op_call(...)  (->out_key)?'"""
+    body = line[1:].strip()  # strip leading ':'
+
+    # Split name=rest
+    eq_idx = body.index("=") if "=" in body else -1
+    if eq_idx <= 0:
+        raise ParseError("Transition must have 'name=op(...)'", line_num)
+
+    name = body[:eq_idx].strip()
+
+    # Check for ->out_key at the end (outside parens)
+    rest = body[eq_idx + 1:]
+    out_key: str | None = None
+
+    # Find the closing paren of the op call, then check for ->
+    paren_depth = 0
+    close_idx = -1
+    for i, ch in enumerate(rest):
+        if ch == '(':
+            paren_depth += 1
+        elif ch == ')':
+            paren_depth -= 1
+            if paren_depth == 0:
+                close_idx = i
+                break
+
+    if close_idx < 0:
+        raise ParseError(f"Unmatched parenthesis in transition '{name}'", line_num)
+
+    after_paren = rest[close_idx + 1:].strip()
+    if after_paren.startswith("->"):
+        out_key = after_paren[2:].strip()
+
+    op_str = rest[:close_idx + 1].strip()
+    operation = _parse_op_call(op_str, out_key, line_num)
+    return Transition(name=name, operation=operation)
+
+
+def _parse_op_call(op_str: str, out_key: str | None, line_num: int):
+    """Parse 'op_name(args)' into an Operation descriptor."""
+    m = re.match(r'^(\w+)\((.+)\)$', op_str, re.DOTALL)
+    if not m:
+        raise ParseError(f"Invalid operation: '{op_str}'", line_num)
+
+    op_name = m.group(1)
+    args_str = m.group(2)
+
+    if op_name == "transform":
+        return _parse_transform_op(args_str, out_key, line_num)
+    elif op_name == "gate":
+        return _parse_gate_op(args_str, out_key, line_num)
+    elif op_name == "merge":
+        return _parse_merge_op(args_str, out_key, line_num)
+    elif op_name == "distance":
+        return _parse_distance_op(args_str, out_key, line_num)
+    elif op_name == "route":
+        return _parse_route_op(args_str, out_key, line_num)
+    else:
+        raise ParseError(f"Unknown operation: '{op_name}'", line_num)
+
+
+def _parse_transform_op(args: str, out_key: str | None, line_num: int) -> TransformOp:
+    """Parse 'key;M=matrix_expr'"""
+    parts = _split_args(args)
+    key = parts[0].strip()
+    matrix: TransMatrix | None = None
+
+    for part in parts[1:]:
+        part = part.strip()
+        if part.startswith("M="):
+            matrix = _parse_matrix(part[2:], line_num)
+
+    if matrix is None:
+        raise ParseError("transform requires M= parameter", line_num)
+
+    return TransformOp(key=key, matrix=matrix, out_key=out_key)
+
+
+def _parse_gate_op(args: str, out_key: str | None, line_num: int) -> GateOp:
+    """Parse 'key;g=gate_key'"""
+    parts = _split_args(args)
+    key = parts[0].strip()
+    gate_key: str | None = None
+
+    for part in parts[1:]:
+        part = part.strip()
+        if part.startswith("g="):
+            gate_key = part[2:].strip()
+
+    if gate_key is None:
+        raise ParseError("gate requires g= parameter", line_num)
+
+    return GateOp(key=key, gate_key=gate_key, out_key=out_key)
+
+
+def _parse_merge_op(args: str, out_key: str | None, line_num: int) -> MergeOp:
+    """Parse 'key1 key2 ...;w=[w1 w2 ...]'"""
+    parts = _split_args(args)
+    keys = parts[0].strip().split()
+    weights: FloatVec | None = None
+
+    for part in parts[1:]:
+        part = part.strip()
+        if part.startswith("w="):
+            w_str = part[2:].strip()
+            m = re.match(r'^\[([^\]]*)\]$', w_str)
+            if not m:
+                raise ParseError(f"Invalid weights: '{w_str}'", line_num)
+            nums = _parse_numbers(m.group(1))
+            weights = FloatVec.from_list(nums)
+
+    if weights is None:
+        raise ParseError("merge requires w= parameter", line_num)
+
+    if out_key is None:
+        raise ParseError("merge requires ->out_key", line_num)
+
+    return MergeOp(keys=keys, weights=weights, out_key=out_key)
+
+
+def _parse_distance_op(args: str, out_key: str | None, line_num: int) -> DistanceOp:
+    """Parse 'key_a key_b (;metric=name)?'"""
+    parts = _split_args(args)
+    keys = parts[0].strip().split()
+    if len(keys) != 2:
+        raise ParseError("distance requires exactly 2 keys", line_num)
+
+    metric = "euclidean"
+    for part in parts[1:]:
+        part = part.strip()
+        if part.startswith("metric="):
+            metric = part[7:].strip()
+
+    return DistanceOp(
+        key_a=keys[0], key_b=keys[1], metric=metric,
+        out_key=out_key or "_distance",
+    )
+
+
+def _parse_route_op(args: str, out_key: str | None, line_num: int) -> RouteOp:
+    """Parse 'key;R=matrix_expr'"""
+    parts = _split_args(args)
+    key = parts[0].strip()
+    router: TransMatrix | None = None
+
+    for part in parts[1:]:
+        part = part.strip()
+        if part.startswith("R="):
+            router = _parse_matrix(part[2:], line_num)
+
+    if router is None:
+        raise ParseError("route requires R= parameter", line_num)
+
+    return RouteOp(key=key, router=router, out_key=out_key or "_route")
+
+
+# ---------------------------------------------------------------------------
+# Matrix parsing
+# ---------------------------------------------------------------------------
+
+def _parse_matrix(token: str, line_num: int) -> TransMatrix:
+    """Parse dense '[r00 r01;r10 r11]' or 'sparse(MxN;i,j=v ...)'."""
+    token = token.strip()
+
+    # sparse(MxN;entries...)
+    m = re.match(r'^sparse\((\d+)x(\d+);(.+)\)$', token)
+    if m:
+        rows, cols = int(m.group(1)), int(m.group(2))
+        entries_str = m.group(3).strip()
+        mat = np.zeros((rows, cols), dtype=np.float32)
+        for entry in entries_str.split():
+            em = re.match(r'^(\d+),(\d+)=([^\s]+)$', entry)
+            if not em:
+                raise ParseError(f"Invalid sparse entry: '{entry}'", line_num)
+            r, c, v = int(em.group(1)), int(em.group(2)), float(em.group(3))
+            mat[r, c] = v
+        return TransMatrix(data=mat)
+
+    # dense [row;row;...] — rows separated by ;, values by space
+    m = re.match(r'^\[([^\]]*)\]$', token)
+    if m:
+        content = m.group(1).strip()
+        if ";" in content:
+            row_strs = content.split(";")
+            rows_data = [_parse_numbers(r.strip()) for r in row_strs]
+        else:
+            # Single row (or 1x1 matrix like [0.8])
+            nums = _parse_numbers(content)
+            rows_data = [nums]
+        return TransMatrix.from_list(rows_data)
+
+    raise ParseError(f"Invalid matrix: '{token}'", line_num)
+
+
+# ---------------------------------------------------------------------------
+# Terminal
+# ---------------------------------------------------------------------------
+
+_COMP_OPS = {
+    ">=": lambda a, b: a >= b,
+    "<=": lambda a, b: a <= b,
+    ">":  lambda a, b: a > b,
+    "<":  lambda a, b: a < b,
+    "==": lambda a, b: a == b,
+}
+
+
+def _parse_terminal(line: str, state_keys: dict, line_num: int) -> tuple[str, Transition]:
+    """Parse '? terminal_name condition' → (terminal_key, Transition with CustomOp).
+
+    The CustomOp checks the condition each iteration and sets the terminal GateVec.
+    """
+    body = line[1:].strip()  # strip leading '?'
+    parts = body.split(None, 1)
+    if len(parts) < 2:
+        raise ParseError("Terminal line needs 'name condition'", line_num)
+
+    terminal_name = parts[0]
+    condition_str = parts[1]
+
+    key, index, comp_str, threshold = _parse_condition(condition_str, line_num)
+
+    comp_fn = _COMP_OPS.get(comp_str)
+    if comp_fn is None:
+        raise ParseError(f"Unknown comparator: '{comp_str}'", line_num)
+
+    terminal_key = f"_{terminal_name}"
+
+    def make_check(k: str, idx: int | None, cmp: Callable, thr: float, t_key: str):
+        def check(state: StateBundle) -> StateBundle:
+            s = state.copy()
+            vec = s[k]
+            if idx is not None:
+                val = float(vec.data[idx])
+            else:
+                val = float(vec.data[0])
+            if cmp(val, thr):
+                s[t_key] = GateVec.ones(1)
+            return s
+        return check
+
+    fn = make_check(key, index, comp_fn, threshold, terminal_key)
+    op = CustomOp(fn=fn, label=f"check_{terminal_name}")
+    transition = Transition(name=f"_check_{terminal_name}", operation=op)
+
+    return terminal_key, transition
+
+
+def _parse_condition(expr: str, line_num: int) -> tuple[str, int | None, str, float]:
+    """Parse 'key[idx]>=threshold' or 'key>=threshold'.
+
+    Returns (key, index_or_None, comparator_str, threshold).
+    """
+    # Try key[idx]comp_threshold
+    m = re.match(r'^([A-Za-z_]\w*)\[(\d+)\]\s*(>=|<=|>|<|==)\s*([^\s]+)$', expr)
+    if m:
+        return m.group(1), int(m.group(2)), m.group(3), float(m.group(4))
+
+    # Try key comp threshold
+    m = re.match(r'^([A-Za-z_]\w*)\s*(>=|<=|>|<|==)\s*([^\s]+)$', expr)
+    if m:
+        return m.group(1), None, m.group(2), float(m.group(3))
+
+    raise ParseError(f"Invalid condition: '{expr}'", line_num)

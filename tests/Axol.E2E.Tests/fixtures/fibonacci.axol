@@ -1,2 +1,0 @@
-(f fib [i -> i] n (? (<= n 1) n (+ (fib (- n 1)) (fib (- n 2)))))
-(F i (range 0 10) (print (fib i)))
