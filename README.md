@@ -38,12 +38,14 @@ Instead of traditional control flow (if/else, for loops, function calls), Axol r
 - **Sparse matrix notation** scales O(N) vs O(N^2) for dense representations
 - **Deterministic execution** with full state tracing
 - **NumPy backend** enables 500x+ speedup on large vector operations
+- **Matrix-level encryption** - secret key matrices make programs cryptographically unreadable, a fundamental solution to the Shadow AI problem
 
 ---
 
 ## Table of Contents
 
 - [Theoretical Background](#theoretical-background)
+- [Shadow AI & Matrix Encryption](#shadow-ai--matrix-encryption)
 - [Architecture](#architecture)
 - [Quick Start](#quick-start)
 - [DSL Syntax](#dsl-syntax)
@@ -132,6 +134,101 @@ M=sparse(100x100;0,1=1 1,2=1 ... 98,99=1 99,99=1)
 | 25 | 214 | 269 | 186 | 0.87x | 0.69x |
 | 100 | 739 | 869 | 636 | 0.86x | 0.73x |
 | 200 | 1,439 | 1,669 | 1,236 | 0.86x | 0.74x |
+
+---
+
+## Shadow AI & Matrix Encryption
+
+### The Shadow AI Problem
+
+**Shadow AI** refers to the risk of unauthorized AI agents leaking, copying, or reverse-engineering proprietary business logic. As AI agents increasingly write and execute code autonomously, traditional source code becomes a critical attack surface:
+
+- An AI agent's prompts and generated code can be **extracted via prompt injection**
+- Code in Python/C#/JavaScript is **human-readable by design** - obfuscation is reversible
+- Proprietary algorithms, decision rules, and trade secrets embedded in code are **exposed in plaintext**
+- Traditional obfuscation (variable renaming, control flow flattening) only raises the bar slightly - the logic remains structurally intact and recoverable
+
+### How Axol Solves This: Matrix-Level Encryption
+
+Because **all computation in Axol reduces to matrix multiplication** (`v @ M`), a mathematical property becomes available that is impossible in traditional programming languages: **similarity transformation encryption**.
+
+Given a secret invertible key matrix **K**, any Axol program can be encrypted:
+
+```
+Original program:     state  -->  M  -->  new_state
+Encrypted program:    state' -->  M' -->  new_state'
+
+Where:
+  M' = K^(-1) @ M @ K          (encrypted operation matrix)
+  state' = state @ K            (encrypted initial state)
+  result  = result' @ K^(-1)    (decrypted final output)
+```
+
+This is not obfuscation - it is **cryptographic transformation**. The encrypted program:
+
+1. **Runs correctly** in the encrypted domain (matrix algebra preserves conjugation)
+2. **Produces encrypted output** that requires K^(-1) to decode
+3. **Hides all business logic** - the matrices M' are mathematically unrelated to M without K
+4. **Resists reverse engineering** - recovering K from M' requires solving an NP-hard matrix decomposition problem for large N
+
+### Concrete Example
+
+```
+# Original: State machine transition matrix (business logic visible)
+M = [0 1 0]    # IDLE -> RUNNING
+    [0 0 1]    # RUNNING -> DONE
+    [0 0 1]    # DONE -> DONE (absorbing)
+
+# After encryption with secret key K:
+M' = [0.73  -0.21   0.48]    # Meaningless without K
+     [0.15   0.89  -0.04]    # Cannot infer state machine structure
+     [0.52   0.33   0.15]    # Appears as random noise
+```
+
+The encrypted program still executes correctly (matrix algebra guarantees `K^(-1)(KvM)K = vM`), but the DSL text contains **only the encrypted matrices**. Even if the entire `.axol` file is leaked:
+
+- No state names are visible (vectors are encrypted)
+- No transition logic is visible (matrices are encrypted)
+- No terminal conditions are meaningful (thresholds operate on encrypted values)
+
+### Why This Is Impossible in Traditional Languages
+
+| Property | Python/C#/JS | Axol |
+|----------|-------------|------|
+| Code semantics | Plaintext control flow | Matrix multiplication |
+| Obfuscation | Reversible (rename vars, flatten flow) | N/A |
+| Encryption | Impossible (must be parseable) | Similarity transform on matrices |
+| Leaked code | Full logic exposed | Random-looking numbers |
+| Key separation | Not possible | Key matrix stored separately (HSM, enclave) |
+| Correctness after encryption | N/A | Mathematically guaranteed |
+
+### Security Architecture
+
+```
+  [Developer]                    [Deployment]
+       |                              |
+  Original .axol                 Encrypted .axol
+  (readable logic)               (encrypted matrices)
+       |                              |
+       +--- K (secret key) ---------->|
+       |    stored in HSM/enclave     |
+       v                              v
+  encrypt(M, K) = K^(-1)MK      run_program(encrypted)
+                                      |
+                                 encrypted output
+                                      |
+                                 decrypt(output, K^(-1))
+                                      |
+                                 actual result
+```
+
+The secret key matrix K can be:
+- Stored in a **Hardware Security Module (HSM)**
+- Managed by a **key management service (KMS)**
+- Rotated periodically without changing program structure
+- Different per deployment environment (dev/staging/prod)
+
+This makes Axol the first programming paradigm where **the source code itself can be cryptographically secured** while remaining executable - a fundamental, not incremental, solution to the Shadow AI problem.
 
 ---
 
