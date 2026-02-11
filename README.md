@@ -1,7 +1,7 @@
 <p align="center">
   <h1 align="center">AXOL</h1>
   <p align="center">
-    <strong>AI-Native Vector Programming Language</strong>
+    <strong>Token-Efficient Vector Programming Language</strong>
   </p>
   <p align="center">
     <a href="#"><img src="https://img.shields.io/badge/status-experimental-orange" alt="Status: Experimental"></a>
@@ -37,8 +37,8 @@ Instead of traditional control flow (if/else, for loops, function calls), Axol r
 - **9 primitive operations** cover all computation: `transform`, `gate`, `merge`, `distance`, `route` (encrypted) + `step`, `branch`, `clamp`, `map` (plaintext)
 - **Sparse matrix notation** scales O(N) vs O(N^2) for dense representations
 - **Deterministic execution** with full state tracing
-- **NumPy backend** enables 500x+ speedup on large vector operations
-- **E/P security classification** - each operation is classified as Encrypted (E) or Plaintext (P), with built-in coverage analyzer
+- **NumPy backend** for large vector operations (faster than pure Python loops for large dimensions)
+- **E/P security classification** - each operation is classified as Encrypted (E) or Plaintext (P), with encryption coverage vs expressiveness tradeoff visualized by the built-in analyzer
 - **Matrix-level encryption** - secret key matrices make programs cryptographically unreadable, a fundamental solution to the Shadow AI problem
 
 ---
@@ -187,7 +187,7 @@ This is not obfuscation - it is **cryptographic transformation**. The encrypted 
 1. **Runs correctly** in the encrypted domain (matrix algebra preserves conjugation)
 2. **Produces encrypted output** that requires K^(-1) to decode
 3. **Hides all business logic** - the matrices M' are mathematically unrelated to M without K
-4. **Resists reverse engineering** - recovering K from M' requires solving an NP-hard matrix decomposition problem for large N
+4. **Resists reverse engineering** - recovering K from M' is a matrix decomposition problem whose difficulty grows with N. While no known polynomial-time algorithm exists for the general case, formal cryptographic hardness proofs are an area of ongoing research
 
 ### Concrete Example
 
@@ -211,14 +211,16 @@ The encrypted program still executes correctly (matrix algebra guarantees `K^(-1
 
 ### Why This Is Impossible in Traditional Languages
 
-| Property | Python/C#/JS | Axol |
-|----------|-------------|------|
-| Code semantics | Plaintext control flow | Matrix multiplication |
-| Obfuscation | Reversible (rename vars, flatten flow) | N/A |
-| Encryption | Impossible (must be parseable) | Similarity transform on matrices |
-| Leaked code | Full logic exposed | Random-looking numbers |
-| Key separation | Not possible | Key matrix stored separately (HSM, enclave) |
-| Correctness after encryption | N/A | Mathematically guaranteed |
+| Property | Python/C#/JS | FHE | Axol |
+|----------|-------------|-----|------|
+| Code semantics | Plaintext control flow | Encrypted (any computation) | Matrix multiplication |
+| Obfuscation | Reversible (rename vars, flatten flow) | N/A | N/A |
+| Encryption | Impossible (must be parseable) | Full (any computation) | Linear ops only (5 of 9) |
+| Performance overhead | N/A | 1000-10000x | ~0% (pipeline mode) |
+| Complexity | N/A | Very high | Low (key matrix only) |
+| Leaked code | Full logic exposed | Encrypted | Random-looking numbers |
+| Key separation | Not possible | Required | Key matrix stored separately (HSM, enclave) |
+| Correctness after encryption | N/A | Mathematically guaranteed | Mathematically guaranteed |
 
 ### Security Architecture
 
@@ -246,7 +248,7 @@ The secret key matrix K can be:
 - Rotated periodically without changing program structure
 - Different per deployment environment (dev/staging/prod)
 
-This makes Axol the first programming paradigm where **the source code itself can be cryptographically secured** while remaining executable - a fundamental, not incremental, solution to the Shadow AI problem.
+Axol offers a lightweight alternative to Fully Homomorphic Encryption (FHE) for matrix-based computations. Unlike FHE (which supports arbitrary computation but with high overhead), Axol's similarity transformation is efficient but limited to linear operations. This tradeoff makes it practical for specific use cases where the 5 encrypted operations suffice.
 
 ### Encryption Proof: All 5 Operations Verified
 
@@ -317,6 +319,18 @@ print(result.summary())
 # Encryptable keys: (keys only E ops touch)
 # Plaintext keys: (keys any P op touches)
 ```
+
+### Security-Expressiveness Tradeoff
+
+Adding P operations increases expressiveness but reduces encryption coverage:
+
+| Program Type | Encryption Coverage | Expressiveness |
+|-------------|-------------------|---------------|
+| E ops only | 100% | Linear only |
+| Mixed E+P | 30-70% (typical) | Full (nonlinear) |
+| P ops only | 0% | Full (nonlinear) |
+
+Programs requiring nonlinear operations (activation functions, conditional branching) must accept partial encryption coverage. Use the built-in analyzer to measure your program's coverage and identify which keys require plaintext access.
 
 ### New Ops Token Cost (Python vs C# vs Axol DSL)
 
@@ -749,6 +763,12 @@ POST /api/module/run  - Run program with sub-modules
 
 Measured with `tiktoken` cl100k_base tokenizer (used by GPT-4 and Claude).
 
+> **Note**: Token savings are measured on programs that naturally map to
+> vector/matrix operations (state machines, linear transforms, weighted sums).
+> For general-purpose programming tasks (string processing, I/O, API calls),
+> Axol cannot express them at all. The comparisons below represent Axol's
+> best-case scenario, not average-case.
+
 ### Python vs Axol DSL
 
 | Program | Python | Axol DSL | Saving |
@@ -783,7 +803,12 @@ Measured with `tiktoken` cl100k_base tokenizer (used by GPT-4 and Claude).
 
 ## Runtime Performance
 
-Axol uses NumPy as its computation backend. Performance characteristics:
+Axol uses NumPy as its computation backend.
+
+> **Note**: Runtime benchmarks compare pure Python loops against Axol's
+> NumPy backend. The speedup is primarily from NumPy's optimized C/Fortran
+> implementation, not from Axol-specific optimizations. Python code using
+> NumPy directly would achieve similar speeds.
 
 ### Small Vectors (dim < 100)
 
@@ -798,10 +823,10 @@ For small vectors, Python's native loop is faster because NumPy has per-call ove
 
 | Dimension | Python Loop | Axol (NumPy) | Winner |
 |-----------|-------------|--------------|--------|
-| dim=1,000 (matmul) | ~129 ms | ~0.2 ms | **Axol 573x** |
-| dim=10,000 (matmul) | ~14,815 ms | ~381 ms | **Axol 39x** |
+| dim=1,000 (matmul) | ~129 ms | ~0.2 ms | **573x** (NumPy) |
+| dim=10,000 (matmul) | ~14,815 ms | ~381 ms | **39x** (NumPy) |
 
-For large-scale vector operations (matrix multiplication), Axol's NumPy backend is **orders of magnitude faster** than pure Python loops.
+For large-scale vector operations (matrix multiplication), NumPy's optimized C/Fortran BLAS backend (used by Axol) is **orders of magnitude faster** than pure Python loops. Any Python code using NumPy directly would achieve similar speedups.
 
 ### When to Use Axol
 
@@ -812,11 +837,24 @@ For large-scale vector operations (matrix multiplication), Axol's NumPy backend 
 | Simple scripts (< 10 lines) | Python (less overhead) |
 | Human-readable business logic | Python/C# (familiar syntax) |
 
+### Limitations
+
+- **Limited domain**: Axol can only express vector/matrix computations. String processing, I/O, networking, and general-purpose programming are not supported.
+- **No LLM training data**: Unlike Python or JavaScript, no LLM has been trained on Axol code. AI agents may struggle to generate correct Axol programs without examples in context.
+- **Encryption only for linear ops**: Only 5 of 9 operations support encrypted execution. Programs using nonlinear ops (step, branch, clamp, map) have reduced encryption coverage.
+- **Loop-mode encryption overhead**: Encrypted programs in loop mode cannot evaluate terminal conditions, running until max_iterations. This causes significant overhead (400x+ in benchmarks).
+- **Token savings are domain-specific**: The 30-50% token savings apply to vector/matrix-heavy programs. For general-purpose tasks, Python is more concise.
+
 ---
 
 ## Performance Benchmarks
 
 Auto-generated by `pytest tests/test_performance_report.py -v -s`. Full results in [PERFORMANCE_REPORT.md](PERFORMANCE_REPORT.md).
+
+> **Note**: Runtime benchmarks compare pure Python loops against Axol's
+> NumPy backend. The speedup is primarily from NumPy's optimized C/Fortran
+> implementation, not from Axol-specific optimizations. Python code using
+> NumPy directly would achieve similar speeds.
 
 ### Token Efficiency (Axol vs Python vs C#)
 

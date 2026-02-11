@@ -17,6 +17,7 @@ import textwrap
 
 import pytest
 import numpy as np
+import tiktoken
 
 from axol.core.types import FloatVec, GateVec, OneHotVec, TransMatrix, StateBundle
 from axol.core.program import (
@@ -66,23 +67,31 @@ PROGRAMS = {
 }
 
 
+_enc = tiktoken.get_encoding("cl100k_base")
+
+
+def _count_tokens(text: str) -> int:
+    """Count tokens using tiktoken cl100k_base (GPT-4 / Claude tokenizer)."""
+    return len(_enc.encode(text))
+
+
 class TestTokenCost:
     def test_01_token_cost(self, capsys):
-        """Measure token counts for Python vs C# vs Axol."""
+        """Measure token counts for Python vs C# vs Axol (tiktoken cl100k_base)."""
         rows = []
         for name, srcs in PROGRAMS.items():
             row = {
                 "name": name,
-                "python_tokens": len(srcs["python"].split()),
-                "csharp_tokens": len(srcs["csharp"].split()),
-                "axol_tokens": len(srcs["axol"].split()),
+                "python_tokens": _count_tokens(srcs["python"]),
+                "csharp_tokens": _count_tokens(srcs["csharp"]),
+                "axol_tokens": _count_tokens(srcs["axol"]),
             }
             rows.append(row)
         _results["token_cost"] = rows
 
         with capsys.disabled():
             print(f"\n{'='*70}")
-            print("  Token Cost Comparison (word-split estimate)")
+            print("  Token Cost Comparison (tiktoken cl100k_base)")
             print(f"{'='*70}")
             print(f"  {'Program':<18} {'Python':>8} {'C#':>8} {'Axol':>8} {'Saving':>8}")
             print(f"{'-'*70}")

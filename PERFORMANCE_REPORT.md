@@ -6,42 +6,42 @@ Auto-generated benchmark results.
 
 | Program | Python | C# | Axol | Saving vs Python |
 |---------|--------|----|------|------------------|
-| counter | 8 | 5 | 11 | -38% |
-| hp_decay | 9 | 7 | 14 | -56% |
-| state_machine | 9 | 6 | 14 | -56% |
+| counter | 27 | 22 | 32 | -19% |
+| hp_decay | 30 | 36 | 50 | -67% |
+| state_machine | 38 | 43 | 47 | -24% |
 
 ## 2. Runtime Benchmarks
 
 | Dimension | Avg Time (μs) |
 |-----------|---------------|
-| 4 | 122.9 |
-| 100 | 144.1 |
-| 1000 | 2601.4 |
+| 4 | 92.5 |
+| 100 | 97.9 |
+| 1000 | 2200.9 |
 
 ## 3. Optimizer Effect
 
-- Original: 2 transitions, 136.4 μs
-- Optimized: 1 transitions, 85.7 μs
-- Speedup: 1.59x
+- Original: 2 transitions, 100.9 μs
+- Optimized: 1 transitions, 52.1 μs
+- Speedup: 1.94x
 
 ## 4. Encryption Overhead
 
-- Plaintext: 567.3 μs
-- Encrypted: 240582.6 μs
-- Overhead: 424.08x
+- Plaintext: 425.3 μs
+- Encrypted: 240449.3 μs
+- Overhead: 565.32x
 
 ## 5. Scaling Analysis (N-State Automaton)
 
 | N States | Avg Time (μs) |
 |----------|---------------|
-| 5 | 1116.0 |
-| 10 | 1983.4 |
-| 20 | 4365.4 |
-| 50 | 11326.7 |
-| 100 | 22438.6 |
+| 5 | 932.9 |
+| 10 | 1979.9 |
+| 20 | 4219.6 |
+| 50 | 12276.6 |
+| 100 | 24403.2 |
 
 ## 6. Backend Comparison
 
 | Backend | Avg Time (μs) |
 |---------|---------------|
-| numpy | 73.0 |
+| numpy | 63.9 |
