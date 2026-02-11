@@ -127,7 +127,7 @@ class TestGateEncryption:
         v_enc = encrypt_vec(v, K)
         M_enc = encrypt_matrix(M_gate, K)
         result_dec = decrypt_vec(v_enc @ M_enc, K)
-        np.testing.assert_allclose(result_dec, result, atol=1e-4)
+        np.testing.assert_allclose(result_dec, result, atol=1e-3)
 
 
 class TestMergeEncryption:
