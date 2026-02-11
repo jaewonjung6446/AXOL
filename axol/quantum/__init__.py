@@ -54,6 +54,13 @@ from axol.quantum.compose import (
     compose_parallel,
     can_reuse_after_observe,
 )
+from axol.quantum.koopman import (
+    lifted_dim,
+    lift,
+    unlift,
+    estimate_koopman_matrix,
+    compose_koopman_chain,
+)
 from axol.quantum.weaver import weave
 from axol.quantum.observatory import observe, reobserve
 from axol.quantum.dsl import (
@@ -82,6 +89,8 @@ __all__ = [
     "estimate_cost", "CostEstimate",
     # Compose
     "compose_serial", "compose_parallel", "can_reuse_after_observe",
+    # Koopman
+    "lifted_dim", "lift", "unlift", "estimate_koopman_matrix", "compose_koopman_chain",
     # Weaver
     "weave",
     # Observatory

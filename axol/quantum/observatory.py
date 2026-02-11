@@ -16,6 +16,7 @@ from axol.quantum.errors import ObservatoryError
 from axol.quantum.types import Tapestry, Observation
 from axol.quantum.lyapunov import omega_from_lyapunov, omega_from_observations
 from axol.quantum.fractal import phi_from_fractal, phi_from_entropy
+from axol.quantum.koopman import lift, unlift
 
 
 def observe(
@@ -25,22 +26,85 @@ def observe(
 ) -> Observation:
     """Single observation — collapse the tapestry to one point on the attractor.
 
-    Time complexity: O(D) where D is the attractor embedding dimension.
+    If the tapestry has a pre-composed matrix (linear chain), uses the fast path:
+    a single matrix-vector multiply + Born rule. Otherwise falls back to running
+    the full internal program.
 
-    Steps:
-    1. Inject input values into the internal Program's initial state
-    2. Run the program
-    3. Apply Born rule to the output vector
-    4. Compute Omega from global attractor's Lyapunov exponent
-    5. Compute Phi from global attractor's fractal dimension
-    6. Return Observation
+    Fast path complexity: O(dim²)  — depth-independent.
+    Fallback complexity:  O(depth × dim²)
     """
-    program = tapestry._internal_program
-
     # Validate inputs
     for name in tapestry.input_names:
         if name not in inputs:
             raise ObservatoryError(f"Missing input: '{name}'")
+
+    # Quality metrics (shared by both paths)
+    attractor = tapestry.global_attractor
+    omega = omega_from_lyapunov(attractor.max_lyapunov)
+    phi = phi_from_fractal(attractor.fractal_dim, attractor.phase_space_dim)
+
+    output_name = tapestry.output_names[0] if tapestry.output_names else list(tapestry.nodes.keys())[-1]
+
+    # === FAST PATH: composed matrix available ===
+    if tapestry._composed_matrix is not None:
+        info = tapestry._composed_chain_info
+        input_vec = inputs[info["input_key"]]
+        value = ops.transform(input_vec, tapestry._composed_matrix)
+        probs = ops.measure(value)
+
+        value_index = int(np.argmax(probs.data))
+        label = None
+        if output_name in tapestry.nodes:
+            label = tapestry.nodes[output_name].state.labels.get(value_index)
+
+        return Observation(
+            value=value,
+            value_index=value_index,
+            value_label=label,
+            omega=omega,
+            phi=phi,
+            probabilities=probs,
+            tapestry_name=tapestry.name,
+            observation_count=1,
+        )
+
+    # === KOOPMAN FAST PATH: nonlinear composed via Koopman operator ===
+    if tapestry._koopman_matrix is not None:
+        info = tapestry._koopman_chain_info
+        input_vec = inputs[info["input_key"]]
+
+        # 1. Lift input to polynomial observable space
+        lifted = lift(input_vec.data.astype(np.float64), degree=info["degree"])
+        lifted_fv = FloatVec(data=lifted.astype(np.float32))
+
+        # 2. Single matrix multiply in lifted space
+        result_lifted = ops.transform(lifted_fv, tapestry._koopman_matrix)
+
+        # 3. Unlift back to original dimension
+        value_data = unlift(result_lifted.data.astype(np.float64), info["original_dim"], degree=info["degree"])
+        value = FloatVec(data=value_data.astype(np.float32))
+
+        # 4. Born rule
+        probs = ops.measure(value)
+
+        value_index = int(np.argmax(probs.data))
+        label = None
+        if output_name in tapestry.nodes:
+            label = tapestry.nodes[output_name].state.labels.get(value_index)
+
+        return Observation(
+            value=value,
+            value_index=value_index,
+            value_label=label,
+            omega=omega,
+            phi=phi,
+            probabilities=probs,
+            tapestry_name=tapestry.name,
+            observation_count=1,
+        )
+
+    # === FALLBACK: run full program (non-linear / branching pipelines) ===
+    program = tapestry._internal_program
 
     # Inject inputs into initial state
     state = program.initial_state.copy()
@@ -61,7 +125,6 @@ def observe(
     final_state = result.final_state
 
     # Extract output probabilities
-    output_name = tapestry.output_names[0] if tapestry.output_names else list(tapestry.nodes.keys())[-1]
     prob_key = f"_prob_{output_name}"
 
     if prob_key in final_state:
@@ -88,11 +151,6 @@ def observe(
             value = FloatVec(data=value.data.astype(np.float32))
     else:
         value = probs
-
-    # Quality metrics
-    attractor = tapestry.global_attractor
-    omega = omega_from_lyapunov(attractor.max_lyapunov)
-    phi = phi_from_fractal(attractor.fractal_dim, attractor.phase_space_dim)
 
     # Label lookup
     label = None

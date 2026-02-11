@@ -22,7 +22,7 @@ import numpy as np
 from axol.core.types import FloatVec, TransMatrix, StateBundle
 from axol.core.program import (
     Program, Transition,
-    TransformOp, MergeOp, MeasureOp,
+    TransformOp, MergeOp, MeasureOp, CustomOp,
 )
 from axol.core import operations as ops
 
@@ -37,6 +37,9 @@ from axol.quantum.cost import estimate_cost, BASE_COST
 from axol.quantum.lyapunov import estimate_lyapunov, lyapunov_spectrum, omega_from_lyapunov
 from axol.quantum.fractal import estimate_fractal_dim, phi_from_fractal
 from axol.quantum.compose import compose_serial
+from axol.quantum.koopman import (
+    lifted_dim, estimate_koopman_matrix, compose_koopman_chain,
+)
 
 
 def _build_trajectory_matrix(
@@ -171,11 +174,184 @@ def _generate_attractor_points(
     return FloatVec.from_list(points)
 
 
+def _is_composable_chain(transitions: list) -> bool:
+    """Check if transitions form a single composable TransformOp chain.
+
+    Returns True if all non-MeasureOp transitions are TransformOps and
+    they form a sequential chain (out_key of one feeds into key of next).
+    """
+    transform_ops = [t for t in transitions if isinstance(t.operation, TransformOp)]
+    non_measure = [t for t in transitions if not isinstance(t.operation, MeasureOp)]
+
+    # All non-measure ops must be TransformOps
+    if len(transform_ops) != len(non_measure):
+        return False
+    if len(transform_ops) == 0:
+        return False
+
+    # Check chain connectivity: out_key of op[i] == key of op[i+1]
+    for i in range(len(transform_ops) - 1):
+        curr_out = transform_ops[i].operation.out_key or transform_ops[i].operation.key
+        next_in = transform_ops[i + 1].operation.key
+        if curr_out != next_in:
+            return False
+
+    return True
+
+
+def _compose_chain(transitions: list) -> tuple[TransMatrix, dict]:
+    """Compose a chain of TransformOps into a single matrix.
+
+    Returns (composed_matrix, chain_info).
+    Uses float64 for intermediate computation to preserve precision.
+    """
+    transform_ops = [t.operation for t in transitions if isinstance(t.operation, TransformOp)]
+
+    # Multiply matrices in order: M_composed = M1 @ M2 @ ... @ MN
+    # Since transform does vec @ M, chaining gives vec @ M1 @ M2 @ ... @ MN
+    composed = transform_ops[0].matrix.data.astype(np.float64)
+    for op in transform_ops[1:]:
+        composed = composed @ op.matrix.data.astype(np.float64)
+
+    input_key = transform_ops[0].key
+    output_key = transform_ops[-1].out_key or transform_ops[-1].key
+
+    chain_info = {
+        "input_key": input_key,
+        "output_key": output_key,
+        "num_composed": len(transform_ops),
+    }
+    return TransMatrix(data=composed.astype(np.float32)), chain_info
+
+
+def _has_nonlinear_step(declaration: EntangleDeclaration) -> bool:
+    """Check if any relation in the declaration has a transform_fn (nonlinear)."""
+    for rel in declaration.relations:
+        if rel.transform_fn is not None:
+            return True
+    return False
+
+
+def _build_step_fn(
+    traj_matrix: TransMatrix,
+    transform_fn: Callable | None,
+) -> Callable[[np.ndarray], np.ndarray]:
+    """Build a single step function combining linear transform + optional nonlinearity."""
+    M = traj_matrix.data.astype(np.float64)
+    if transform_fn is not None:
+        def step(x: np.ndarray) -> np.ndarray:
+            y = x @ M
+            return np.asarray(transform_fn(y), dtype=np.float64)
+        return step
+    else:
+        def step(x: np.ndarray) -> np.ndarray:
+            return x @ M
+        return step
+
+
+def _is_koopman_composable_chain(
+    transitions: list[Transition],
+    relation_map: dict[str, DeclaredRelation],
+    has_nonlinear: bool,
+) -> bool:
+    """Check if transitions form a Koopman-composable chain.
+
+    Requirements:
+    - All non-MeasureOp, non-CustomOp transitions are TransformOps (no MergeOp)
+    - CustomOps are allowed (they are injected nonlinear transform_fns)
+    - Sequential chain connectivity among TransformOps
+    - At least one nonlinear step exists
+    - All TransformOps share the same dimension
+    """
+    if not has_nonlinear:
+        return False
+
+    transform_ops = [t for t in transitions if isinstance(t.operation, TransformOp)]
+    # Filter out MeasureOp and CustomOp (injected nonlinear transforms)
+    non_measure_non_custom = [
+        t for t in transitions
+        if not isinstance(t.operation, (MeasureOp, CustomOp))
+    ]
+
+    # All remaining ops must be TransformOps (no MergeOp)
+    if len(transform_ops) != len(non_measure_non_custom):
+        return False
+    if len(transform_ops) == 0:
+        return False
+
+    # Check chain connectivity
+    for i in range(len(transform_ops) - 1):
+        curr_out = transform_ops[i].operation.out_key or transform_ops[i].operation.key
+        next_in = transform_ops[i + 1].operation.key
+        if curr_out != next_in:
+            return False
+
+    # All must have the same matrix dimension
+    dims = set()
+    for t in transform_ops:
+        dims.add(t.operation.matrix.shape[0])
+        dims.add(t.operation.matrix.shape[1])
+    if len(dims) > 1:
+        return False
+
+    return True
+
+
+def _compose_koopman_chain_from_transitions(
+    transitions: list[Transition],
+    relation_map: dict[str, DeclaredRelation],
+    degree: int = 2,
+    n_samples: int = 500,
+    seed: int = 42,
+) -> tuple[TransMatrix, dict]:
+    """Estimate and compose Koopman matrices for a chain of transitions.
+
+    For each TransformOp, builds a step function (linear transform + optional
+    nonlinear transform_fn), estimates its Koopman matrix via EDMD, then
+    composes all Koopman matrices into a single matrix.
+    """
+    transform_transitions = [t for t in transitions if isinstance(t.operation, TransformOp)]
+
+    koopman_matrices = []
+    dim = transform_transitions[0].operation.matrix.shape[0]
+
+    for i, t in enumerate(transform_transitions):
+        op = t.operation
+        # Find the relation that produced this transition to get its transform_fn
+        target_name = op.out_key or op.key
+        relation = relation_map.get(target_name)
+        tfn = relation.transform_fn if relation is not None else None
+
+        step_fn = _build_step_fn(op.matrix, tfn)
+        K = estimate_koopman_matrix(
+            step_fn, dim, degree=degree, n_samples=n_samples, seed=seed + i,
+        )
+        koopman_matrices.append(K)
+
+    composed = compose_koopman_chain(koopman_matrices)
+
+    input_key = transform_transitions[0].operation.key
+    output_key = transform_transitions[-1].operation.out_key or transform_transitions[-1].operation.key
+    ld = lifted_dim(dim, degree)
+
+    chain_info = {
+        "input_key": input_key,
+        "output_key": output_key,
+        "num_composed": len(transform_transitions),
+        "original_dim": dim,
+        "lifted_dim": ld,
+        "degree": degree,
+    }
+    return composed, chain_info
+
+
 def weave(
     declaration: EntangleDeclaration,
     encrypt: bool = False,
     seed: int = 42,
     optimize: bool = True,
+    koopman_degree: int = 2,
+    koopman_samples: int = 500,
 ) -> Tapestry:
     """Weave a declaration into a Tapestry.
 
@@ -350,6 +526,28 @@ def weave(
                 name=f"weave_{src}_to_{node_name}",
                 operation=TransformOp(key=src, matrix=traj_matrix, out_key=node_name),
             ))
+            # Inject CustomOp for nonlinear transform_fn (fallback path only)
+            if relation.transform_fn is not None:
+                _tfn = relation.transform_fn
+                _node_name = node_name
+
+                def _make_custom_fn(fn, key):
+                    def custom_fn(state):
+                        s = state.copy()
+                        v = state[key].data.astype(np.float64)
+                        result = np.asarray(fn(v), dtype=np.float64)
+                        result = np.nan_to_num(result, nan=0.0, posinf=10.0, neginf=-10.0)
+                        s[key] = FloatVec(data=result.astype(np.float32))
+                        return s
+                    return custom_fn
+
+                transitions.append(Transition(
+                    name=f"nonlinear_{node_name}",
+                    operation=CustomOp(
+                        fn=_make_custom_fn(_tfn, _node_name),
+                        label=f"transform_fn({node_name})",
+                    ),
+                ))
         else:
             # Multiple sources → TransformOp each, then MergeOp
             intermediate_keys = []
@@ -431,7 +629,27 @@ def weave(
         feasible=cost_est.feasible,
     )
 
-    # Step 9: Return Tapestry
+    # Step 9: Compose chain if optimizable
+    composed_matrix = None
+    composed_chain_info = None
+    koopman_matrix = None
+    koopman_chain_info = None
+    has_nonlinear = _has_nonlinear_step(declaration)
+
+    if optimize:
+        if _is_composable_chain(transitions) and not has_nonlinear:
+            # Pure linear chain → existing fast path
+            composed_matrix, composed_chain_info = _compose_chain(transitions)
+        elif _is_koopman_composable_chain(transitions, relation_map, has_nonlinear):
+            # Nonlinear chain → Koopman composition
+            koopman_matrix, koopman_chain_info = _compose_koopman_chain_from_transitions(
+                transitions, relation_map,
+                degree=koopman_degree,
+                n_samples=koopman_samples,
+                seed=seed,
+            )
+
+    # Step 10: Return Tapestry
     return Tapestry(
         name=declaration.name,
         nodes=nodes,
@@ -440,4 +658,8 @@ def weave(
         global_attractor=global_attractor,
         weaver_report=report,
         _internal_program=program,
+        _composed_matrix=composed_matrix,
+        _composed_chain_info=composed_chain_info,
+        _koopman_matrix=koopman_matrix,
+        _koopman_chain_info=koopman_chain_info,
     )

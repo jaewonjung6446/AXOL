@@ -140,6 +140,10 @@ class Tapestry:
     global_attractor: Attractor
     weaver_report: WeaverReport
     _internal_program: Program
+    _composed_matrix: TransMatrix | None = None
+    _composed_chain_info: dict | None = None  # {"input_key": str, "output_key": str, "num_composed": int}
+    _koopman_matrix: TransMatrix | None = None
+    _koopman_chain_info: dict | None = None  # {"input_key", "output_key", "num_composed", "original_dim", "lifted_dim", "degree"}
 
 
 # ---------------------------------------------------------------------------
