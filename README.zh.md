@@ -1,11 +1,11 @@
 <p align="center">
   <h1 align="center">AXOL</h1>
   <p align="center">
-    <strong>Token高效向量编程语言</strong>
+    <strong>基于混沌理论的空间-概率计算语言</strong>
   </p>
   <p align="center">
     <a href="#"><img src="https://img.shields.io/badge/status-experimental-orange" alt="Status: Experimental"></a>
-    <a href="#"><img src="https://img.shields.io/badge/version-0.1.0-blue" alt="Version 0.1.0"></a>
+    <a href="#"><img src="https://img.shields.io/badge/version-0.2.0-blue" alt="Version 0.2.0"></a>
     <a href="#"><img src="https://img.shields.io/badge/python-3.11%2B-brightgreen" alt="Python 3.11+"></a>
     <a href="#"><img src="https://img.shields.io/badge/license-MIT-lightgrey" alt="License: MIT"></a>
   </p>
@@ -20,1503 +20,191 @@
 ---
 
 > **警告：本项目处于早期实验阶段。**
-> API、DSL语法和内部架构可能会在没有通知的情况下发生重大变更。不建议在生产环境中使用。欢迎贡献和反馈。
+> API、DSL语法和内部架构可能在没有通知的情况下发生重大变更。不建议在生产环境中使用。欢迎贡献和反馈。
 
 ---
 
-## 什么是Axol？
+## 什么是AXOL？
 
-**Axol**是一种从零开始为**AI智能体**设计的领域特定语言（DSL），使其能够以比传统编程语言**更少的token**来读取、编写和推理程序。
+**AXOL**是一种**否定时间轴**（顺序执行）作为计算基础的编程语言，并用两个替代轴取而代之：
 
-Axol不使用传统的控制流（if/else、for循环、函数调用），而是将所有计算表示为不可变向量束上的**向量变换**和**状态转移**。这一设计源于一个简单的观察：**LLM按token计费**，而现有的编程语言是为人类可读性而非token效率设计的。
+- **空间轴** — 节点之间的关系决定计算
+- **概率轴** — 结果的可能性决定结果
+
+AXOL不问"先做这个，再做那个"，而是问："什么与什么相关，关联有多强？"其结果是一种基于**混沌理论**的根本不同的执行模型，计算就是构建和观测**奇异吸引子**的行为。
+
+```
+传统模式：  指令1 → 指令2 → 指令3  （时间顺序）
+
+AXOL：
+  [空间]     NodeA ──relation── NodeB     "在哪里"决定计算
+  [概率] state = { alpha|possibility1> + beta|possibility2> }  "有多大可能"决定结果
+```
 
 ### 核心特性
 
-- 相比Python节省**30~50%的token**
-- 相比C#节省**48~75%的token**
-- **9个原语操作**覆盖所有计算：`transform`、`gate`、`merge`、`distance`、`route`（加密）+ `step`、`branch`、`clamp`、`map`（明文）
-- **稀疏矩阵表示法**：从密集表示的O(N^2)降至O(N)
-- 支持完整状态追踪的**确定性执行**
-- **NumPy后端**支持大规模向量运算（大维度下比纯Python循环更快）
-- **E/P安全分类** - 每个操作被分类为加密（E）或明文（P），通过内置分析器可视化加密覆盖率与表达能力的权衡
-- **矩阵级加密** - 秘密密钥矩阵使程序在密码学层面不可读，从根本上解决影子AI问题
+- **三阶段执行**：Declare → Weave → Observe（不是编译→运行）
+- **混沌理论基础**：Tapestry = 奇异吸引子，质量通过Lyapunov指数和分形维度衡量
+- **双重质量指标**：Omega（结合度）+ Phi（清晰度）— 严谨、可测量、可组合
+- 相比等效Python代码**平均节省63% token**（量子DSL）
+- **不可达检测** — 在计算之前警告目标是否在数学上不可达
+- **Lyapunov估计精度**：平均误差0.0002
+- 基础层中的**9个原语操作**：`transform`、`gate`、`merge`、`distance`、`route`（加密）+ `step`、`branch`、`clamp`、`map`（明文）
+- **矩阵级加密** — 相似变换使程序在密码学层面不可读
+- **NumPy后端**，可选GPU加速（CuPy/JAX）
 
 ---
 
 ## 目录
 
-- [理论背景](#理论背景)
-- [影子AI与矩阵加密](#影子ai与矩阵加密)
-  - [加密证明：全部5个操作验证完成](#加密证明全部5个操作验证完成)
-- [明文操作与安全分类](#明文操作与安全分类)
+- [范式转换](#范式转换)
+- [三阶段执行模型](#三阶段执行模型)
+- [质量指标](#质量指标)
+- [混沌理论基础](#混沌理论基础)
+- [组合规则](#组合规则)
+- [量子DSL](#量子dsl)
+- [性能](#性能)
+- [基础层](#基础层)
+  - [9个原语操作](#9个原语操作)
+  - [矩阵加密（Shadow AI）](#矩阵加密shadow-ai)
+  - [明文操作与安全分类](#明文操作与安全分类)
+  - [编译器优化器](#编译器优化器)
+  - [GPU后端](#gpu后端)
+  - [模块系统](#模块系统)
+  - [量子干涉（Phase 6）](#量子干涉phase-6)
+  - [客户端-服务器架构](#客户端-服务器架构)
 - [架构](#架构)
 - [快速开始](#快速开始)
-- [DSL语法](#dsl语法)
-- [编译器优化](#编译器优化)
-- [GPU后端](#gpu后端)
-- [模块系统](#模块系统)
-- [Tool-Use API](#tool-use-api)
-- [Web前端](#web前端)
-- [Token成本对比](#token成本对比)
-- [运行时性能](#运行时性能)
-- [性能基准测试](#性能基准测试)
 - [API参考](#api参考)
 - [示例](#示例)
-- [测试](#测试)
-- [Phase 6: Quantum Axol](#phase-6-quantum-axol)
-- [Phase 8: 混沌理论量子模块](#phase-8-混沌理论量子模块)
+- [测试套件](#测试套件)
 - [路线图](#路线图)
 
 ---
 
-## 理论背景
+## 范式转换
 
-### Token经济问题
+### 我们否定什么
 
-现代AI系统（GPT-4、Claude等）在**token经济**下运行。输入输出的每个字符都消耗token，直接影响成本和延迟。当AI智能体编写或读取代码时，编程语言的冗余度直接影响：
+每种现代编程语言都建立在**时间轴**（顺序执行）之上：
 
-1. **成本** - 更多token = 更高的API费用
-2. **延迟** - 更多token = 更慢的响应速度
-3. **上下文窗口** - 更多token = 更少的其他信息空间
-4. **推理准确度** - 压缩的表示减少噪声
+| 范式 | 时间轴依赖 |
+|------|-----------|
+| 命令式（C、Python） | "先做这个，再做那个"——显式时间顺序 |
+| 函数式（Haskell、Lisp） | 声明式，但存在求值顺序 |
+| 并行（Go、Rust async） | 多条时间轴同时进行——仍然受时间约束 |
+| 声明式（SQL、HTML） | 描述"做什么"，但引擎在时间轴上处理 |
 
-### 为什么选择向量计算？
+这是因为Von Neumann架构基于时钟周期运行——即时间轴。
 
-传统编程语言通过**控制流**（分支、循环、递归）表达逻辑。这对人类来说很直观，但对AI来说效率低下：
+### 我们提出什么
 
-```python
-# Python: 67个token
-TRANSITIONS = {"IDLE": "RUNNING", "RUNNING": "DONE", "DONE": "DONE"}
-def state_machine():
-    state = "IDLE"
-    steps = 0
-    while state != "DONE":
-        state = TRANSITIONS[state]
-        steps += 1
-    return state, steps
-```
+AXOL用两个替代轴取代时间轴：
 
-用向量变换表达相同的逻辑：
+| 轴 | 决定什么 | 类比 |
+|----|---------|------|
+| **空间轴**（关系） | 由关系连接的节点决定计算 | "在哪里"重要，而非"何时" |
+| **概率轴**（可能性） | 叠加态坍缩到最可能的结果 | "有多大可能"重要，而非"精确" |
+
+权衡：**我们牺牲精确性来消除时间瓶颈。**
 
 ```
-# Axol DSL: 48个token（节省28%）
-@state_machine
-s state=onehot(0,3)
-: advance=transform(state;M=[0 1 0;0 0 1;0 0 1])
-? done state[2]>=1
+精确性 ↑  →  纠缠成本 ↑  →  构建时间 ↑
+精确性 ↓  →  纠缠成本 ↓  →  构建时间 ↓
+               但观测始终是即时的
 ```
 
-状态机的转移表变成了**矩阵**，状态推进变成了**矩阵乘法**。AI不需要推理字符串比较、字典查找或循环条件，只需处理单个矩阵运算。
+### 为什么这很重要
 
-### 九个原语操作
-
-Axol提供九个原语操作。前五个为**加密（E）**操作——可以在加密数据上运行。后四个为**明文（P）**操作——需要明文数据，但增加了非线性表达能力：
-
-| 操作 | 安全等级 | 数学基础 | 描述 |
-|------|:--------:|---------|------|
-| `transform` | **E** | 矩阵乘法：`v @ M` | 线性状态变换 |
-| `gate` | **E** | Hadamard积：`v * g` | 条件遮蔽（0/1） |
-| `merge` | **E** | 加权和：`sum(v_i * w_i)` | 向量组合 |
-| `distance` | **E** | L2 / 余弦 / 点积 | 相似度度量 |
-| `route` | **E** | `argmax(v @ R)` | 离散分支 |
-| `step` | **P** | `where(v >= t, 1, 0)` | 阈值转二值门 |
-| `branch` | **P** | `where(g, then, else)` | 条件向量选择 |
-| `clamp` | **P** | `clip(v, min, max)` | 值域限制 |
-| `map` | **P** | `f(v)` 逐元素 | 非线性激活（relu、sigmoid、abs、neg、square、sqrt） |
-
-五个E操作构成加密计算的**线性代数基础**：
-- 状态机 (transform)
-- 条件逻辑 (gate)
-- 累积/聚合 (merge)
-- 相似度搜索 (distance)
-- 决策制定 (route)
-
-四个P操作为AI/ML工作负载增加**非线性表达能力**：
-- 激活函数（map: relu、sigmoid）
-- 阈值决策（step + branch）
-- 值归一化（clamp）
-
-### 稀疏矩阵表示法
-
-对于大型状态空间，密集矩阵表示在token上是O(N^2)的。Axol的稀疏表示法将其降至O(N)：
-
-```
-# 密集：O(N^2)个token - N=100时不实用
-M=[0 1 0 0 ... 0; 0 0 1 0 ... 0; ...]
-
-# 稀疏：O(N)个token - 线性扩展
-M=sparse(100x100;0,1=1 1,2=1 ... 98,99=1 99,99=1)
-```
-
-| N | Python | C# | Axol DSL | DSL/Python | DSL/C# |
-|---|--------|-----|----------|------------|--------|
-| 5 | 74 | 109 | 66 | 0.89x | 0.61x |
-| 25 | 214 | 269 | 186 | 0.87x | 0.69x |
-| 100 | 739 | 869 | 636 | 0.86x | 0.73x |
-| 200 | 1,439 | 1,669 | 1,236 | 0.86x | 0.74x |
+| 属性 | 传统编译 | AXOL纠缠 |
+|------|---------|----------|
+| 准备 | 代码→机器翻译 | 在逻辑之间构建概率关联 |
+| 执行 | 顺序机器指令 | 观测（输入）→即时坍缩 |
+| 瓶颈 | 与执行路径长度成正比 | 仅取决于纠缠深度 |
+| 类比 | "修建一条快速公路" | "已经在目的地" |
 
 ---
 
-## 影子AI与矩阵加密
+## 三阶段执行模型
 
-### 影子AI问题
+### 第一阶段：Declare（声明）
 
-**影子AI（Shadow AI）**指未经授权的AI智能体泄露、复制或逆向工程专有业务逻辑的风险。随着AI智能体越来越多地自主编写和执行代码，传统源代码成为关键的攻击面：
-
-- AI智能体的提示词和生成代码可通过**提示注入攻击提取**
-- Python/C#/JavaScript代码**设计上就是人类可读的** - 混淆是可逆的
-- 嵌入代码中的专有算法、决策规则和商业秘密**以明文形式暴露**
-- 传统混淆技术（变量重命名、控制流扁平化）只是略微提高门槛 - 逻辑结构完好，可以恢复
-
-### Axol的解决方案：矩阵级加密
-
-由于**Axol中的所有计算都归约为矩阵乘法**（`v @ M`），一种在传统编程语言中不可能实现的数学性质变得可用：**相似变换（similarity transformation）加密**。
-
-给定一个秘密可逆密钥矩阵**K**，任何Axol程序都可以被加密：
-
-```
-原始程序：     state  -->  M  -->  new_state
-加密程序：     state' -->  M' -->  new_state'
-
-其中：
-  M' = K^(-1) @ M @ K          （加密后的运算矩阵）
-  state' = state @ K            （加密后的初始状态）
-  result  = result' @ K^(-1)    （解密后的最终输出）
-```
-
-这不是混淆，而是**密码学变换**。加密后的程序：
-
-1. **在加密域中正常执行**（矩阵代数保持共轭变换）
-2. **生成加密输出** - 没有K^(-1)无法解码
-3. **隐藏所有业务逻辑** - 矩阵M'在没有K的情况下与M在数学上无关
-4. **抵抗逆向工程** - 从M'恢复K是一个随N增大而难度增加的矩阵分解问题。虽然一般情况下不存在已知的多项式时间算法，但正式的密码学困难性证明仍是一个正在研究的领域
-
-### 具体示例
-
-```
-# 原始：状态机转移矩阵（业务逻辑可见）
-M = [0 1 0]    # IDLE -> RUNNING
-    [0 0 1]    # RUNNING -> DONE
-    [0 0 1]    # DONE -> DONE（吸收状态）
-
-# 用秘密密钥K加密后：
-M' = [0.73  -0.21   0.48]    # 没有K毫无意义
-     [0.15   0.89  -0.04]    # 无法推断状态机结构
-     [0.52   0.33   0.15]    # 看起来像随机噪声
-```
-
-加密程序仍然正常执行（矩阵代数保证`K^(-1)(KvM)K = vM`），但DSL文本中**只包含加密后的矩阵**。即使整个`.axol`文件泄露：
-
-- 状态名不可见（向量已加密）
-- 转移逻辑不可见（矩阵已加密）
-- 终止条件无意义（阈值在加密值上操作）
-
-### 为什么传统语言无法实现
-
-| 属性 | Python/C#/JS | FHE | Axol |
-|------|-------------|-----|------|
-| 代码语义 | 明文控制流 | 加密（任意计算） | 矩阵乘法 |
-| 混淆 | 可逆（变量重命名、流程扁平化） | 不适用 | 不适用 |
-| 加密 | 不可能（必须可解析） | 完全（任意计算） | 仅线性操作（9个中5个） |
-| 性能开销 | 不适用 | 1000-10000倍 | 约0%（管道模式） |
-| 复杂度 | 不适用 | 非常高 | 低（仅密钥矩阵） |
-| 代码泄露时 | 全部逻辑暴露 | 已加密 | 看起来像随机数字 |
-| 密钥分离 | 不可能 | 必需 | 密钥矩阵单独存储（HSM、安全飞地） |
-| 加密后正确性 | 不适用 | 数学保证 | 数学保证 |
-
-### 安全架构
-
-```
-  [开发者]                       [部署环境]
-     |                              |
-  原始.axol                    加密后的.axol
-  （可读逻辑）                  （加密矩阵）
-     |                              |
-     +--- K（秘密密钥）---------->|
-     |    存储在HSM/安全飞地      |
-     v                              v
-  encrypt(M, K) = K^(-1)MK     run_program(加密程序)
-                                     |
-                                加密输出
-                                     |
-                                decrypt(output, K^(-1))
-                                     |
-                                实际结果
-```
-
-秘密密钥矩阵K可以：
-- 存储在**硬件安全模块（HSM）**中
-- 通过**密钥管理服务（KMS）**管理
-- 在不改变程序结构的情况下定期轮换
-- 按部署环境（dev/staging/prod）使用不同密钥
-
-Axol为基于矩阵的计算提供了全同态加密（FHE）的轻量级替代方案。与FHE（支持任意计算但开销很高）不同，Axol的相似变换高效但仅限于线性操作。这种权衡使其在5个加密操作足够的特定用例中具有实用性。
-
-### 加密证明：全部5个操作验证完成
-
-Axol全部5个操作的加密兼容性已**经过数学证明和测试**（`tests/test_encryption.py`，21项测试）：
-
-| 操作 | 加密方法 | 密钥约束 | 状态 |
-|------|---------|---------|------|
-| `transform` | `M' = K^(-1) M K`（相似变换） | 任意可逆矩阵K | **已证明** |
-| `gate` | 转换为`diag(g)`矩阵后同transform | 任意可逆矩阵K | **已证明** |
-| `merge` | 线性性：`w*(v@K) = (wv)@K`（自动兼容） | 任意可逆矩阵K | **已证明** |
-| `distance` | `\|\|v@K\|\| = \|\|v\|\|`（正交矩阵保范） | 正交矩阵K | **已证明** |
-| `route` | `R' = K^(-1) R`（仅左乘） | 任意可逆矩阵K | **已证明** |
-
-**复杂多操作程序同样验证通过：**
-
-- HP衰减（transform + merge循环）- 加密/解密结果一致
-- 3状态FSM（链式transform）- 加密域中状态转移正确
-- 战斗流水线（transform + gate + merge）- 3个操作链式执行，误差 < 0.001
-- 20状态自动机（稀疏矩阵，19步）- 加密执行结果与原始一致
-- 50x50大规模矩阵 - float32精度保持
-
-**测试证明的安全属性：**
-
-- 加密后的矩阵呈现为随机噪声（稀疏 -> 稠密，无可见结构）
-- 不同密钥产生完全不同的加密结果
-- 100个随机密钥暴力破解无法恢复原始矩阵
-- OneHot向量结构在加密后完全隐藏
-
----
-
-## 明文操作与安全分类
-
-### 为什么需要明文操作？
-
-原始的5个加密操作是**线性的**——它们只能表达线性变换。许多实际的AI/ML工作负载需要**非线性**操作（激活函数、条件分支、值截断）。新增的4个明文操作填补了这一空白。
-
-### SecurityLevel枚举
-
-每个操作都携带一个`SecurityLevel`：
+定义**什么与什么相关**并设定质量目标。此时不进行任何计算。
 
 ```python
-from axol.core import SecurityLevel
+from axol.quantum import DeclarationBuilder, RelationKind
 
-SecurityLevel.ENCRYPTED  # "E" - 可在加密数据上运行
-SecurityLevel.PLAINTEXT  # "P" - 需要明文数据
-```
-
-### 加密覆盖率分析器
-
-内置分析器可报告程序中能以加密方式运行的操作比例：
-
-```python
-from axol.core import parse, analyze
-
-program = parse("""
-@damage_calc
-s raw=[50 30] armor=[10 5]
-: diff=merge(raw armor;w=[1 -1])->dmg
-: act=map(dmg;fn=relu)
-: safe=clamp(dmg;min=0,max=100)
-""")
-
-result = analyze(program)
-print(result.summary())
-# Program: damage_calc
-# Transitions: 3 total, 1 encrypted (E), 2 plaintext (P)
-# Coverage: 33.3%
-# Encryptable keys: (仅E操作访问的键)
-# Plaintext keys: (任何P操作访问的键)
-```
-
-### 安全性与表达能力的权衡
-
-添加P操作会增加表达能力，但会降低加密覆盖率：
-
-| 程序类型 | 加密覆盖率 | 表达能力 |
-|---------|-----------|---------|
-| 仅E操作 | 100% | 仅线性 |
-| E+P混合 | 30-70%（典型） | 完全（非线性） |
-| 仅P操作 | 0% | 完全（非线性） |
-
-需要非线性操作（激活函数、条件分支）的程序必须接受部分加密覆盖率。使用内置分析器来衡量程序的覆盖率，并识别哪些键需要明文访问。
-
-### 新操作的Token成本（Python vs C# vs Axol DSL）
-
-| 程序 | Python | C# | Axol DSL | vs Python | vs C# |
-|------|-------:|---:|--------:|---------:|------:|
-| ReLU激活 | 48 | 82 | 28 | 42% | 66% |
-| 阈值选择 | 140 | 184 | 80 | 43% | 57% |
-| 值截断 | 66 | 95 | 31 | 53% | 67% |
-| Sigmoid激活 | 57 | 88 | 28 | 51% | 68% |
-| 伤害流水线 | 306 | 326 | 155 | 49% | 53% |
-| **总计** | **617** | **775** | **322** | **48%** | **59%** |
-
-### 新操作运行时性能（dim=10,000）
-
-| 操作 | Python循环 | Axol（NumPy） | 加速比 |
-|------|----------:|----------:|--------:|
-| ReLU | 575 us | 21 us | **27x** |
-| Sigmoid | 1.7 ms | 42 us | **40x** |
-| Step+Branch | 889 us | 96 us | **9x** |
-| Clamp | 937 us | 16 us | **58x** |
-| 伤害流水线 | 3.8 ms | 191 us | **20x** |
-
----
-
-## 架构
-
-```
-                                          +-------------+
-  .axol源码 -----> 解析器 (dsl.py) -----> | Program     |
-                         |                | + optimize()|
-                         v                +------+------+
-                    模块系统                      |
-                    (module.py)                  v
-                      - import             +-----------+    +-----------+
-                      - use()              |  执行引擎  |--->|  验证器   |
-                      - compose()          |(program.py)|    |(verify.py)|
-                                           +-----------+    +-----------+
-                                                |
-                    +-----------+    +----------+----------+
-                    |  后端     |<---|    运算模块          |
-                    |(backend.py)|    | (operations.py)     |
-                    | numpy/cupy|    +---------------------+
-                    | /jax      |               |
-                    +-----------+    +-----------+----------+
-                                    |      类型系统        |
-                                    |   (types.py)         |
-                    +-----------+   +----------------------+
-                    |  加密     |   +-----------+
-                    |(encryption|   | 分析器    |
-                    |       .py)|   |(analyzer  |
-                    +-----------+   |       .py)|
-                                    +-----------+
-                    +-----------+    +-----------+
-                    | Tool API  |    |  服务器   |
-                    |(api/)     |    |(server/)  |
-                    | dispatch  |    | FastAPI   |
-                    | tools     |    | HTML/JS   |
-                    +-----------+    +-----------+
-```
-
-### 模块概览
-
-| 模块 | 描述 |
-|------|------|
-| `axol.core.types` | 7种向量类型（`BinaryVec`、`IntVec`、`FloatVec`、`OneHotVec`、`GateVec`、`TransMatrix`）+ `StateBundle` |
-| `axol.core.operations` | 9个原语操作：`transform`、`gate`、`merge`、`distance`、`route`、`step`、`branch`、`clamp`、`map_fn` |
-| `axol.core.program` | 执行引擎：`Program`、`Transition`、`run_program`、`SecurityLevel`、`StepOp`/`BranchOp`/`ClampOp`/`MapOp` |
-| `axol.core.verify` | 状态验证（exact/cosine/euclidean匹配） |
-| `axol.core.dsl` | DSL解析器：`parse(source) -> Program`，支持`import`/`use()` |
-| `axol.core.optimizer` | 3遍编译器优化：变换融合、死状态消除、常量折叠 |
-| `axol.core.backend` | 可插拔数组后端：`numpy`（默认）、`cupy`、`jax` |
-| `axol.core.encryption` | 相似变换加密：`encrypt_program`、`decrypt_state`（E/P感知） |
-| `axol.core.analyzer` | 加密覆盖率分析器：`analyze(program) -> AnalysisResult`，E/P分类 |
-| `axol.core.module` | 模块系统：`Module`、`ModuleRegistry`、`compose()`、schema验证 |
-| `axol.api` | AI智能体Tool-Use API：`dispatch(request)`、`get_tool_definitions()` |
-| `axol.server` | FastAPI Web服务器 + 原生HTML/JS可视化调试前端 |
-
----
-
-## 快速开始
-
-### 安装
-
-```bash
-# 克隆仓库
-git clone https://github.com/your-username/AXOL.git
-cd AXOL
-
-# 安装依赖
-pip install -e ".[dev]"
-```
-
-### 环境要求
-
-- Python 3.11+
-- NumPy >= 1.24.0
-- pytest >= 7.4.0（开发用）
-- tiktoken >= 0.5.0（开发用，token分析）
-- fastapi >= 0.100.0、uvicorn >= 0.23.0（可选，Web前端）
-- cupy-cuda12x >= 12.0.0（可选，GPU加速）
-- jax[cpu] >= 0.4.0（可选，JAX后端）
-
-### Hello World - DSL
-
-```python
-from axol.core import parse, run_program
-
-source = """
-@counter
-s count=[0] one=[1]
-: increment=merge(count one;w=[1 1])->count
-? done count>=5
-"""
-
-program = parse(source)
-result = run_program(program)
-
-print(f"最终计数: {result.final_state['count'].to_list()}")  # [5.0]
-print(f"步数: {result.steps_executed}")
-print(f"终止条件: {result.terminated_by}")  # terminal_condition
-```
-
-### Hello World - Python API
-
-```python
-from axol.core import (
-    FloatVec, GateVec, TransMatrix, StateBundle,
-    Program, Transition, run_program,
+decl = (
+    DeclarationBuilder("search")
+    .input("query", 64)
+    .input("db", 64)
+    .relate("relevance", ["query", "db"], RelationKind.PROPORTIONAL)
+    .output("relevance")
+    .quality(omega=0.9, phi=0.7)   # 质量目标
+    .build()
 )
-from axol.core.program import TransformOp
+```
 
-state = StateBundle(vectors={
-    "hp": FloatVec.from_list([100.0]),
+或使用DSL：
+
+```
+entangle search(query: float[64], db: float[64]) @ Omega(0.9) Phi(0.7) {
+    relevance <~> similarity(query, db)
+    ranking <~> relevance
+}
+```
+
+### 第二阶段：Weave（织造）
+
+构建**奇异吸引子**（Tapestry）。这是计算成本发生的阶段。织造器（weaver）：
+
+1. 估计纠缠成本
+2. 检测不可达性（当目标在数学上不可达时发出警告）
+3. 为每个节点构建吸引子结构（轨迹矩阵、Hadamard干涉）
+4. 估计Lyapunov指数和分形维度
+5. 组装内部`Program`以供执行
+
+```python
+from axol.quantum import weave
+
+tapestry = weave(decl, seed=42)
+print(tapestry.weaver_report)
+# target:   Omega(0.90) Phi(0.70)
+# achieved: Omega(0.95) Phi(0.82)
+# feasible: True
+```
+
+不可达检测示例：
+
+```
+> weave predict_weather: WARNING
+>   target:   Omega(0.99) Phi(0.99)
+>   maximum:  Omega(0.71) Phi(0.68)
+>   reason:   chaotic dependency (lambda=2.16 on path: input->atmosphere->prediction)
+>   attractor_dim: D=2.06 (Lorenz-class)
+```
+
+### 第三阶段：Observe（观测）
+
+输入值→**即时坍缩**到吸引子上的一点。时间复杂度：O(D)，其中D是吸引子的嵌入维度。
+
+```python
+from axol.quantum import observe, reobserve
+from axol.core.types import FloatVec
+
+# 单次观测
+result = observe(tapestry, {
+    "query": FloatVec.from_list([1.0] * 64),
+    "db": FloatVec.from_list([0.5] * 64),
 })
-decay = TransMatrix.from_list([[0.8]])
+print(f"Omega: {result.omega:.2f}, Phi: {result.phi:.2f}")
 
-program = Program(
-    name="hp_decay",
-    initial_state=state,
-    transitions=[
-        Transition("decay", TransformOp(key="hp", matrix=decay)),
-    ],
-)
-result = run_program(program)
-print(f"衰减后HP: {result.final_state['hp'].to_list()}")  # [80.0]
+# 重复观测以提升质量
+result = reobserve(tapestry, inputs, count=10)
+# 对概率分布取平均，重新计算经验Omega
 ```
 
----
-
-## DSL语法
-
-### 程序结构
-
-```
-@program_name              # 头部：程序名称
-s key1=[values] key2=...   # 状态：初始向量声明
-: name=op(args)->out       # 转移：操作定义
-? terminal condition       # 终端：循环退出条件（可选）
-```
-
-### 状态声明
-
-```
-s hp=[100]                          # 单浮点向量
-s pos=[1.5 2.0 -3.0]               # 多元素向量
-s state=onehot(0,5)                 # 独热向量：索引0，大小5
-s buffer=zeros(10)                  # 大小10的零向量
-s mask=ones(3)                      # 大小3的全1向量
-s hp=[100] mp=[50] stamina=[75]     # 一行声明多个向量
-```
-
-### 操作
-
-```
-# --- 加密（E）操作 ---
-
-# transform：矩阵乘法
-: decay=transform(hp;M=[0.8])
-: advance=transform(state;M=[0 1 0;0 0 1;0 0 1])
-
-# gate：逐元素遮蔽
-: masked=gate(values;g=mask)
-
-# merge：向量加权和
-: total=merge(a b c;w=[1 1 1])->result
-
-# distance：相似度度量
-: dist=distance(pos1 pos2)
-: sim=distance(vec1 vec2;metric=cosine)
-
-# route：argmax路由
-: choice=route(scores;R=[1 0 0;0 1 0;0 0 1])
-
-# --- 明文（P）操作 ---
-
-# step：阈值转二值门
-: mask=step(scores;t=0.5)->gate_out
-
-# branch：条件向量选择（需要->out_key）
-: selected=branch(gate_key;then=high,else=low)->result
-
-# clamp：将值截断到指定范围
-: safe=clamp(values;min=0,max=100)
-
-# map：逐元素非线性函数（relu、sigmoid、abs、neg、square、sqrt）
-: activated=map(x;fn=relu)
-: prob=map(logits;fn=sigmoid)->output
-```
-
-### 矩阵格式
-
-```
-# 密集：行用;分隔
-M=[0.8]                               # 1x1
-M=[1 0;0 1]                           # 2x2 单位矩阵
-M=[0 1 0;0 0 1;0 0 1]                # 3x3 移位矩阵
-
-# 稀疏：只标记非零元素
-M=sparse(100x100;0,1=1 1,2=1 99,99=1) # 100x100，100个非零项
-```
-
-### 终端条件
-
-```
-? done count>=5              # count[0] >= 5时退出
-? finished state[2]>=1       # state[2] >= 1时退出（索引访问）
-? end hp<=0                  # hp[0] <= 0时退出
-```
-
-没有`?`行时，程序以**管道模式**运行（所有转移执行一次）。
-
-### 注释
-
-```
-# 这是注释
-@my_program
-# 注释可以出现在任何位置
-s v=[1 2 3]
-: t=transform(v;M=[1 0 0;0 1 0;0 0 1])
-```
-
----
-
-## 编译器优化
-
-`optimize()`应用三个优化遍，减少程序体积并预计算常量：
-
-```python
-from axol.core import parse, optimize, run_program
-
-program = parse(source)
-optimized = optimize(program)   # 融合 + 消除 + 折叠
-result = run_program(optimized)
-```
-
-### 第1遍：变换融合
-
-对同一键的连续`TransformOp`进行融合，合并为单次矩阵乘法：
-
-```
-# 优化前：2个转移，每次迭代进行2次矩阵乘法
-: t1=transform(v;M=[0 1 0;0 0 1;1 0 0])
-: t2=transform(v;M=[2 0 0;0 2 0;0 0 2])
-
-# 优化后：1个转移，1次矩阵乘法（M_fused = M1 @ M2）
-: t1+t2=transform(v;M_fused)
-```
-
-- 不跨越`CustomOp`边界
-- 不动点迭代处理3个以上的链
-- 含2个transform的管道：**转移数减少50%，执行时间减少45%**
-
-### 第2遍：死状态消除
-
-移除初始状态中从未被任何转移读取的向量：
-
-```
-s used=[1 0]  unused=[99 99]   # unused从未被引用
-: t=transform(used;M=[...])
-
-# 优化后：unused从初始状态中移除
-```
-
-- 对`CustomOp`采取保守策略（保留所有状态）
-- `terminal_key`始终被视为"已读取"
-
-### 第3遍：常量折叠
-
-预计算对不可变键（从未被写入的键）的变换：
-
-```
-s constant=[1 0 0]
-: t=transform(constant;M=[0 1 0;0 0 1;1 0 0])->result
-
-# 优化后：转移被消除，result=[0,1,0]直接存储在初始状态中
-```
-
----
-
-## GPU后端
-
-可插拔数组后端，支持`numpy`（默认）、`cupy`（NVIDIA GPU）和`jax`：
-
-```python
-from axol.core import set_backend, get_backend_name
-
-set_backend("numpy")   # 默认 - CPU
-set_backend("cupy")    # NVIDIA GPU（需安装cupy）
-set_backend("jax")     # Google JAX（需安装jax）
-```
-
-安装可选后端：
-
-```bash
-pip install axol[gpu]   # cupy-cuda12x
-pip install axol[jax]   # jax[cpu]
-```
-
-所有现有代码透明兼容——后端切换是全局的，影响所有向量/矩阵运算。
-
----
-
-## 模块系统
-
-可复用、可组合的程序，支持schema、导入和子模块执行。
-
-### 模块定义
-
-```python
-from axol.core.module import Module, ModuleSchema, VecSchema, ModuleRegistry
-
-schema = ModuleSchema(
-    inputs=[VecSchema("atk", "float", 1), VecSchema("def_val", "float", 1)],
-    outputs=[VecSchema("dmg", "float", 1)],
-)
-module = Module(name="damage_calc", program=program, schema=schema)
-```
-
-### 注册表与文件加载
-
-```python
-registry = ModuleRegistry()
-registry.load_from_file("damage_calc.axol")
-registry.resolve_import("heal", relative_to="main.axol")
-```
-
-### DSL导入与使用语法
-
-```
-@main
-import damage_calc from "damage_calc.axol"
-s atk=[50] def_val=[10]
-: calc=use(damage_calc;in=atk,def_val;out=dmg)
-```
-
-### 程序组合
-
-```python
-from axol.core.module import compose
-combined = compose(program_a, program_b, name="combined")
-```
-
----
-
-## Tool-Use API
-
-面向AI智能体的JSON可调用接口，用于解析、运行和验证Axol程序：
-
-```python
-from axol.api import dispatch
-
-# 解析
-result = dispatch({"action": "parse", "source": "@prog\ns v=[1]\n: t=transform(v;M=[2])"})
-# -> {"program_name": "prog", "state_keys": ["v"], "transition_count": 1, "has_terminal": false}
-
-# 运行
-result = dispatch({"action": "run", "source": "...", "optimize": True})
-# -> {"final_state": {"v": [2.0]}, "steps_executed": 1, "terminated_by": "pipeline_end"}
-
-# 逐步检查
-result = dispatch({"action": "inspect", "source": "...", "step": 1})
-
-# 列出操作
-result = dispatch({"action": "list_ops"})
-
-# 验证预期输出
-result = dispatch({"action": "verify", "source": "...", "expected": {"v": [2.0]}})
-```
-
-AI智能体的工具定义（JSON Schema）可通过`get_tool_definitions()`获取。
-
----
-
-## Web前端
-
-FastAPI服务器配合原生HTML/JS可视化调试器：
-
-```bash
-pip install axol[server]    # fastapi + uvicorn
-python -m axol.server       # http://localhost:8080
-```
-
-### 功能
-
-| 面板 | 描述 |
-|------|------|
-| **DSL编辑器** | 语法编辑，内置示例下拉菜单 |
-| **执行** | 运行/优化按钮，结果摘要（步数、时间、终止原因） |
-| **追踪查看器** | 逐步状态表，支持上一步/下一步/播放控制 |
-| **状态图表** | Chart.js时序图（X=步数，Y=向量值） |
-| **加密演示** | 原始vs加密矩阵热力图，加密/运行/解密工作流 |
-| **性能** | 优化器前后对比，token成本分析 |
-
-### API端点
-
-```
-POST /api/parse       - 解析DSL源码
-POST /api/run         - 解析 + 执行 + 完整追踪
-POST /api/optimize    - 优化器前后对比
-POST /api/encrypt     - 加密程序 + 运行 + 解密
-GET  /api/examples    - 内置示例程序
-GET  /api/ops         - 操作描述
-POST /api/token-cost  - Token计数分析（Axol vs Python vs C#）
-POST /api/module/run  - 运行带子模块的程序
-```
-
----
-
-## Token成本对比
-
-使用`tiktoken` cl100k_base分词器测量（GPT-4 / Claude使用）。
-
-> **注意**: Token节省是在自然映射到向量/矩阵操作的程序（状态机、线性变换、加权和）上测量的。对于通用编程任务（字符串处理、I/O、API调用），Axol无法表达。以下比较代表Axol的最佳情况，而非平均情况。
-
-### Python vs Axol DSL
-
-| 程序 | Python | Axol DSL | 节省 |
-|------|--------|----------|------|
-| 计数器（0->5） | 32 | 33 | -3.1% |
-| 状态机（3状态） | 67 | 47 | 29.9% |
-| HP衰减（3轮） | 51 | 32 | 37.3% |
-| RPG伤害计算 | 130 | 90 | 30.8% |
-| 100状态自动机 | 1,034 | 636 | 38.5% |
-| **总计** | **1,314** | **838** | **36.2%** |
-
-### Python vs C# vs Axol DSL
-
-| 程序 | Python | C# | Axol DSL | vs Python | vs C# |
-|------|--------|----|----------|-----------|-------|
-| Counter | 32 | 61 | 33 | -3.1% | 45.9% |
-| State Machine | 67 | 147 | 48 | 28.4% | 67.3% |
-| HP Decay | 51 | 134 | 51 | 0.0% | 61.9% |
-| Combat | 145 | 203 | 66 | 54.5% | 67.5% |
-| Data Heavy | 159 | 227 | 67 | 57.9% | 70.5% |
-| Pattern Match | 151 | 197 | 49 | 67.5% | 75.1% |
-| 100-State Auto | 739 | 869 | 636 | 13.9% | 26.8% |
-| **总计** | **1,344** | **1,838** | **950** | **29.3%** | **48.3%** |
-
-### 关键发现
-
-1. **简单程序**（counter、hp_decay）：DSL与Python相当。DSL语法的开销大致等于Python对简单程序的最少语法。
-2. **结构化程序**（combat、data_heavy、pattern_match）：DSL相比Python节省**50~68%**，相比C#节省**67~75%**。向量表示消除了类定义、控制流和样板代码。
-3. **大型状态空间**（100+状态）：稀疏矩阵表示法相比Python稳定节省**约38%**，相比C#节省**约27%**，实现O(N)扩展（对比O(N^2)）。
-
-### Tool-Use API vs Python + FHE
-
-比较**完整加密工作流程**（不仅仅是DSL语法）：
-
-| 任务 | Python + FHE | Axol Tool-Use API | 节省 |
-|------|-------------|-------------------|------|
-| 加密分支 | 约150 token | 约30 token | 80% |
-| 加密状态机 | 约200 token | 约35 token | 82% |
-| 加密Grover搜索 | 约250 token | 约25 token | 90% |
-
-节省来自**抽象而非语法**：LLM完全不需要看到加密代码（密钥生成、加密、解密），因为Tool-Use API在内部处理一切。
-
----
-
-## 运行时性能
-
-Axol使用NumPy作为计算后端。
-
-> **注意**: 运行时基准测试将纯Python循环与Axol的NumPy后端进行比较。加速主要来自NumPy优化的C/Fortran实现，而非Axol特有的优化。直接使用NumPy的Python代码也能达到类似的速度。
-
-### 小型向量（dim < 100）
-
-| 维度 | Python循环 | Axol（NumPy） | 优势 |
-|------|-----------|--------------|------|
-| dim=4 | ~6 us | ~11 us | Python 2x |
-| dim=100 | ~14 us | ~20 us | Python 1.4x |
-
-对于小型向量，Python原生循环更快，因为NumPy有单次调用开销。这在预期之内且可接受——小程序无论如何都很快。
-
-### 大型向量（dim >= 1000）
-
-| 维度 | Python循环 | Axol（NumPy） | 优势 |
-|------|-----------|--------------|------|
-| dim=1,000（矩阵乘） | ~129 ms | ~0.2 ms | **573x**（NumPy） |
-| dim=10,000（矩阵乘） | ~14,815 ms | ~381 ms | **39x**（NumPy） |
-
-在大规模向量运算（矩阵乘法）中，NumPy优化的C/Fortran BLAS后端（Axol所使用的）比纯Python循环快**数个数量级**。直接使用NumPy的Python代码也能达到类似的加速。
-
-### 使用场景建议
-
-| 场景 | 建议 |
-|------|------|
-| AI智能体加密计算 | Axol Tool-Use API（LLM无需加密知识） |
-| 大型状态空间（100+维） | Axol（NumPy加速 + 稀疏表示法） |
-| 客户端-服务器加密委托 | AxolClient SDK（本地加密，远程计算） |
-| 可变维度状态转换 | KeyFamily + 矩形加密（N→M） |
-| 维度隐藏隐私 | 填充加密（统一max_dim） |
-| 函数→矩阵编译 | `fn_to_matrix` / `truth_table_to_matrix` 编译器 |
-| 简单脚本（< 10行） | Python（更少开销） |
-| 人类可读的业务逻辑 | Python/C#（熟悉的语法） |
-
-### 局限性
-
-- **有限的领域**: Axol只能表达向量/矩阵计算。不支持字符串处理、I/O、网络和通用编程。
-- **无LLM训练数据**: 与Python或JavaScript不同，没有LLM在Axol代码上进行过训练。AI智能体在上下文中没有示例的情况下可能难以生成正确的Axol程序。
-- **仅线性操作支持加密**: 9个操作中只有5个支持加密执行。使用非线性操作（step、branch、clamp、map）的程序加密覆盖率会降低。但BranchOp在编译时门已知的情况下，可以编译为加密的TransformOp。
-- **循环模式加密开销**: 循环模式下的加密程序无法评估终端条件，会运行到max_iterations。这在基准测试中导致400倍以上的开销。
-- **Token节省是领域特定的**: DSL Token节省是领域特定的（向量/矩阵程序30-50%）。但Tool-Use API通过完全抽象加密，提供相比Python+FHE 80-85%的节省。
-- **填充开销**: 填充加密将所有维度扩展到max_dim，计算量增加O(max_dim²/dim²)。仅在需要维度隐藏时使用。
-
----
-
-## 性能基准测试
-
-由`pytest tests/test_performance_report.py -v -s`自动生成。完整结果见[PERFORMANCE_REPORT.md](PERFORMANCE_REPORT.md)。
-
-> **注意**: 运行时基准测试将纯Python循环与Axol的NumPy后端进行比较。加速主要来自NumPy优化的C/Fortran实现，而非Axol特有的优化。直接使用NumPy的Python代码也能达到类似的速度。
-
-### Token效率（Axol vs Python vs C#）
-
-| 程序 | Axol | Python | C# | vs Python | vs C# |
-|------|------|--------|----|-----------|-------|
-| 计数器（0->5） | 11 | 45 | 78 | **节省76%** | **节省86%** |
-| 3状态FSM | 14 | 52 | 89 | **节省73%** | **节省84%** |
-| HP衰减 | 14 | 58 | 95 | **节省76%** | **节省85%** |
-| 战斗流水线 | 14 | 55 | 92 | **节省75%** | **节省85%** |
-| 矩阵链 | 21 | 60 | 98 | **节省65%** | **节省79%** |
-
-平均：比Python**少74%的token**，比C#**少85%的token**。
-
-### 各维度执行时间
-
-| 维度 | 平均时间 |
-|------|---------|
-| 4 | 0.25 ms |
-| 100 | 0.17 ms |
-| 1,000 | 1.41 ms |
-
-### 优化器效果
-
-| 程序 | 优化前 | 优化后 | 时间减少 |
-|------|--------|-------|---------|
-| 管道（2个transform） | 2个转移 | 1个转移 | **-45%** |
-| 计数器（循环） | 2个转移 | 2个转移 | - |
-| FSM（循环） | 2个转移 | 2个转移 | - |
-
-变换融合对含有连续矩阵运算的管道程序最为有效。
-
-### 加密开销
-
-| 程序 | 明文 | 加密 | 开销 |
-|------|------|------|------|
-| 管道（1次） | 0.12 ms | 0.12 ms | **约0%** |
-| 3状态FSM（循环） | 0.62 ms | 276.8 ms | +44,633% |
-
-管道模式：开销可忽略。循环模式：开销较高，因为加密的终端条件无法触发提前退出，导致执行运行至`max_iterations`。
-
-### 扩展性（N状态自动机）
-
-| 状态数 | Token数 | 执行时间 |
-|--------|---------|---------|
-| 5 | 28 | 1.6 ms |
-| 20 | 388 | 4.3 ms |
-| 50 | 2,458 | 12.9 ms |
-| 100 | 9,908 | 27.9 ms |
-| 200 | 39,808 | 59.2 ms |
-
-得益于稀疏矩阵表示法，Token数呈**O(N)**增长（对比Python/C#的O(N^2)）。执行时间因矩阵乘法呈约O(N^2)增长，但200状态的程序仍在60ms以内。
-
----
-
-## API参考
-
-### `parse(source, registry=None, source_path=None) -> Program`
-
-将Axol DSL源文本解析为可执行的`Program`对象。
-
-```python
-from axol.core import parse
-program = parse("@test\ns v=[1 2 3]\n: t=transform(v;M=[1 0 0;0 1 0;0 0 1])")
-
-# 带模块注册表，支持import/use
-from axol.core.module import ModuleRegistry
-registry = ModuleRegistry()
-program = parse(source, registry=registry, source_path="main.axol")
-```
-
-### `run_program(program: Program) -> ExecutionResult`
-
-执行程序并返回结果。
-
-```python
-from axol.core import run_program
-result = run_program(program)
-result.final_state     # StateBundle，包含最终向量值
-result.steps_executed  # 总转移步数
-result.terminated_by   # "pipeline_end" | "terminal_condition" | "max_iterations"
-result.trace           # TraceEntry列表，用于调试
-result.verification    # VerifyResult（如果设置了expected_state）
-```
-
-### `optimize(program, *, fuse=True, eliminate_dead=True, fold_constants=True) -> Program`
-
-优化程序，不修改原始对象。
-
-```python
-from axol.core import optimize
-optimized = optimize(program)                          # 全部遍
-optimized = optimize(program, fold_constants=False)    # 选择性遍
-```
-
-### `set_backend(name) / get_backend() / to_numpy(arr)`
-
-切换数组计算后端。
-
-```python
-from axol.core import set_backend, get_backend, to_numpy
-set_backend("cupy")     # 切换到GPU
-xp = get_backend()      # 返回cupy模块
-arr = to_numpy(gpu_arr) # 转回numpy
-```
-
-### `dispatch(request) -> dict`
-
-AI智能体的Tool-Use API入口。
-
-```python
-from axol.api import dispatch
-result = dispatch({"action": "run", "source": "...", "optimize": True})
-```
-
-### 向量类型
-
-| 类型 | 描述 | 工厂方法 |
-|------|------|---------|
-| `FloatVec` | 32位浮点 | `from_list([1.0, 2.0])`、`zeros(n)`、`ones(n)` |
-| `IntVec` | 64位整数 | `from_list([1, 2])`、`zeros(n)` |
-| `BinaryVec` | 元素为{0, 1} | `from_list([0, 1])`、`zeros(n)`、`ones(n)` |
-| `OneHotVec` | 恰好一个1.0 | `from_index(idx, n)`、`from_list(...)` |
-| `GateVec` | 元素为{0.0, 1.0} | `from_list([1.0, 0.0])`、`zeros(n)`、`ones(n)` |
-| `TransMatrix` | M x N float32矩阵 | `from_list(rows)`、`identity(n)`、`zeros(m, n)` |
-
-### 操作描述符
-
-```python
-from axol.core.program import (
-    # 加密（E）操作
-    TransformOp,  # TransformOp(key="v", matrix=M, out_key=None)
-    GateOp,       # GateOp(key="v", gate_key="g", out_key=None)
-    MergeOp,      # MergeOp(keys=["a","b"], weights=w, out_key="out")
-    DistanceOp,   # DistanceOp(key_a="a", key_b="b", metric="euclidean")
-    RouteOp,      # RouteOp(key="v", router=R, out_key="_route")
-    # 明文（P）操作
-    StepOp,       # StepOp(key="v", threshold=0.0, out_key=None)
-    BranchOp,     # BranchOp(gate_key="g", then_key="a", else_key="b", out_key="out")
-    ClampOp,      # ClampOp(key="v", min_val=-inf, max_val=inf, out_key=None)
-    MapOp,        # MapOp(key="v", fn_name="relu", out_key=None)
-    # 扩展接口
-    CustomOp,     # CustomOp(fn=callable, label="name")  -- security=P
-)
-```
-
-### 分析器
-
-```python
-from axol.core import analyze
-
-result = analyze(program)
-result.coverage_pct        # E / total * 100
-result.encrypted_count     # E转移数量
-result.plaintext_count     # P转移数量
-result.encryptable_keys    # 仅被E操作访问的键
-result.plaintext_keys      # 被P操作访问的键
-print(result.summary())    # 人类可读报告
-```
-
-### 验证
-
-```python
-from axol.core import verify_states, VerifySpec
-
-result = verify_states(
-    expected=expected_bundle,
-    actual=actual_bundle,
-    specs={"hp": VerifySpec.exact(tolerance=0.01)},
-    strict_keys=False,
-)
-print(result.passed)    # True/False
-print(result.summary()) # 详细报告
-```
-
----
-
-## 示例
-
-### 1. 计数器（0 -> 5）
-
-```
-@counter
-s count=[0] one=[1]
-: increment=merge(count one;w=[1 1])->count
-? done count>=5
-```
-
-### 2. 状态机（IDLE -> RUNNING -> DONE）
-
-```
-@state_machine
-s state=onehot(0,3)
-: advance=transform(state;M=[0 1 0;0 0 1;0 0 1])
-? done state[2]>=1
-```
-
-### 3. HP衰减（100 x 0.8^3 = 51.2）
-
-```
-@hp_decay
-s hp=[100] round=[0] one=[1]
-: decay=transform(hp;M=[0.8])
-: tick=merge(round one;w=[1 1])->round
-? done round>=3
-```
-
-### 4. 战斗伤害（管道模式）
-
-```
-@combat
-s atk=[50] def_val=[20] flag=[1]
-: scale=transform(atk;M=[1.5])->scaled
-: block=gate(def_val;g=flag)
-: combine=merge(scaled def_val;w=[1 -1])->damage
-```
-
-### 5. ReLU激活（map）
-
-```
-@relu
-s x=[-2 0 3 -1 5]
-:act=map(x;fn=relu)
-# 结果：x = [0, 0, 3, 0, 5]
-```
-
-### 6. 阈值选择（step + branch）
-
-```
-@threshold_select
-s scores=[0.3 0.8 0.1 0.9] high=[100 200 300 400] low=[1 2 3 4]
-:s1=step(scores;t=0.5)->mask
-:b1=branch(mask;then=high,else=low)->result
-# mask = [0, 1, 0, 1]
-# result = [1, 200, 3, 400]
-```
-
-### 7. 伤害流水线（全部4个新操作）
-
-```
-@damage_pipe
-s raw=[50 30 80 20] armor=[10 40 5 25]
-s crit=[1 0 1 0] bonus=[20 20 20 20] zero=[0 0 0 0]
-:d1=merge(raw armor;w=[1 -1])->diff
-:d2=map(diff;fn=relu)->effective
-:d3=step(crit;t=0.5)->mask
-:d4=branch(mask;then=bonus,else=zero)->crit_bonus
-:d5=merge(effective crit_bonus;w=[1 1])->total
-:d6=clamp(total;min=0,max=9999)
-# diff=[40,-10,75,-5] -> relu=[40,0,75,0] -> +bonus=[60,0,95,0]
-```
-
-### 8. 100状态自动机（稀疏）
-
-```
-@auto_100
-s s=onehot(0,100)
-: step=transform(s;M=sparse(100x100;0,1=1 1,2=1 ... 98,99=1 99,99=1))
-? done s[99]>=1
-```
-
----
-
-## 测试
-
-```bash
-# 运行全部测试（约320项）
-pytest tests/ -v
-
-# 核心测试
-pytest tests/test_types.py tests/test_operations.py tests/test_program.py tests/test_dsl.py -v
-
-# 优化器测试（18项）
-pytest tests/test_optimizer.py -v
-
-# 后端测试（13项，未安装cupy/jax时跳过）
-pytest tests/test_backend.py -v
-
-# Tool-Use API测试（20项）
-pytest tests/test_api.py -v
-
-# 模块系统测试（18项）
-pytest tests/test_module.py -v
-
-# 加密概念验证测试（21项）
-pytest tests/test_encryption.py -v -s
-
-# 新操作测试 - step/branch/clamp/map（44项）
-pytest tests/test_new_ops.py -v
-
-# 分析器测试 - E/P覆盖率分析（7项）
-pytest tests/test_analyzer.py -v
-
-# 新操作基准测试 - Python vs C# vs Axol（15项）
-pytest tests/test_benchmark_new_ops.py -v -s
-
-# 服务器端点测试（13项，需安装fastapi）
-pytest tests/test_server.py -v
-
-# 性能报告（生成PERFORMANCE_REPORT.md）
-pytest tests/test_performance_report.py -v -s
-
-# Token成本对比
-pytest tests/test_token_cost.py -v -s
-
-# 三语言基准测试（Python vs C# vs Axol）
-pytest tests/test_benchmark_trilingual.py -v -s
-
-# 启动Web前端
-python -m axol.server   # http://localhost:8080
-```
-
-当前测试数量：**约320项**，全部通过（4项跳过：未安装cupy/jax）。
-
----
-
-## Phase 6: Quantum Axol
-
-Phase 6为Axol引入了**量子干涉** — 将非线性逻辑重新表达为线性矩阵运算，从而实现量子程序的**100%加密覆盖率**。同时引入了LLM无需任何加密知识即可使用的**加密透明Tool-Use API**。
-
-### 背景理论
-
-#### 核心问题
-
-Axol的加密基于**相似变换（similarity transformation）**：`M' = K⁻¹MK`。这对线性操作（`transform`、`gate`、`merge`、`distance`、`route`）完美适用，但对非线性操作（`step`、`branch`、`clamp`、`map`）则失败。因为非线性函数与线性密钥变换不可交换。
-
-这产生了一个根本性的权衡：
-
-| 程序类型 | 加密覆盖率 | 表达力 |
-|---------|----------|-------|
-| 仅线性操作（E） | 100% | 仅线性代数 |
-| 混合 E+P | 30-70% | 完全（含非线性） |
-| **量子操作（Phase 6）** | **100%** | **Grover级搜索、量子行走** |
-
-#### 解决方案：量子干涉
-
-核心洞察：**量子算法仅用纯线性操作就能实现看似非线性的行为**。例如Grover搜索在无条件分支的情况下以O(√N)时间找到标记项 — 仅使用矩阵乘法：
-
-1. **Hadamard**（H）：创建包含负振幅的均匀叠加态
-2. **Oracle**（O）：翻转标记项符号的对角矩阵（-1项）
-3. **Diffusion**（D）：围绕均值反射状态（2|s⟩⟨s| - I）
-
-三者都是**实正交矩阵** → 组合为 `state @ O @ D`，即简单的矩阵乘法链 — 与Axol的`TransformOp`（E-class）完全兼容。
-
-#### 为何有符号振幅就够了
-
-量子计算通常使用**复数**振幅（a + bi）。然而，包括Grover搜索和量子行走在内的许多有用量子算法仅需要**有符号实数**振幅。由于`FloatVec`已经支持负float32值，启用量子干涉的成本实质为零：
-
-| 层级 | 振幅类型 | 干涉水平 | 实现成本 | 算法 |
-|------|---------|---------|---------|------|
-| 0（Phase 6之前） | 非负实数 | 无 | — | 经典FSM |
-| **1（Phase 6）** | **有符号实数** | **Grover级** | **约0** | **Grover搜索、量子行走** |
-| 2（未来） | 复数（a+bi） | 完全相位 | 内存2倍、计算4倍 | Shor、QPE、QFT |
-
-#### 数学验证：N=4的Grover
-
-从均匀叠加 `|s⟩ = [0.5, 0.5, 0.5, 0.5]` 开始，目标索引3：
-
-```
-步骤1 — Oracle（标记索引3）：
-  O = diag(1, 1, 1, -1)
-  state = [0.5, 0.5, 0.5, -0.5]    ← 符号翻转产生干涉
-
-步骤2 — Diffusion（围绕均值反射）：
-  D = 2|s⟩⟨s| - I
-  state = [0, 0, 0, 1.0]           ← 目标处相长干涉
-
-结果：恰好1次迭代找到目标，概率 |1.0|² = 100%。
-```
-
-对于N=4，单次Oracle+Diffusion迭代实现**完美**判别。对于更大的N，最优迭代次数为 ⌊π/4 · √N⌋。
-
-### 架构
-
-#### 新组件
-
-```
-operations.py        program.py          dsl.py
-┌──────────────┐    ┌──────────────┐    ┌──────────────┐
-│ measure()    │    │ MeasureOp    │    │ measure()    │
-│ hadamard_m() │    │ (P-class)    │    │ hadamard()   │
-│ oracle_m()   │    │              │    │ oracle()     │
-│ diffusion_m()│    │ OpKind.      │    │ diffuse()    │
-│              │    │   MEASURE    │    │              │
-└──────┬───────┘    └──────┬───────┘    └──────┬───────┘
-       │                   │                   │
-       │    ┌──────────────┴──────────────┐    │
-       └───>│     现有TransformOp         │<───┘
-            │     (E-class，无需更改)      │
-            │     ↓ 优化器融合            │
-            │     ↓ 加密兼容             │
-            └─────────────────────────────┘
-```
-
-**核心设计决策**：Hadamard、Oracle和Diffusion**不是**新的操作类型。它们是生成`TransMatrix`对象的便捷函数，然后通过现有的`TransformOp`（E-class）使用。这意味着：
-
-- 现有的**优化器**自动融合连续量子操作（如：Oracle @ Diffusion → 单一矩阵）
-- 现有的**加密模块**通过相似变换自动加密量子操作
-- 现有的**分析器**对纯量子程序正确报告100%覆盖率
-
-仅`measure`是真正的新操作（P-class），因为Born规则 `p_i = |α_i|²` 是非线性的。但`measure`仅在**最后应用一次** — 所有中间计算都在完全加密状态下运行。
-
-#### 量子程序的加密管线
-
-```
-客户端：                         服务端（加密）：
-
-  [0.5, 0.5, 0.5, 0.5]        [加密状态]
-         │                            │
-    encrypt(state, K)          state @ O' @ D' @ O' @ D' ...
-         │                            │
-         └──────────────>       [加密结果]
-                                      │
-    decrypt(result, K)  <─────────────┘
-         │
-  [0, 0, 0, 1.0]              所有O', D'都是E-class！
-         │
-    measure() ← 客户端（P-class，不发送到服务端）
-         │
-  [0, 0, 0, 1.0] → 答案 = 索引3
-```
-
-### 预期性能
-
-#### 加密覆盖率
-
-| 程序 | Phase 6之前 | Phase 6之后 | 变化 |
-|------|-----------|-----------|------|
-| 纯线性（仅transform） | 100% | 100% | — |
-| 混合（transform + branch + map） | 30-70% | 30-70% | — |
-| **量子搜索（oracle + diffuse）** | **不适用** | **100%** | **新增** |
-| **量子 + 测量** | **不适用** | **67-100%** | **新增** |
-
-#### Grover搜索复杂度
-
-| 搜索空间（N） | 经典（线性扫描） | Grover（Axol） | 加速 |
-|-------------|-----------------|---------------|------|
-| 4 | 4次比较 | 1次迭代（2次矩阵乘） | 2倍 |
-| 16 | 16次比较 | 3次迭代（6次矩阵乘） | 2.7倍 |
-| 64 | 64次比较 | 6次迭代（12次矩阵乘） | 5.3倍 |
-| 256 | 256次比较 | 12次迭代（24次矩阵乘） | 10.7倍 |
-| 1024 | 1024次比较 | 25次迭代（50次矩阵乘） | 20.5倍 |
-| N | O(N) | O(√N) | O(√N) |
-
-每次"迭代"是2次矩阵乘（Oracle + Diffusion），两者都是E-class。
-
-#### Tool-Use API Token效率
-
-加密透明API从LLM的视角消除了所有加密样板代码：
-
-| 任务 | Python + FHE | Axol Tool-Use API | Token节省 |
-|------|-------------|-------------------|----------|
-| 加密分支 | 约150 token | 约30 token | **80%** |
-| 加密状态机 | 约200 token | 约35 token | **82%** |
-| 加密Grover搜索 | 约250 token | 约25 token | **90%** |
-| 加密量子行走 | 约300 token | 约30 token | **90%** |
-
-**为何节省如此之大**：使用Python+FHE时，LLM必须生成密钥生成、加密、电路编译、加密执行和解密代码。使用Axol的Tool-Use API只需发送：
-
-```json
-{"action": "quantum_search", "n": 256, "marked": [42], "encrypt": true}
-```
-
-API在内部处理密钥生成、程序构建、加密、执行、解密和测量。
-
-### 差异化优势
-
-#### Axol vs. 现有方案
-
-| 属性 | Python（普通） | Python + FHE | Python + TEE | Axol + Quantum |
-|------|-------------|-------------|-------------|---------------|
-| **加密范围** | 无 | 100%（任意计算） | 100%（硬件） | 100%（量子操作）/ 30-70%（混合） |
-| **性能开销** | — | 1,000-10,000倍 | 约0% | 约0%（管线模式） |
-| **需要硬件** | 无 | 无 | SGX/TrustZone飞地 | 无 |
-| **LLM需要加密知识** | — | 是（compile, keygen, encrypt, decrypt） | 否（基础设施级） | **否（API处理）** |
-| **LLM Token成本** | 约70 token | 约200 token | 约70 token + 基础设施 | **约25-30 token** |
-| **纯软件** | 是 | 是 | 否 | **是** |
-
-**Axol的独特定位**：结合了FHE的软件级加密 + TEE的透明性（LLM不知道加密存在）+ FHE和TEE都不提供的Tool-Use API效率。
-
-#### 为什么不直接用FHE？
-
-全同态加密（FHE）支持对加密数据进行**任意**计算 — 严格来说比Axol更强大的模型。但是：
-
-1. **性能**：FHE产生1,000-10,000倍的开销。Axol的相似变换对线性操作的开销约为0%。
-2. **LLM复杂度**：FHE需要LLM生成编译、密钥生成和加密代码（约200 token）。Axol的API只需约25 token。
-3. **实用范围**：许多AI智能体任务（状态机、搜索、路由、评分）本质上是线性的。量子干涉将此扩展到搜索问题。剩余的非线性情况（激活函数、截断）可以隔离到客户端后处理。
-
-#### 为什么不直接用TEE？
-
-可信执行环境（Intel SGX、ARM TrustZone）以零性能开销提供硬件级加密。但是：
-
-1. **硬件依赖**：TEE需要特定的CPU功能。Axol在任何有NumPy的机器上都能运行。
-2. **供应链信任**：TEE的安全性依赖于对硬件供应商的信任。Axol的安全性是纯数学的。
-3. **粒度**：TEE是全有或全无（整个飞地都受保护）。Axol的分析器精确显示哪些操作被加密，支持有据可依的权衡决策。
-
-### DSL示例
-
-#### Grover搜索（明文）
-
-```
-@grover_4
-s state=[0.5 0.5 0.5 0.5]
-: oracle=oracle(state;marked=[3];n=4)
-: diffuse=diffuse(state;n=4)
-? found state[3]>=0.9
-```
-
-结果：1次迭代以100%概率找到目标索引3。
-
-#### Grover搜索（加密管线）
-
-```
-@grover_encrypted
-s state=[0.5 0.5 0.5 0.5]
-: oracle=oracle(state;marked=[3];n=4)
-: diffuse=diffuse(state;n=4)
-```
-
-无终止条件 — 管线模式确保所有操作为E-class。
-客户端解密后在本地应用`measure()`。
-
-#### Tool-Use API（零加密知识）
-
-```json
-{"action": "quantum_search", "n": 256, "marked": [42], "encrypt": true}
-→ {"found_index": 42, "probability": 0.996, "iterations": 12, "encrypted": true}
-
-{"action": "encrypted_run",
- "source": "@prog\ns state=[0.5 0.5 0.5 0.5]\n: o=oracle(state;marked=[3];n=4)\n: d=diffuse(state;n=4)",
- "dim": 4}
-→ {"final_state": {"state": [0.0, 0.0, 0.0, 1.0]}, "encrypted": true}
-```
-
-### 测试覆盖
-
-`tests/test_quantum.py`中37项测试，按类别组织：
-
-| 类别 | 测试数 | 验证内容 |
-|------|-------|---------|
-| 单元：Hadamard | 4 | 正交性（H@H^T=I）、负元素、2的幂验证 |
-| 单元：Oracle | 3 | 正确的符号翻转、多个标记索引、空时为单位矩阵 |
-| 单元：Diffusion | 2 | 正交性（D@D^T=I）、负元素 |
-| 单元：Measure | 5 | Born规则、负振幅不变性、归一化、零向量 |
-| 集成：Grover | 5 | N=4（1次）、N=8（2次）、加密管线、终止警告、量子行走 |
-| 分析器 | 2 | 纯量子100%覆盖率、measure的P-class |
-| DSL解析 | 8 | measure、hadamard、oracle、diffuse解析 + 错误情况 |
-| 优化器 | 2 | Oracle+Diffuse融合、融合正确性 |
-| API | 6 | encrypted_run、quantum_search（明文/加密/N=8）、错误处理 |
-
-```bash
-# 运行所有量子测试
-pytest tests/test_quantum.py -v -s
-
-# 运行特定类别
-pytest tests/test_quantum.py::TestGrover -v -s
-pytest tests/test_quantum.py::TestQuantumAnalyzer -v -s
-pytest tests/test_quantum.py::TestAPI -v -s
-```
-
-### 层级路线图
-
-| 层级 | 状态 | 振幅 | 算法 | 加密 |
-|------|------|------|------|------|
-| 0 | Phase 1-5 | 非负实数 | 经典FSM、路由 | 30-100%（混合E/P） |
-| 1 | Phase 6 | 有符号实数 | Grover搜索、量子行走 | 100%（E-class） |
-| **2** | **Phase 8（当前）** | **混沌理论基础** | **Declare->Weave->Observe、Lyapunov/分形** | **Omega/Phi质量指标** |
-| 3 | 未来 | 复数（a+bi） | Shor、QPE、QFT | 100%（复酉矩阵） |
-
----
-
-## 路线图
-
-- [x] Phase 1：类型系统（7种向量类型 + StateBundle）
-- [x] Phase 1：5个原语操作
-- [x] Phase 1：程序执行引擎（管道 + 循环模式）
-- [x] Phase 1：状态验证框架
-- [x] Phase 2：DSL解析器（完整语法支持）
-- [x] Phase 2：稀疏矩阵表示法
-- [x] Phase 2：Token成本基准测试（Python、C#、Axol）
-- [x] Phase 2：矩阵加密概念验证（全部5个操作已验证，21项测试）
-- [x] Phase 3：编译器优化（变换融合、死状态消除、常量折叠）
-- [x] Phase 3：GPU后端（numpy/cupy/jax可插拔）
-- [x] Phase 4：AI智能体Tool-Use API（parse/run/inspect/verify/list_ops）
-- [x] Phase 4：加密模块（encrypt_program、decrypt_state）
-- [x] Phase 5：模块系统（注册表、import/use DSL、compose、schema验证）
-- [x] 前端：FastAPI + 原生HTML/JS可视化调试器（追踪查看器、状态图表、加密演示）
-- [x] 性能基准测试（token成本、运行时扩展性、优化器效果、加密开销）
-- [x] Phase 6：量子干涉（有符号振幅、Hadamard/Oracle/Diffusion矩阵、测量操作）
-- [x] Phase 6：量子程序100%加密覆盖率（除最终测量外所有操作均为E-class）
-- [x] Phase 6：加密透明Tool-Use API（encrypted_run、quantum_search — LLM无需加密知识）
-- [x] Phase 7：KeyFamily — 从单一种子确定性派生多维度密钥
-- [x] Phase 7：矩形矩阵加密（通过KeyFamily实现N→M维度变换）
-- [x] Phase 7：函数→矩阵编译器（fn_to_matrix、truth_table_to_matrix）
-- [x] Phase 7：填充层 — 维度隐藏双重加密（统一max_dim）
-- [x] Phase 7：分支→变换编译（BranchOp → 加密对角TransformOp）
-- [x] Phase 7：AxolClient SDK — 客户端加密、服务器计算架构
-- [x] Phase 8：混沌理论量子模块（`axol/quantum/`）— Declare -> Weave -> Observe 管道
-- [x] Phase 8：Lyapunov指数估计（Benettin QR方法）+ Omega = 1/(1+max(lambda,0))
-- [x] Phase 8：分形维度估计（盒计数/相关维度）+ Phi = 1/(1+D/D_max)
-- [x] Phase 8：织机（weaver）— 从声明构建基于吸引子的Tapestry
-- [x] Phase 8：观测所（observatory）— 单次/重复观测实现质量提升
-- [x] Phase 8：合成规则（串行：lambda求和，并行：min/max规则）
-- [x] Phase 8：纠缠成本估算 + 不可达检测
-- [x] Phase 8：量子DSL解析器（entangle/observe/reobserve/if块）
-- [x] Phase 8：101项新测试（总计545项通过，0项失败）
-
----
-
-## Phase 8: 混沌理论量子模块
-
-Phase 8将AXOL的理论基础（THEORY.md）用**混沌理论**形式化，并将**Declare -> Weave -> Observe**管道实现为可执行代码。它在不修改现有`axol/core`引擎的情况下进行复用，作为独立的`axol/quantum/`包实现。
-
-### 核心映射
-
-| AXOL概念 | 混沌理论 | 公式 |
-|---|---|---|
-| Tapestry（织物） | 奇异吸引子 (Strange Attractor) | 相空间中的紧致不变集 |
-| Omega（结合度） | Lyapunov稳定性 | `1/(1+max(lambda,0))` |
-| Phi（清晰度） | 分形维度倒数 | `1/(1+D/D_max)` |
-| Weave（织造） | 吸引子构建 | 迭代映射的轨迹矩阵 |
-| Observe（观测） | 吸引子上的点坍缩 | 时间复杂度 O(D) |
-| 纠缠范围 | 吸引域 (Basin of Attraction) | 收敛区域的边界 |
-
-### 管道
-
-```
-[Declare]                    [Weave]                       [Observe]
-关系声明 + 质量目标       ->  吸引子构建 + 成本估算       ->  输入 -> 即时坍缩
-entangle search(q, db)        weave(declaration)              observe(tapestry, inputs)
-  @ Omega(0.9) Phi(0.7)        -> Tapestry                     -> Observation
-  { relevance <~> ... }        + WeaverReport                   + Omega, Phi
-```
-
-### 质量指标
-
-```
-        Phi（清晰度）
-        ^
-   1.0  |  锐利但不稳定         理想（强纠缠）
-        |
-   0.0  |  噪声                 稳定但模糊
-        +-----------------------------> Omega（结合度）
-       0.0                             1.0
-```
-
-### 合成规则
-
-| 模式 | lambda | Omega | D | Phi |
-|------|--------|-------|---|-----|
-| 串行 | lambda_A + lambda_B | 1/(1+max(sum,0)) | D_A + D_B | Phi_A * Phi_B |
-| 并行 | max(lambda_A, lambda_B) | min(Omega_A, Omega_B) | max(D_A, D_B) | min(Phi_A, Phi_B) |
-
-### DSL语法
+### 完整管道（DSL）
 
 ```
 entangle search(query: float[64], db: float[64]) @ Omega(0.9) Phi(0.7) {
@@ -1531,93 +219,693 @@ if result.Omega < 0.95 {
 }
 ```
 
-### 使用示例
+---
+
+## 质量指标
+
+AXOL在两个独立的轴上衡量计算质量：
+
+```
+        Phi（清晰度）
+        ^
+   1.0  |  锐利但不稳定         理想（强纠缠）
+        |
+   0.0  |  噪声                 稳定但模糊
+        +-----------------------------> Omega（结合度）
+       0.0                             1.0
+```
+
+### Omega — 结合度（有多稳定？）
+
+由**最大Lyapunov指数**（lambda）推导：
+
+```
+Omega = 1 / (1 + max(lambda, 0))
+```
+
+| lambda | 含义 | Omega |
+|--------|------|-------|
+| lambda < 0 | 收敛系统（稳定） | 1.0 |
+| lambda = 0 | 中性稳定 | 1.0 |
+| lambda = 0.91 | Lorenz级混沌 | 0.52 |
+| lambda = 2.0 | 强混沌 | 0.33 |
+
+**解读**：Omega = 1.0意味着重复观测总是给出相同结果。Omega < 1.0意味着混沌敏感性——微小的输入变化会导致不同的输出。
+
+### Phi — 清晰度（有多锐利？）
+
+由吸引子的**分形维度**（D）推导：
+
+```
+Phi = 1 / (1 + D / D_max)
+```
+
+| D | D_max | 含义 | Phi |
+|---|-------|------|-----|
+| 0 | 任意 | 点（delta分布） | 1.0 |
+| 1 | 4 | 线性吸引子 | 0.80 |
+| 2.06 | 3 | Lorenz吸引子 | 0.59 |
+| D_max | D_max | 填满整个相空间 | 0.50 |
+
+**解读**：Phi = 1.0意味着输出是一个锐利、确定的值。Phi → 0.0意味着输出分散在多种可能性中（噪声）。
+
+### 两个指标都可组合
+
+质量指标通过组合进行传播——参见[组合规则](#组合规则)。
+
+---
+
+## 混沌理论基础
+
+AXOL的理论基础将其概念映射到成熟的混沌理论：
+
+| AXOL概念 | 混沌理论 | 数学对象 |
+|----------|---------|---------|
+| Tapestry | 奇异吸引子 | 相空间中的紧致不变集 |
+| Omega（结合度） | Lyapunov稳定性 | `1/(1+max(lambda,0))` |
+| Phi（清晰度） | 分形维度倒数 | `1/(1+D/D_max)` |
+| Weave | 吸引子构建 | 迭代映射的轨迹矩阵 |
+| Observe | 吸引子上的点坍缩 | 时间复杂度O(D) |
+| 纠缠范围 | 吸引域 | 收敛区域的边界 |
+| 纠缠成本 | 收敛迭代次数 | `E = sum_path(iterations * complexity)` |
+| 观测后复用 | 吸引子稳定性 | lambda < 0: 可复用, lambda > 0: 需重新织造 |
+
+### Lyapunov指数估计
+
+使用**Benettin QR分解方法**从轨迹矩阵估计最大Lyapunov指数。
+
+- **收缩系统**（lambda < 0）：可预测，Omega趋近1.0
+- **中性系统**（lambda = 0）：混沌边缘
+- **混沌系统**（lambda > 0）：对初始条件敏感，Omega < 1.0
+
+估计精度已通过已知系统验证（平均误差：0.0002）。
+
+### 分形维度估计
+
+两种可用方法：
+
+- **盒计数法**：基于网格，对ln(N) vs ln(1/epsilon)进行回归
+- **相关维度**（Grassberger-Procaccia）：成对距离分析
+
+已通过已知几何体验证：线段（D=1）、Cantor集（D~0.63）、Sierpinski三角形（D~1.58）。
+
+### 完整理论文档
+
+- [THEORY.md](THEORY.md) — 基础理论（时间轴否定、基于纠缠的计算）
+- [THEORY_MATH.md](THEORY_MATH.md) — 混沌理论形式化（Lyapunov、分形、组合证明）
+
+---
+
+## 组合规则
+
+当组合多个Tapestry时，质量指标按照严格的数学规则传播：
+
+### 串行组合（A → B）
+
+```
+lambda_total = lambda_A + lambda_B          （指数累加）
+Omega_total  = 1/(1+max(lambda_total, 0))   （Omega退化）
+D_total      = D_A + D_B                    （维度求和）
+Phi_total    = Phi_A * Phi_B                （Phi相乘——总是退化）
+```
+
+### 并行组合（A || B）
+
+```
+lambda_total = max(lambda_A, lambda_B)      （最弱环节）
+Omega_total  = min(Omega_A, Omega_B)        （最弱环节）
+D_total      = max(D_A, D_B)               （最复杂）
+Phi_total    = min(Phi_A, Phi_B)            （最不清晰）
+```
+
+### 复用规则
+
+```
+lambda < 0  →  观测后可复用（吸引子稳定）
+lambda > 0  →  观测后需重新织造（混沌——吸引子被扰乱）
+```
+
+### 汇总表
+
+| 模式 | lambda | Omega | D | Phi |
+|------|--------|-------|---|-----|
+| 串行 | sum | 1/(1+max(sum,0)) | sum | product |
+| 并行 | max | min | max | min |
+
+---
+
+## 量子DSL
+
+### 语法概览
+
+```
+entangle NAME(PARAM: TYPE[DIM], ...) @ Omega(X) Phi(Y) {
+    TARGET <OP> SOURCE_EXPRESSION
+    ...
+}
+
+result = observe NAME(args...)
+result = reobserve NAME(args...) x COUNT
+
+if result.FIELD OP VALUE {
+    ...
+}
+```
+
+### 关系运算符
+
+| 运算符 | 名称 | 含义 |
+|--------|------|------|
+| `<~>` | 正比 | 线性相关 |
+| `<+>` | 加法 | 加权和 |
+| `<*>` | 乘法 | 乘积关系 |
+| `<!>` | 反比 | 反向相关 |
+| `<?>` | 条件 | 上下文相关 |
+
+### 示例
+
+#### 简单搜索
+
+```
+entangle search(query: float[64], db: float[64]) @ Omega(0.9) Phi(0.7) {
+    relevance <~> similarity(query, db)
+    ranking <~> relevance
+}
+result = observe search(query_vec, db_vec)
+```
+
+#### 多阶段管道
+
+```
+entangle analyze(data: float[128], model: float[128]) @ Omega(0.85) Phi(0.8) {
+    features <~> extract(data)
+    prediction <~> apply(features, model)
+    confidence <+> validate(prediction, data)
+}
+
+result = observe analyze(data_vec, model_vec)
+
+if result.Omega < 0.9 {
+    result = reobserve analyze(data_vec, model_vec) x 20
+}
+```
+
+#### 分类
+
+```
+entangle classify(input: float[32]) @ Omega(0.95) Phi(0.9) {
+    category <~> classify(input)
+}
+result = observe classify(input_vec)
+```
+
+---
+
+## 性能
+
+### Token效率 — 量子DSL vs Python
+
+使用`tiktoken` cl100k_base分词器测量。
+
+| 程序 | Python Token数 | DSL Token数 | 节省 |
+|------|:------------:|:----------:|:------:|
+| search | 173 | 57 | **67%** |
+| classify | 129 | 39 | **70%** |
+| pipeline | 210 | 73 | **65%** |
+| multi_input | 191 | 74 | **61%** |
+| reobserve_pattern | 131 | 62 | **53%** |
+| **合计** | **834** | **305** | **63%** |
+
+### Token效率 — 基础DSL vs Python vs C#
+
+| 程序 | Python | C# | Axol DSL | vs Python | vs C# |
+|------|:------:|:--:|:--------:|:---------:|:-----:|
+| Counter | 32 | 61 | 33 | -3% | 46% |
+| State Machine | 67 | 147 | 48 | 28% | 67% |
+| Combat Pipeline | 145 | 203 | 66 | 55% | 68% |
+| 100-State Automaton | 739 | 869 | 636 | 14% | 27% |
+
+### 精度
+
+| 指标 | 值 |
+|------|-----|
+| Lyapunov估计平均误差 | **0.0002** |
+| Omega公式误差 | **0**（精确） |
+| Phi公式误差 | **0**（精确） |
+| 组合规则 | **全部通过** |
+| 观测一致性（50次重复） | **1.0000** |
+
+### 速度
+
+| 操作 | 时间 |
+|------|------|
+| DSL解析（简单） | ~25 us |
+| DSL解析（完整程序） | ~62 us |
+| 成本估算 | ~40 us |
+| 单次观测 | ~300 us |
+| Weave（2节点，dim=8） | ~14 ms |
+| Reobserve x10 | ~14 ms |
+| **完整管道**（解析→织造→观测，dim=16） | **~17 ms** |
+
+### 扩展性
+
+| 节点数 | 维度 | 织造时间 |
+|:-----:|:----:|:------:|
+| 1 | 8 | 9 ms |
+| 4 | 8 | 25 ms |
+| 16 | 8 | 108 ms |
+| 2 | 4 | 12 ms |
+| 2 | 64 | 39 ms |
+
+完整基准数据：[QUANTUM_PERFORMANCE_REPORT.md](QUANTUM_PERFORMANCE_REPORT.md) | [PERFORMANCE_REPORT.md](PERFORMANCE_REPORT.md)
+
+---
+
+## 基础层
+
+量子模块（`axol/quantum/`）构建在基础层（`axol/core/`）之上，不对其进行修改。基础层提供数学引擎：向量类型、矩阵操作、程序执行、加密和优化。
+
+### 9个原语操作
+
+| 操作 | 安全等级 | 数学基础 | 描述 |
+|------|:--------:|---------|------|
+| `transform` | **E** | 矩阵乘法：`v @ M` | 线性状态变换 |
+| `gate` | **E** | Hadamard积：`v * g` | 条件遮蔽 |
+| `merge` | **E** | 加权和：`sum(v_i * w_i)` | 向量组合 |
+| `distance` | **E** | L2 / cosine / dot | 相似度度量 |
+| `route` | **E** | `argmax(v @ R)` | 离散分支 |
+| `step` | **P** | `where(v >= t, 1, 0)` | 阈值转二值门 |
+| `branch` | **P** | `where(g, then, else)` | 条件向量选择 |
+| `clamp` | **P** | `clip(v, min, max)` | 值域限制 |
+| `map` | **P** | `f(v)` 逐元素 | 非线性激活 |
+
+5个**E**（加密）操作可通过相似变换在加密数据上运行。4个**P**（明文）操作增加非线性表达能力。
+
+### 矩阵加密（Shadow AI）
+
+Axol中的所有计算都归约为矩阵乘法（`v @ M`）。这使得**相似变换加密**成为可能：
+
+```
+M' = K^(-1) @ M @ K     （加密后的运算矩阵）
+state' = state @ K       （加密后的初始状态）
+result = result' @ K^(-1)（解密后的输出）
+```
+
+- 加密程序在加密域中正确运行
+- 所有业务逻辑被隐藏——矩阵表现为随机噪声
+- 这不是混淆——而是密码学变换
+- 全部5个E操作已验证（`tests/test_encryption.py`中21项测试）
+
+### 明文操作与安全分类
+
+每个操作都携带一个`SecurityLevel`（E或P）。内置分析器可报告加密覆盖率：
 
 ```python
-from axol.quantum import DeclarationBuilder, RelationKind, weave, observe
+from axol.core import parse, analyze
+
+result = analyze(program)
+print(result.summary())
+# Program: damage_calc
+# Transitions: 3 total, 1 encrypted (E), 2 plaintext (P)
+# Coverage: 33.3%
+```
+
+### 编译器优化器
+
+三遍优化：变换融合、死状态消除、常量折叠。
+
+```python
+from axol.core import parse, optimize, run_program
+
+program = parse(source)
+optimized = optimize(program)
+result = run_program(optimized)
+```
+
+### GPU后端
+
+可插拔数组后端：`numpy`（默认）、`cupy`（NVIDIA GPU）、`jax`。
+
+```python
+from axol.core import set_backend
+set_backend("cupy")   # NVIDIA GPU
+set_backend("jax")    # Google JAX
+```
+
+### 模块系统
+
+可复用、可组合的程序，支持schema、导入和子模块执行。
+
+```
+@main
+import damage_calc from "damage_calc.axol"
+s atk=[50] def_val=[10]
+: calc=use(damage_calc;in=atk,def_val;out=dmg)
+```
+
+### 量子干涉（Phase 6）
+
+Phase 6引入了量子干涉——Grover搜索、量子行走——实现量子程序的**100%加密覆盖率**。Hadamard、Oracle和Diffusion生成`TransMatrix`对象，通过`TransformOp`（E-class）使用，因此现有的优化器和加密模块自动兼容。
+
+```
+@grover_4
+s state=[0.5 0.5 0.5 0.5]
+: oracle=oracle(state;marked=[3];n=4)
+: diffuse=diffuse(state;n=4)
+? found state[3]>=0.9
+```
+
+### 客户端-服务器架构
+
+在客户端加密，在不受信任的服务器上计算：
+
+```
+Client (key)              Server (no key)
+  Program ─── encrypt ──► Encrypted Program
+  pad_and_encrypt()       run_program() on noise
+                    ◄──── Encrypted Result
+  decrypt_result()
+  ──► Result
+```
+
+关键组件：`KeyFamily(seed)`、`fn_to_matrix()`、`pad_and_encrypt()`、`AxolClient` SDK。
+
+---
+
+## 架构
+
+```
+                    ┌─────────────────────────────────────────────┐
+                    │            axol/quantum/                     │
+                    │                                             │
+  Quantum DSL ──►  │  dsl.py ──► declare.py ──► weaver.py ──►   │
+  (entangle,       │               │              │   │          │
+   observe,        │  types.py   cost.py    lyapunov.py          │
+   reobserve)      │               │        fractal.py           │
+                    │           compose.py                        │
+                    │               │                             │
+                    │           observatory.py ──► Observation    │
+                    └──────────────┬──────────────────────────────┘
+                                   │ 复用
+                    ┌──────────────┴──────────────────────────────┐
+                    │            axol/core/                        │
+                    │                                             │
+  Foundation DSL ►  │  dsl.py ──► program.py ──► operations.py   │
+  (@prog,           │              │              │               │
+   s/:/?)           │  types.py  optimizer.py  backend.py        │
+                    │              │              (numpy/cupy/jax) │
+                    │  encryption.py  analyzer.py  module.py      │
+                    └──────────────┬──────────────────────────────┘
+                                   │
+                    ┌──────────────┴──────────────────────────────┐
+                    │            axol/api/ + axol/server/          │
+                    │  Tool-Use API    FastAPI + HTML/JS调试器     │
+                    └─────────────────────────────────────────────┘
+```
+
+### 内部引擎复用
+
+量子模块在不修改`axol/core`的情况下复用它：
+
+| 量子概念 | 核心实现 |
+|----------|---------|
+| 吸引子振幅/轨迹 | `FloatVec` |
+| 吸引子相关矩阵 | `TransMatrix` |
+| Tapestry内部执行 | `Program` + `run_program()` |
+| Born规则概率 | `operations.measure()` |
+| Weave变换构建 | `TransformOp`、`MergeOp` |
+| 吸引子探索扩散 | `hadamard_matrix()`、`diffusion_matrix()` |
+
+---
+
+## 快速开始
+
+### 安装
+
+```bash
+git clone https://github.com/your-username/AXOL.git
+cd AXOL
+pip install -e ".[dev]"
+```
+
+### 环境要求
+
+- Python 3.11+
+- NumPy >= 1.24.0
+- pytest >= 7.4.0（开发用）
+- tiktoken >= 0.5.0（开发用，token分析）
+- fastapi >= 0.100.0、uvicorn >= 0.23.0（可选，Web前端）
+- cupy-cuda12x >= 12.0.0（可选，GPU加速）
+- jax[cpu] >= 0.4.0（可选，JAX后端）
+
+### Hello World — 量子DSL（Declare → Weave → Observe）
+
+```python
+from axol.quantum import (
+    DeclarationBuilder, RelationKind,
+    weave, observe, parse_quantum,
+)
 from axol.core.types import FloatVec
 
+# 方式1：Python API
+decl = (
+    DeclarationBuilder("hello")
+    .input("x", 4)
+    .relate("y", ["x"], RelationKind.PROPORTIONAL)
+    .output("y")
+    .quality(0.9, 0.8)
+    .build()
+)
+
+tapestry = weave(decl, seed=42)
+result = observe(tapestry, {"x": FloatVec.from_list([1, 0, 0, 0])})
+print(f"Omega: {result.omega:.2f}, Phi: {result.phi:.2f}")
+
+# 方式2：DSL
+program = parse_quantum("""
+entangle hello(x: float[4]) @ Omega(0.9) Phi(0.8) {
+    y <~> transform(x)
+}
+""")
+```
+
+### Hello World — 基础DSL（向量操作）
+
+```python
+from axol.core import parse, run_program
+
+source = """
+@counter
+s count=[0] one=[1]
+: increment=merge(count one;w=[1 1])->count
+? done count>=5
+"""
+
+program = parse(source)
+result = run_program(program)
+print(f"Final count: {result.final_state['count'].to_list()}")  # [5.0]
+```
+
+---
+
+## API参考
+
+### 量子模块（`axol.quantum`）
+
+```python
 # 声明
+DeclarationBuilder(name)           # 用于构建声明的Fluent API
+  .input(name, dim, labels?)       # 添加输入
+  .output(name)                    # 标记输出
+  .relate(target, sources, kind)   # 添加关系
+  .quality(omega, phi)             # 设定质量目标
+  .build() -> EntangleDeclaration
+
+# 织造
+weave(declaration, encrypt?, seed?, optimize?) -> Tapestry
+
+# 观测
+observe(tapestry, inputs, seed?) -> Observation
+reobserve(tapestry, inputs, count, seed?) -> Observation
+
+# DSL
+parse_quantum(source) -> QuantumProgram
+
+# Lyapunov
+estimate_lyapunov(trajectory_matrix, steps?) -> float
+lyapunov_spectrum(trajectory_matrix, dim, steps?) -> list[float]
+omega_from_lyapunov(lyapunov) -> float
+
+# 分形
+estimate_fractal_dim(attractor_points, method?, phase_space_dim?) -> float
+phi_from_fractal(fractal_dim, phase_space_dim) -> float
+phi_from_entropy(probs) -> float
+
+# 组合
+compose_serial(omega_a, phi_a, lambda_a, d_a, ...) -> tuple
+compose_parallel(omega_a, phi_a, lambda_a, d_a, ...) -> tuple
+can_reuse_after_observe(lyapunov) -> bool
+
+# 成本
+estimate_cost(declaration) -> CostEstimate
+```
+
+### 核心类型
+
+| 类型 | 描述 |
+|------|------|
+| `SuperposedState` | 具有振幅、标签和Born规则概率的命名状态 |
+| `Attractor` | 具有Lyapunov谱、分形维度和轨迹矩阵的奇异吸引子 |
+| `Tapestry` | 由`TapestryNode`组成的图，包含全局吸引子和织造报告 |
+| `Observation` | 坍缩结果，包含值、Omega、Phi和概率 |
+| `WeaverReport` | 目标vs达成的质量、可行性、成本明细 |
+| `CostEstimate` | 每节点成本、关键路径、最大可达Omega/Phi |
+| `FloatVec` | 32位浮点向量 |
+| `TransMatrix` | M x N float32矩阵 |
+| `StateBundle` | 命名向量集合 |
+| `Program` | 可执行转移序列 |
+
+### 基础模块（`axol.core`）
+
+```python
+parse(source) -> Program
+run_program(program) -> ExecutionResult
+optimize(program) -> Program
+set_backend(name)    # "numpy" | "cupy" | "jax"
+analyze(program) -> AnalysisResult
+dispatch(request) -> dict    # Tool-Use API
+```
+
+---
+
+## 示例
+
+### 1. Declare → Weave → Observe（完整管道）
+
+```python
+from axol.quantum import *
+from axol.core.types import FloatVec
+
 decl = (
     DeclarationBuilder("search")
     .input("query", 64)
     .input("db", 64)
     .relate("relevance", ["query", "db"], RelationKind.PROPORTIONAL)
-    .output("relevance")
+    .relate("ranking", ["relevance"], RelationKind.PROPORTIONAL)
+    .output("ranking")
     .quality(0.9, 0.7)
     .build()
 )
 
-# 织造
 tapestry = weave(decl, seed=42)
-print(f"Omega: {tapestry.weaver_report.estimated_omega:.2f}")
-print(f"Phi: {tapestry.weaver_report.estimated_phi:.2f}")
-
-# 观测
-result = observe(tapestry, {"query": FloatVec.zeros(64), "db": FloatVec.zeros(64)})
-print(f"Result Omega: {result.omega:.2f}, Phi: {result.phi:.2f}")
+result = observe(tapestry, {
+    "query": FloatVec.zeros(64),
+    "db": FloatVec.ones(64),
+})
+print(f"Omega={result.omega:.2f}, Phi={result.phi:.2f}")
 ```
 
-### 测试
+### 2. 量子DSL往返
 
-```bash
-# 仅运行新量子模块测试
-pytest tests/test_quantum_*.py tests/test_lyapunov.py tests/test_fractal.py tests/test_compose.py -v
+```python
+from axol.quantum import parse_quantum, weave, observe
+from axol.core.types import FloatVec
 
-# 完整测试套件（现有 + 新增）
-pytest tests/ -v
-# 545 passed, 0 failed, 4 skipped
+prog = parse_quantum("""
+entangle classify(input: float[32]) @ Omega(0.95) Phi(0.9) {
+    category <~> classify(input)
+}
+result = observe classify(input_vec)
+""")
+
+tapestry = weave(prog.declarations[0], seed=0)
+result = observe(tapestry, {"input": FloatVec.zeros(32)})
+```
+
+### 3. 状态机（基础DSL）
+
+```
+@state_machine
+s state=onehot(0,3)
+: advance=transform(state;M=[0 1 0;0 0 1;0 0 1])
+? done state[2]>=1
+```
+
+### 4. Grover搜索（量子干涉）
+
+```
+@grover_4
+s state=[0.5 0.5 0.5 0.5]
+: oracle=oracle(state;marked=[3];n=4)
+: diffuse=diffuse(state;n=4)
+? found state[3]>=0.9
+```
+
+### 5. 加密执行
+
+```python
+from axol.core import parse, run_program
+from axol.core.encryption import encrypt_program, decrypt_state
+
+program = parse("@test\ns v=[1 0 0]\n: t=transform(v;M=[0 1 0;0 0 1;1 0 0])")
+encrypted, key = encrypt_program(program)
+result = run_program(encrypted)
+decrypted = decrypt_state(result.final_state, key)
 ```
 
 ---
 
-## 客户端-服务器架构
+## 测试套件
 
-Phase 7引入了客户端加密、不受信任服务器计算的分离架构：
+```bash
+# 完整测试套件（545项测试）
+pytest tests/ -v
 
-```
-┌─────────────────┐         ┌─────────────────────┐
-│  客户端（密钥）   │         │  服务器（无密钥）     │
-│                 │         │                      │
-│  程序 ──────────►│  加密   │  加密程序             │
-│  fn_to_matrix() │────────►│  run_program()       │
-│  pad_and_encrypt│         │  （对噪声执行计算）   │
-│                 │◄────────│  加密结果             │
-│  decrypt_result │  解密   │                      │
-│  ──────► 结果   │         │                      │
-└─────────────────┘         └─────────────────────┘
-```
+# 量子模块测试（101项）
+pytest tests/test_quantum_*.py tests/test_lyapunov.py tests/test_fractal.py tests/test_compose.py -v
 
-### 关键组件
+# 性能基准测试（生成报告）
+pytest tests/test_quantum_performance.py -v -s
+pytest tests/test_performance_report.py -v -s
 
-| 组件 | 说明 |
-|------|------|
-| `KeyFamily(seed)` | 从单一种子派生所有维度的正交密钥 |
-| `fn_to_matrix(fn, N, M)` | 将Python函数编译为变换矩阵 |
-| `encrypt_matrix_rect(M, kf)` | 加密N×M矩形矩阵 |
-| `pad_and_encrypt(prog, kf, max_dim)` | 将所有维度填充至max_dim后加密 |
-| `AxolClient(seed, max_dim)` | 高层SDK：prepare → 发送 → decrypt |
+# 核心测试
+pytest tests/test_types.py tests/test_operations.py tests/test_program.py tests/test_dsl.py -v
 
-### 使用方法
+# 加密测试（21项）
+pytest tests/test_encryption.py -v -s
 
-```python
-from axol.api.client import AxolClient
-from axol.core.compiler import fn_to_matrix
+# 量子干涉测试（37项）
+pytest tests/test_quantum.py -v -s
 
-# 将函数编译为矩阵
-M = fn_to_matrix(lambda x: (x + 1) % 4, 4, 4)
+# API + 服务器测试
+pytest tests/test_api.py tests/test_server.py -v
 
-# 构建并加密
-client = AxolClient(seed=42, max_dim=8, use_padding=True)
-result = client.run_local(program)  # 加密 → 执行 → 解密
+# 启动Web前端
+python -m axol.server   # http://localhost:8080
 ```
 
-### 安全属性
+当前：**545项测试通过**，0项失败，4项跳过（cupy/jax未安装）。
 
-- **维度隐藏**: 使用填充后，服务器无法确定原始向量维度。
-- **密钥隔离**: 每个维度拥有唯一的派生密钥——一个泄露不会暴露其他密钥。
-- **分支编译**: 具有编译时门的BranchOp被转换为加密变换，提高E-class覆盖率。
-- **透明I/O**: 客户端处理所有加密/解密，服务器仅对噪声执行线性代数运算。
+---
+
+## 路线图
+
+- [x] Phase 1：类型系统（7种向量类型 + StateBundle）+ 5个原语操作 + 执行引擎
+- [x] Phase 2：DSL解析器 + 稀疏矩阵表示法 + Token基准测试 + 加密概念验证
+- [x] Phase 3：编译器优化器（融合、消除、折叠）+ GPU后端
+- [x] Phase 4：Tool-Use API + 加密模块
+- [x] Phase 5：模块系统（注册表、import/use、compose、schema）
+- [x] 前端：FastAPI + HTML/JS可视化调试器
+- [x] Phase 6：量子干涉（Hadamard/Oracle/Diffusion，100% E-class覆盖率）
+- [x] Phase 7：KeyFamily、矩形加密、fn_to_matrix、填充、分支编译、AxolClient SDK
+- [x] Phase 8：混沌理论量子模块 — Declare → Weave → Observe管道
+- [x] Phase 8：Lyapunov指数估计（Benettin QR）+ Omega = 1/(1+max(lambda,0))
+- [x] Phase 8：分形维度估计（盒计数/相关维度）+ Phi = 1/(1+D/D_max)
+- [x] Phase 8：织造器、观测所、组合规则、成本估算、DSL解析器
+- [x] Phase 8：101项新测试（总计545项，0项失败）
+- [ ] Phase 9：复数振幅（a+bi）支持Shor、QPE、QFT — 完整相位干涉
+- [ ] Phase 10：跨多节点的分布式Tapestry织造
+- [ ] Phase 11：自适应质量 — 观测期间动态Omega/Phi调整
 
 ---
 
