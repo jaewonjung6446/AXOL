@@ -43,9 +43,13 @@ class TestLiftedDim:
         # 1 + 16 + 16*17//2 = 1 + 16 + 136 = 153
         assert lifted_dim(16) == 153
 
-    def test_unsupported_degree(self):
-        with pytest.raises(NotImplementedError):
-            lifted_dim(4, degree=3)
+    def test_degree_3(self):
+        # 1 + 4 + 10 + C(6,3) = 1 + 4 + 10 + 20 = 35
+        assert lifted_dim(4, degree=3) == 35
+
+    def test_degree_4(self):
+        # 1 + 4 + 10 + 20 + C(7,4) = 35 + 35 = 70
+        assert lifted_dim(4, degree=4) == 70
 
 
 class TestLift:

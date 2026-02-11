@@ -13,6 +13,8 @@ Core mapping:
 
 from __future__ import annotations
 
+from itertools import combinations_with_replacement
+from math import comb
 from typing import Callable
 
 import numpy as np
@@ -27,11 +29,13 @@ from axol.core.types import TransMatrix
 def lifted_dim(dim: int, degree: int = 2) -> int:
     """Dimension of the polynomial observable space.
 
-    For degree=2: 1 (constant) + dim (linear) + dim*(dim+1)//2 (quadratic).
+    Sum of C(dim+k-1, k) for k = 0 .. degree.
+    degree=2, dim=4 → 15;  degree=3, dim=4 → 35.
     """
-    if degree != 2:
-        raise NotImplementedError("Only degree=2 is currently supported")
-    return 1 + dim + dim * (dim + 1) // 2
+    total = 0
+    for k in range(degree + 1):
+        total += comb(dim + k - 1, k)
+    return total
 
 
 # ---------------------------------------------------------------------------
@@ -43,14 +47,11 @@ def lift(x: np.ndarray, degree: int = 2) -> np.ndarray:
 
     Args:
         x: shape (dim,) or (n, dim)
-        degree: polynomial degree (only 2 supported)
+        degree: polynomial degree (≥1)
 
     Returns:
         Lifted array of shape (lifted_dim,) or (n, lifted_dim).
     """
-    if degree != 2:
-        raise NotImplementedError("Only degree=2 is currently supported")
-
     single = x.ndim == 1
     if single:
         x = x.reshape(1, -1)
@@ -60,16 +61,28 @@ def lift(x: np.ndarray, degree: int = 2) -> np.ndarray:
     ld = lifted_dim(dim, degree)
     out = np.empty((n, ld), dtype=np.float64)
 
-    # Constant term
-    out[:, 0] = 1.0
-    # Linear terms
-    out[:, 1:dim + 1] = x
-    # Quadratic terms: x_i * x_j for i <= j
-    idx = dim + 1
-    for i in range(dim):
-        for j in range(i, dim):
-            out[:, idx] = x[:, i] * x[:, j]
-            idx += 1
+    if degree == 2:
+        # Optimised fast path for the common case
+        out[:, 0] = 1.0
+        out[:, 1:dim + 1] = x
+        idx = dim + 1
+        for i in range(dim):
+            for j in range(i, dim):
+                out[:, idx] = x[:, i] * x[:, j]
+                idx += 1
+    else:
+        # General path for any degree
+        idx = 0
+        for k in range(degree + 1):
+            for combo in combinations_with_replacement(range(dim), k):
+                if k == 0:
+                    out[:, idx] = 1.0
+                else:
+                    col = np.ones(n, dtype=np.float64)
+                    for c in combo:
+                        col *= x[:, c]
+                    out[:, idx] = col
+                idx += 1
 
     if single:
         return out[0]
@@ -89,9 +102,6 @@ def unlift(y_lifted: np.ndarray, dim: int, degree: int = 2) -> np.ndarray:
     Returns:
         Array of shape (dim,) or (n, dim).
     """
-    if degree != 2:
-        raise NotImplementedError("Only degree=2 is currently supported")
-
     single = y_lifted.ndim == 1
     if single:
         y_lifted = y_lifted.reshape(1, -1)
@@ -133,6 +143,9 @@ def estimate_koopman_matrix(
     """
     rng = np.random.default_rng(seed)
     ld = lifted_dim(dim, degree)
+
+    # Ensure enough samples for the lifted dimension
+    n_samples = max(n_samples, ld + 10)
 
     # Generate samples from a moderate distribution
     X = rng.standard_normal((n_samples, dim)) * 0.5
