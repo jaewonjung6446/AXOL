@@ -14,34 +14,34 @@ Auto-generated benchmark results.
 
 | Dimension | Avg Time (μs) |
 |-----------|---------------|
-| 4 | 92.5 |
-| 100 | 97.9 |
-| 1000 | 2200.9 |
+| 4 | 76.9 |
+| 100 | 81.8 |
+| 1000 | 2410.2 |
 
 ## 3. Optimizer Effect
 
-- Original: 2 transitions, 100.9 μs
-- Optimized: 1 transitions, 52.1 μs
-- Speedup: 1.94x
+- Original: 2 transitions, 108.8 μs
+- Optimized: 1 transitions, 54.3 μs
+- Speedup: 2.00x
 
 ## 4. Encryption Overhead
 
-- Plaintext: 425.3 μs
-- Encrypted: 240449.3 μs
-- Overhead: 565.32x
+- Plaintext: 431.5 μs
+- Encrypted: 238707.9 μs
+- Overhead: 553.17x
 
 ## 5. Scaling Analysis (N-State Automaton)
 
 | N States | Avg Time (μs) |
 |----------|---------------|
-| 5 | 932.9 |
-| 10 | 1979.9 |
-| 20 | 4219.6 |
-| 50 | 12276.6 |
-| 100 | 24403.2 |
+| 5 | 830.7 |
+| 10 | 1703.0 |
+| 20 | 4107.2 |
+| 50 | 9046.5 |
+| 100 | 21823.3 |
 
 ## 6. Backend Comparison
 
 | Backend | Avg Time (μs) |
 |---------|---------------|
-| numpy | 63.9 |
+| numpy | 61.8 |
