@@ -1,4 +1,4 @@
-"""Axol 5 primitive operations — pure functions over vector types."""
+"""Axol 9 primitive operations — pure functions over vector types."""
 
 from __future__ import annotations
 
@@ -113,6 +113,68 @@ def route(vec: _VecBase, router: TransMatrix) -> int:
         )
     scores = v @ router.data
     return int(np.argmax(scores))
+
+
+# ---------------------------------------------------------------------------
+# step: threshold → binary gate vector (Plaintext only)
+# ---------------------------------------------------------------------------
+
+def step(vec: _VecBase, threshold: float = 0.0) -> GateVec:
+    """Element-wise step function: 1.0 where vec >= threshold, else 0.0."""
+    v = vec.data.astype(np.float32)
+    result = np.where(v >= threshold, 1.0, 0.0).astype(np.float32)
+    return GateVec(data=result)
+
+
+# ---------------------------------------------------------------------------
+# branch: conditional select via gate vector (Plaintext only)
+# ---------------------------------------------------------------------------
+
+def branch(gate_vec: GateVec, then_vec: _VecBase, else_vec: _VecBase) -> FloatVec:
+    """Element-wise branch: where gate==1 pick then_vec, else else_vec."""
+    g = gate_vec.data.astype(np.float32)
+    t = then_vec.data.astype(np.float32)
+    e = else_vec.data.astype(np.float32)
+    if g.shape[0] != t.shape[0] or g.shape[0] != e.shape[0]:
+        raise ValueError(
+            f"Dimension mismatch: gate({g.shape[0]}) vs then({t.shape[0]}) vs else({e.shape[0]})"
+        )
+    result = np.where(g == 1.0, t, e).astype(np.float32)
+    return FloatVec(data=result)
+
+
+# ---------------------------------------------------------------------------
+# clamp: clip values to [min, max] (Plaintext only)
+# ---------------------------------------------------------------------------
+
+def clamp(vec: _VecBase, min_val: float = -np.inf, max_val: float = np.inf) -> FloatVec:
+    """Element-wise clamp: clip values to [min_val, max_val]."""
+    v = vec.data.astype(np.float32)
+    result = np.clip(v, min_val, max_val).astype(np.float32)
+    return FloatVec(data=result)
+
+
+# ---------------------------------------------------------------------------
+# map_fn: apply named element-wise function (Plaintext only)
+# ---------------------------------------------------------------------------
+
+_MAP_FUNCTIONS: dict[str, callable] = {
+    "relu": lambda x: np.maximum(x, 0.0),
+    "sigmoid": lambda x: 1.0 / (1.0 + np.exp(-x)),
+    "abs": lambda x: np.abs(x),
+    "neg": lambda x: -x,
+    "square": lambda x: x * x,
+    "sqrt": lambda x: np.sqrt(np.maximum(x, 0.0)),
+}
+
+
+def map_fn(vec: _VecBase, fn_name: str) -> FloatVec:
+    """Apply a named element-wise function to a vector."""
+    if fn_name not in _MAP_FUNCTIONS:
+        raise ValueError(f"Unknown map function: '{fn_name}'. Available: {sorted(_MAP_FUNCTIONS)}")
+    v = vec.data.astype(np.float32)
+    result = _MAP_FUNCTIONS[fn_name](v).astype(np.float32)
+    return FloatVec(data=result)
 
 
 # ---------------------------------------------------------------------------

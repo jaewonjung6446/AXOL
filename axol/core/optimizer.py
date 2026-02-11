@@ -25,6 +25,10 @@ from axol.core.program import (
     DistanceOp,
     RouteOp,
     CustomOp,
+    StepOp,
+    BranchOp,
+    ClampOp,
+    MapOp,
     Operation,
 )
 
@@ -197,6 +201,16 @@ def _collect_read_keys(program: Program) -> set[str]:
             keys.add(op.key_b)
         elif isinstance(op, RouteOp):
             keys.add(op.key)
+        elif isinstance(op, StepOp):
+            keys.add(op.key)
+        elif isinstance(op, BranchOp):
+            keys.add(op.gate_key)
+            keys.add(op.then_key)
+            keys.add(op.else_key)
+        elif isinstance(op, ClampOp):
+            keys.add(op.key)
+        elif isinstance(op, MapOp):
+            keys.add(op.key)
 
     return keys
 
@@ -259,5 +273,13 @@ def _collect_write_keys(program: Program) -> set[str]:
             keys.add(op.out_key)
         elif isinstance(op, RouteOp):
             keys.add(op.out_key)
+        elif isinstance(op, StepOp):
+            keys.add(op.out_key if op.out_key is not None else op.key)
+        elif isinstance(op, BranchOp):
+            keys.add(op.out_key)
+        elif isinstance(op, ClampOp):
+            keys.add(op.out_key if op.out_key is not None else op.key)
+        elif isinstance(op, MapOp):
+            keys.add(op.out_key if op.out_key is not None else op.key)
 
     return keys

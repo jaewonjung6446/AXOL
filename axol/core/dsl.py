@@ -33,6 +33,10 @@ from axol.core.program import (
     DistanceOp,
     RouteOp,
     CustomOp,
+    StepOp,
+    BranchOp,
+    ClampOp,
+    MapOp,
     Transition,
     Program,
 )
@@ -134,9 +138,16 @@ def parse(
     # Build initial StateBundle
     initial = StateBundle(vectors=dict(state_vectors))
 
-    # Auto-coerce FloatVec → GateVec for keys referenced by GateOps
+    # Auto-coerce FloatVec → GateVec for keys referenced by GateOps or BranchOps
     for t in transitions:
         if isinstance(t.operation, GateOp):
+            gk = t.operation.gate_key
+            if gk in initial.vectors and not isinstance(initial[gk], GateVec):
+                vec = initial[gk]
+                vals = vec.data.astype(np.float32)
+                if np.all((vals == 0.0) | (vals == 1.0)):
+                    initial[gk] = GateVec.from_list(vals.tolist())
+        elif isinstance(t.operation, BranchOp):
             gk = t.operation.gate_key
             if gk in initial.vectors and not isinstance(initial[gk], GateVec):
                 vec = initial[gk]
@@ -331,6 +342,14 @@ def _parse_op_call(
         return _parse_distance_op(args_str, out_key, line_num)
     elif op_name == "route":
         return _parse_route_op(args_str, out_key, line_num)
+    elif op_name == "step":
+        return _parse_step_op(args_str, out_key, line_num)
+    elif op_name == "branch":
+        return _parse_branch_op(args_str, out_key, line_num)
+    elif op_name == "clamp":
+        return _parse_clamp_op(args_str, out_key, line_num)
+    elif op_name == "map":
+        return _parse_map_op(args_str, out_key, line_num)
     elif op_name == "use":
         return _parse_use_op(args_str, line_num, registry=registry, imports=imports)
     else:
@@ -430,6 +449,90 @@ def _parse_route_op(args: str, out_key: str | None, line_num: int) -> RouteOp:
         raise ParseError("route requires R= parameter", line_num)
 
     return RouteOp(key=key, router=router, out_key=out_key or "_route")
+
+
+# ---------------------------------------------------------------------------
+# Plaintext op parsers (step, branch, clamp, map)
+# ---------------------------------------------------------------------------
+
+def _parse_step_op(args: str, out_key: str | None, line_num: int) -> StepOp:
+    """Parse 'step(key;t=threshold)'"""
+    parts = _split_args(args)
+    key = parts[0].strip()
+    threshold = 0.0
+
+    for part in parts[1:]:
+        part = part.strip()
+        if part.startswith("t="):
+            threshold = float(part[2:].strip())
+
+    return StepOp(key=key, threshold=threshold, out_key=out_key)
+
+
+def _parse_branch_op(args: str, out_key: str | None, line_num: int) -> BranchOp:
+    """Parse 'branch(gate_key;then=a,else=b)->out'  (out_key required)."""
+    if out_key is None:
+        raise ParseError("branch requires ->out_key", line_num)
+
+    parts = _split_args(args)
+    gate_key = parts[0].strip()
+    then_key: str | None = None
+    else_key: str | None = None
+
+    for part in parts[1:]:
+        part = part.strip()
+        # Support both "then=x,else=y" (comma-separated) and separate "then=x;else=y"
+        sub_parts = [p.strip() for p in part.split(",")]
+        for sp in sub_parts:
+            if sp.startswith("then="):
+                then_key = sp[5:].strip()
+            elif sp.startswith("else="):
+                else_key = sp[5:].strip()
+
+    if then_key is None:
+        raise ParseError("branch requires then= parameter", line_num)
+    if else_key is None:
+        raise ParseError("branch requires else= parameter", line_num)
+
+    return BranchOp(gate_key=gate_key, then_key=then_key, else_key=else_key, out_key=out_key)
+
+
+def _parse_clamp_op(args: str, out_key: str | None, line_num: int) -> ClampOp:
+    """Parse 'clamp(key;min=0,max=100)' — semicolons and commas both supported."""
+    # Normalize: replace commas at top-level with semicolons for uniform splitting
+    parts = _split_args(args)
+    key = parts[0].strip()
+    min_val = float("-inf")
+    max_val = float("inf")
+
+    for part in parts[1:]:
+        part = part.strip()
+        # Also handle comma-separated within a part (e.g., "min=0,max=100")
+        sub_parts = [p.strip() for p in part.split(",")]
+        for sp in sub_parts:
+            if sp.startswith("min="):
+                min_val = float(sp[4:].strip())
+            elif sp.startswith("max="):
+                max_val = float(sp[4:].strip())
+
+    return ClampOp(key=key, min_val=min_val, max_val=max_val, out_key=out_key)
+
+
+def _parse_map_op(args: str, out_key: str | None, line_num: int) -> MapOp:
+    """Parse 'map(key;fn=relu)'."""
+    parts = _split_args(args)
+    key = parts[0].strip()
+    fn_name: str | None = None
+
+    for part in parts[1:]:
+        part = part.strip()
+        if part.startswith("fn="):
+            fn_name = part[3:].strip()
+
+    if fn_name is None:
+        raise ParseError("map requires fn= parameter", line_num)
+
+    return MapOp(key=key, fn_name=fn_name, out_key=out_key)
 
 
 # ---------------------------------------------------------------------------

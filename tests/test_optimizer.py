@@ -203,14 +203,15 @@ class TestConstantFolding:
                 "const": FloatVec.from_list([10.0]),
             }),
             transitions=[
-                Transition("t1", TransformOp(key="const", matrix=M)),
+                # out_key="result" so "const" is never written to
+                Transition("t1", TransformOp(key="const", matrix=M, out_key="result")),
             ],
         )
         opt = optimize(prog, fuse=False, eliminate_dead=False)
         # Transition should be removed (folded)
         assert len(opt.transitions) == 0
         # Result pre-computed in initial state
-        val = opt.initial_state["const"].to_list()[0]
+        val = opt.initial_state["result"].to_list()[0]
         assert val == pytest.approx(30.0, abs=1e-3)
 
     def test_no_fold_mutable_key(self):

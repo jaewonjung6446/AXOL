@@ -34,10 +34,11 @@
 
 - Python 대비 **30~50% 적은 토큰** 소모
 - C# 대비 **48~75% 적은 토큰** 소모
-- **5개 원시 연산**으로 모든 계산 표현: `transform`, `gate`, `merge`, `distance`, `route`
+- **9개 원시 연산**으로 모든 계산 표현: `transform`, `gate`, `merge`, `distance`, `route` (암호화) + `step`, `branch`, `clamp`, `map` (평문)
 - **희소 행렬 표기법**: 밀집 표현의 O(N^2) 대비 O(N)으로 스케일링
 - 완전한 상태 추적이 가능한 **결정론적 실행**
 - **NumPy 백엔드**로 대규모 벡터 연산 500배 이상 가속
+- **E/P 보안 등급 분류** - 각 연산은 암호화(E) 또는 평문(P)으로 분류되며, 내장 커버리지 분석기 제공
 - **행렬 수준 암호화** - 비밀 키 행렬로 프로그램을 암호학적으로 해독 불가능하게 만들어, 셰도우 AI 문제를 근본적으로 해결
 
 ---
@@ -47,11 +48,18 @@
 - [이론적 배경](#이론적-배경)
 - [셰도우 AI와 행렬 암호화](#셰도우-ai와-행렬-암호화)
   - [암호화 증명: 5개 연산 모두 검증 완료](#암호화-증명-5개-연산-모두-검증-완료)
+- [평문 연산 & 보안 등급](#평문-연산--보안-등급)
 - [아키텍처](#아키텍처)
 - [빠른 시작](#빠른-시작)
 - [DSL 문법](#dsl-문법)
+- [컴파일러 최적화](#컴파일러-최적화)
+- [GPU 백엔드](#gpu-백엔드)
+- [모듈 시스템](#모듈-시스템)
+- [Tool-Use API](#tool-use-api)
+- [웹 프론트엔드](#웹-프론트엔드)
 - [토큰 비용 비교](#토큰-비용-비교)
 - [런타임 성능](#런타임-성능)
+- [성능 벤치마크](#성능-벤치마크)
 - [API 레퍼런스](#api-레퍼런스)
 - [예제](#예제)
 - [테스트](#테스트)
@@ -98,24 +106,33 @@ s state=onehot(0,3)
 
 상태 머신의 전이 테이블이 **행렬**이 되고, 상태 전진이 **행렬 곱셈**이 됩니다. AI는 문자열 비교, 딕셔너리 조회, 루프 조건을 추론할 필요 없이 단일 행렬 연산만 처리하면 됩니다.
 
-### 다섯 가지 원시 연산
+### 아홉 가지 원시 연산
 
-Axol은 모든 연산을 다섯 가지 연산으로 환원합니다. 각각은 기본적인 선형대수 개념에 대응합니다:
+Axol은 9개의 원시 연산을 제공합니다. 처음 5개는 **암호화(E)** 가능 - 암호화된 데이터에서 실행할 수 있습니다. 나머지 4개는 **평문(P)** 전용 - 평문이 필요하지만 비선형 표현력을 추가합니다:
 
-| 연산 | 수학적 기반 | 설명 |
-|------|-----------|------|
-| `transform` | 행렬 곱: `v @ M` | 선형 상태 변환 |
-| `gate` | 아다마르 곱: `v * g` | 조건부 마스킹 |
-| `merge` | 가중합: `sum(v_i * w_i)` | 벡터 결합 |
-| `distance` | L2 / 코사인 / 내적 | 유사도 측정 |
-| `route` | `argmax(v @ R)` | 이산 분기 |
+| 연산 | 보안 등급 | 수학적 기반 | 설명 |
+|------|:--------:|-----------|------|
+| `transform` | **E** | 행렬 곱: `v @ M` | 선형 상태 변환 |
+| `gate` | **E** | 아다마르 곱: `v * g` | 조건부 마스킹 (0/1) |
+| `merge` | **E** | 가중합: `sum(v_i * w_i)` | 벡터 결합 |
+| `distance` | **E** | L2 / 코사인 / 내적 | 유사도 측정 |
+| `route` | **E** | `argmax(v @ R)` | 이산 분기 |
+| `step` | **P** | `where(v >= t, 1, 0)` | 임계값 이진 게이트 |
+| `branch` | **P** | `where(g, then, else)` | 조건부 벡터 선택 |
+| `clamp` | **P** | `clip(v, min, max)` | 값 범위 제한 |
+| `map` | **P** | `f(v)` 요소별 적용 | 비선형 활성화 (relu, sigmoid, abs, neg, square, sqrt) |
 
-이 다섯 연산으로 다음을 표현할 수 있습니다:
+5개 E 연산은 암호화 연산을 위한 **선형대수 기반**을 형성합니다:
 - 상태 머신 (transform)
 - 조건 로직 (gate)
 - 누적/집계 (merge)
 - 유사도 검색 (distance)
 - 의사 결정 (route)
+
+4개 P 연산은 AI/ML 워크로드를 위한 **비선형 표현력**을 추가합니다:
+- 활성화 함수 (map: relu, sigmoid)
+- 임계값 결정 (step + branch)
+- 값 정규화 (clamp)
 
 ### 희소 행렬 표기법
 
@@ -260,40 +277,122 @@ Axol의 5개 연산 모두에 대한 암호화 호환성이 **수학적으로 �
 
 ---
 
+## 평문 연산 & 보안 등급
+
+### 평문 연산이 필요한 이유
+
+기존 5개 암호화 연산은 **선형** 연산만 표현할 수 있습니다. 실제 AI/ML 워크로드에는 **비선형** 연산(활성화 함수, 조건 분기, 값 클램핑)이 필요합니다. 4개의 새 평문 연산이 이 격차를 메웁니다.
+
+### SecurityLevel 열거형
+
+모든 연산은 `SecurityLevel`을 가집니다:
+
+```python
+from axol.core import SecurityLevel
+
+SecurityLevel.ENCRYPTED  # "E" - 암호화된 데이터에서 실행 가능
+SecurityLevel.PLAINTEXT  # "P" - 평문 필요
+```
+
+### 암호화 커버리지 분석기
+
+내장 분석기가 프로그램의 암호화 가능 비율을 보고합니다:
+
+```python
+from axol.core import parse, analyze
+
+program = parse("""
+@damage_calc
+s raw=[50 30] armor=[10 5]
+: diff=merge(raw armor;w=[1 -1])->dmg
+: act=map(dmg;fn=relu)
+: safe=clamp(dmg;min=0,max=100)
+""")
+
+result = analyze(program)
+print(result.summary())
+# Program: damage_calc
+# Transitions: 3 total, 1 encrypted (E), 2 plaintext (P)
+# Coverage: 33.3%
+# Encryptable keys: (E 연산만 접근하는 키)
+# Plaintext keys: (P 연산이 접근하는 키)
+```
+
+### 새 연산 토큰 비용 (Python vs C# vs Axol DSL)
+
+| 프로그램 | Python | C# | Axol DSL | vs Python | vs C# |
+|---------|-------:|---:|--------:|---------:|------:|
+| ReLU 활성화 | 48 | 82 | 28 | 42% | 66% |
+| 임계값 선택 | 140 | 184 | 80 | 43% | 57% |
+| 값 클램프 | 66 | 95 | 31 | 53% | 67% |
+| Sigmoid 활성화 | 57 | 88 | 28 | 51% | 68% |
+| 데미지 파이프라인 | 306 | 326 | 155 | 49% | 53% |
+| **합계** | **617** | **775** | **322** | **48%** | **59%** |
+
+### 새 연산 런타임 (dim=10,000)
+
+| 연산 | Python 루프 | Axol (NumPy) | 속도 향상 |
+|------|----------:|----------:|--------:|
+| ReLU | 575 us | 21 us | **27x** |
+| Sigmoid | 1.7 ms | 42 us | **40x** |
+| Step+Branch | 889 us | 96 us | **9x** |
+| Clamp | 937 us | 16 us | **58x** |
+| 데미지 파이프라인 | 3.8 ms | 191 us | **20x** |
+
+---
+
 ## 아키텍처
 
 ```
-                    +-----------+
-  .axol 소스 ------>|  파서     |----> Program 객체
-                    | (dsl.py)  |         |
-                    +-----------+         |
-                                          v
+                                          +-------------+
+  .axol 소스 -----> 파서 (dsl.py) ------> | Program     |
+                         |                | + optimize()|
+                         v                +------+------+
+                    모듈 시스템                   |
+                    (module.py)                  v
+                      - import             +-----------+    +-----------+
+                      - use()              |  실행엔진  |--->|  검증기   |
+                      - compose()          |(program.py)|    |(verify.py)|
+                                           +-----------+    +-----------+
+                                                |
+                    +-----------+    +----------+----------+
+                    |  백엔드   |<---|    연산 모듈         |
+                    |(backend.py)|    | (operations.py)     |
+                    | numpy/cupy|    +---------------------+
+                    | /jax      |               |
+                    +-----------+    +-----------+----------+
+                                    |      타입 시스템      |
+                                    |   (types.py)         |
+                    +-----------+   +----------------------+
+                    |  암호화   |   +-----------+
+                    |(encryption|   |  분석기   |
+                    |       .py)|   |(analyzer  |
+                    +-----------+   |       .py)|
+                                    +-----------+
                     +-----------+    +-----------+
-                    |  검증기   |<---|  실행엔진  |
-                    |(verify.py)|    |(program.py)|
+                    | Tool API  |    |  서버     |
+                    |(api/)     |    |(server/)  |
+                    | dispatch  |    | FastAPI   |
+                    | tools     |    | HTML/JS   |
                     +-----------+    +-----------+
-                                          |
-                         사용             |
-                    +-----------+         |
-                    | 연산 모듈  |<--------+
-                    | (ops.py)  |
-                    +-----------+
-                         |
-                    +-----------+
-                    | 타입 시스템 |
-                    |(types.py) |
-                    +-----------+
 ```
 
 ### 모듈 개요
 
 | 모듈 | 설명 |
 |------|------|
-| `axol.core.types` | 7개 벡터 타입 + `StateBundle` |
-| `axol.core.operations` | 5개 원시 연산: `transform`, `gate`, `merge`, `distance`, `route` |
-| `axol.core.program` | 실행 엔진: `Program`, `Transition`, `run_program` |
+| `axol.core.types` | 7개 벡터 타입 (`BinaryVec`, `IntVec`, `FloatVec`, `OneHotVec`, `GateVec`, `TransMatrix`) + `StateBundle` |
+| `axol.core.operations` | 9개 원시 연산: `transform`, `gate`, `merge`, `distance`, `route`, `step`, `branch`, `clamp`, `map_fn` |
+| `axol.core.program` | 실행 엔진: `Program`, `Transition`, `run_program`, `SecurityLevel`, `StepOp`/`BranchOp`/`ClampOp`/`MapOp` |
 | `axol.core.verify` | 상태 검증 (exact/cosine/euclidean 매칭) |
-| `axol.core.dsl` | DSL 파서: `parse(source) -> Program` |
+| `axol.core.dsl` | DSL 파서: `parse(source) -> Program`, `import`/`use()` 지원 |
+| `axol.core.optimizer` | 3-패스 컴파일러 최적화: transform 융합, 데드 상태 제거, 상수 폴딩 |
+| `axol.core.backend` | 교체 가능한 배열 백엔드: `numpy` (기본값), `cupy`, `jax` |
+| `axol.core.encryption` | 유사 변환 암호화: `encrypt_program`, `decrypt_state` (E/P 인식) |
+| `axol.core.analyzer` | 암호화 커버리지 분석기: `analyze(program) -> AnalysisResult`, E/P 분류 |
+| `axol.core.module` | 모듈 시스템: `Module`, `ModuleRegistry`, `compose()`, 스키마 검증 |
+| `axol.api` | AI 에이전트용 Tool-Use API: `dispatch(request)`, `get_tool_definitions()` |
+| `axol.server` | FastAPI 웹 서버 + 바닐라 HTML/JS 비주얼 디버거 프론트엔드 |
 
 ---
 
@@ -302,8 +401,11 @@ Axol의 5개 연산 모두에 대한 암호화 호환성이 **수학적으로 �
 ### 설치
 
 ```bash
+# 리포지토리 클론
 git clone https://github.com/your-username/AXOL.git
 cd AXOL
+
+# 의존성 설치
 pip install -e ".[dev]"
 ```
 
@@ -313,6 +415,9 @@ pip install -e ".[dev]"
 - NumPy >= 1.24.0
 - pytest >= 7.4.0 (개발용)
 - tiktoken >= 0.5.0 (개발용, 토큰 분석)
+- fastapi >= 0.100.0, uvicorn >= 0.23.0 (선택, 웹 프론트엔드)
+- cupy-cuda12x >= 12.0.0 (선택, GPU)
+- jax[cpu] >= 0.4.0 (선택, JAX 백엔드)
 
 ### Hello World - DSL
 
@@ -386,6 +491,8 @@ s hp=[100] mp=[50] stamina=[75]     # 한 줄에 여러 벡터 선언
 ### 연산
 
 ```
+# --- 암호화(E) 연산 ---
+
 # transform: 행렬 곱셈
 : decay=transform(hp;M=[0.8])
 : advance=transform(state;M=[0 1 0;0 0 1;0 0 1])
@@ -402,6 +509,21 @@ s hp=[100] mp=[50] stamina=[75]     # 한 줄에 여러 벡터 선언
 
 # route: argmax 라우팅
 : choice=route(scores;R=[1 0 0;0 1 0;0 0 1])
+
+# --- 평문(P) 연산 ---
+
+# step: 임계값 이진 게이트
+: mask=step(scores;t=0.5)->gate_out
+
+# branch: 조건부 벡터 선택 (->out_key 필수)
+: selected=branch(gate_key;then=high,else=low)->result
+
+# clamp: 값 범위 제한
+: safe=clamp(values;min=0,max=100)
+
+# map: 요소별 비선형 함수 (relu, sigmoid, abs, neg, square, sqrt)
+: activated=map(x;fn=relu)
+: prob=map(logits;fn=sigmoid)->output
 ```
 
 ### 행렬 형식
@@ -413,7 +535,7 @@ M=[1 0;0 1]                           # 2x2 항등행렬
 M=[0 1 0;0 0 1;0 0 1]                # 3x3 시프트 행렬
 
 # 희소: 0이 아닌 항목만 표기
-M=sparse(100x100;0,1=1 1,2=1 99,99=1)
+M=sparse(100x100;0,1=1 1,2=1 99,99=1) # 100개 항목을 가진 100x100
 ```
 
 ### 터미널 조건
@@ -426,11 +548,217 @@ M=sparse(100x100;0,1=1 1,2=1 99,99=1)
 
 `?` 줄이 없으면 **파이프라인 모드**로 실행됩니다 (모든 전이가 1회 실행).
 
+### 주석
+
+```
+# 이것은 주석입니다
+@my_program
+# 주석은 어디에나 올 수 있습니다
+s v=[1 2 3]
+: t=transform(v;M=[1 0 0;0 1 0;0 0 1])
+```
+
+---
+
+## 컴파일러 최적화
+
+`optimize()`는 3개 패스를 적용하여 프로그램 크기를 줄이고 상수를 사전 계산합니다:
+
+```python
+from axol.core import parse, optimize, run_program
+
+program = parse(source)
+optimized = optimize(program)   # 융합 + 제거 + 폴딩
+result = run_program(optimized)
+```
+
+### 패스 1: Transform 융합
+
+동일한 키에 대한 연속 `TransformOp`을 단일 행렬 곱셈으로 융합합니다:
+
+```
+# 이전: 2개 전이, 반복당 2회 행렬 곱셈
+: t1=transform(v;M=[0 1 0;0 0 1;1 0 0])
+: t2=transform(v;M=[2 0 0;0 2 0;0 0 2])
+
+# 이후: 1개 전이, 1회 행렬 곱셈 (M_fused = M1 @ M2)
+: t1+t2=transform(v;M_fused)
+```
+
+- `CustomOp` 경계를 넘지 않음
+- 고정점 반복으로 3개 이상 연쇄 처리
+- 2개 transform 파이프라인: **전이 수 -50%, 실행 시간 -45%**
+
+### 패스 2: 데드 상태 제거
+
+어떤 전이에서도 참조되지 않는 초기 상태 벡터를 제거합니다:
+
+```
+s used=[1 0]  unused=[99 99]   # unused는 참조되지 않음
+: t=transform(used;M=[...])
+
+# 최적화 후: unused가 초기 상태에서 제거됨
+```
+
+- `CustomOp`에 대해 보수적 (모든 상태 보존)
+- `terminal_key`는 항상 "읽음"으로 처리
+
+### 패스 3: 상수 폴딩
+
+불변 키(쓰기가 없는 키)에 대한 transform을 사전 계산합니다:
+
+```
+s constant=[1 0 0]
+: t=transform(constant;M=[0 1 0;0 0 1;1 0 0])->result
+
+# 이후: 전이 제거, result=[0,1,0]이 초기 상태에 저장됨
+```
+
+---
+
+## GPU 백엔드
+
+`numpy` (기본값), `cupy` (NVIDIA GPU), `jax`를 지원하는 교체 가능한 배열 백엔드:
+
+```python
+from axol.core import set_backend, get_backend_name
+
+set_backend("numpy")   # 기본값 - CPU
+set_backend("cupy")    # NVIDIA GPU (cupy 설치 필요)
+set_backend("jax")     # Google JAX (jax 설치 필요)
+```
+
+선택적 백엔드 설치:
+
+```bash
+pip install axol[gpu]   # cupy-cuda12x
+pip install axol[jax]   # jax[cpu]
+```
+
+기존 코드가 투명하게 동작합니다 - 백엔드 전환은 전역적이며 모든 벡터/행렬 연산에 적용됩니다.
+
+---
+
+## 모듈 시스템
+
+스키마, 임포트, 서브모듈 실행을 갖춘 재사용 가능하고 합성 가능한 프로그램.
+
+### 모듈 정의
+
+```python
+from axol.core.module import Module, ModuleSchema, VecSchema, ModuleRegistry
+
+schema = ModuleSchema(
+    inputs=[VecSchema("atk", "float", 1), VecSchema("def_val", "float", 1)],
+    outputs=[VecSchema("dmg", "float", 1)],
+)
+module = Module(name="damage_calc", program=program, schema=schema)
+```
+
+### 레지스트리 & 파일 로딩
+
+```python
+registry = ModuleRegistry()
+registry.load_from_file("damage_calc.axol")
+registry.resolve_import("heal", relative_to="main.axol")
+```
+
+### DSL Import & Use 문법
+
+```
+@main
+import damage_calc from "damage_calc.axol"
+s atk=[50] def_val=[10]
+: calc=use(damage_calc;in=atk,def_val;out=dmg)
+```
+
+### 프로그램 합성
+
+```python
+from axol.core.module import compose
+combined = compose(program_a, program_b, name="combined")
+```
+
+---
+
+## Tool-Use API
+
+AI 에이전트가 Axol 프로그램을 파싱, 실행, 검증할 수 있는 JSON 호출 인터페이스:
+
+```python
+from axol.api import dispatch
+
+# 파싱
+result = dispatch({"action": "parse", "source": "@prog\ns v=[1]\n: t=transform(v;M=[2])"})
+# -> {"program_name": "prog", "state_keys": ["v"], "transition_count": 1, "has_terminal": false}
+
+# 실행
+result = dispatch({"action": "run", "source": "...", "optimize": True})
+# -> {"final_state": {"v": [2.0]}, "steps_executed": 1, "terminated_by": "pipeline_end"}
+
+# 단계별 검사
+result = dispatch({"action": "inspect", "source": "...", "step": 1})
+
+# 연산 목록
+result = dispatch({"action": "list_ops"})
+
+# 기대 출력 검증
+result = dispatch({"action": "verify", "source": "...", "expected": {"v": [2.0]}})
+```
+
+AI 에이전트 도구 정의(JSON Schema)는 `get_tool_definitions()`로 제공됩니다.
+
+---
+
+## 웹 프론트엔드
+
+바닐라 HTML/JS 비주얼 디버거를 포함한 FastAPI 서버:
+
+```bash
+pip install axol[server]    # fastapi + uvicorn
+python -m axol.server       # http://localhost:8080
+```
+
+### 기능
+
+| 패널 | 설명 |
+|------|------|
+| **DSL 에디터** | 예제 드롭다운이 있는 구문 편집기 |
+| **실행** | 실행/최적화 버튼, 결과 요약 (스텝, 시간, terminated_by) |
+| **트레이스 뷰어** | prev/next/play 컨트롤이 있는 단계별 상태 테이블 |
+| **상태 차트** | Chart.js 시계열 그래프 (X=스텝, Y=벡터 값) |
+| **암호화 데모** | 원본 vs 암호화 행렬 히트맵, 암호화/실행/복호화 워크플로우 |
+| **성능** | 최적화 전/후 비교, 토큰 비용 분석 |
+
+### API 엔드포인트
+
+```
+POST /api/parse       - DSL 소스 파싱
+POST /api/run         - 파싱 + 실행 + 전체 트레이스
+POST /api/optimize    - 최적화 전/후 비교
+POST /api/encrypt     - 프로그램 암호화 + 실행 + 복호화
+GET  /api/examples    - 내장 예제 프로그램
+GET  /api/ops         - 연산 설명
+POST /api/token-cost  - 토큰 수 분석 (Axol vs Python vs C#)
+POST /api/module/run  - 서브모듈 포함 프로그램 실행
+```
+
 ---
 
 ## 토큰 비용 비교
 
 `tiktoken` cl100k_base 토크나이저로 측정 (GPT-4 / Claude 사용).
+
+### Python vs Axol DSL
+
+| 프로그램 | Python | Axol DSL | 절약률 |
+|---------|--------|----------|--------|
+| Counter (0->5) | 32 | 33 | -3.1% |
+| State Machine (3-state) | 67 | 47 | 29.9% |
+| HP Decay (3 rounds) | 51 | 32 | 37.3% |
+| RPG Damage Calc | 130 | 90 | 30.8% |
+| 100-State Automaton | 1,034 | 636 | 38.5% |
+| **합계** | **1,314** | **838** | **36.2%** |
 
 ### Python vs C# vs Axol DSL
 
@@ -464,7 +792,7 @@ Axol은 NumPy를 연산 백엔드로 사용합니다.
 | dim=4 | ~6 us | ~11 us | Python 2x |
 | dim=100 | ~14 us | ~20 us | Python 1.4x |
 
-소규모 벡터에서는 Python 네이티브 루프가 더 빠릅니다 (NumPy 호출 오버헤드).
+소규모 벡터에서는 Python 네이티브 루프가 더 빠릅니다 (NumPy 호출 오버헤드). 예상된 결과이며 수용 가능합니다 - 소규모 프로그램은 어떤 방식이든 빠릅니다.
 
 ### 대규모 벡터 (dim >= 1000)
 
@@ -474,6 +802,194 @@ Axol은 NumPy를 연산 백엔드로 사용합니다.
 | dim=10,000 (행렬곱) | ~14,815 ms | ~381 ms | **Axol 39x** |
 
 대규모 벡터 연산(행렬 곱셈)에서는 Axol의 NumPy 백엔드가 순수 Python 루프보다 **수백 배 빠릅니다**.
+
+### 사용 가이드
+
+| 시나리오 | 권장 |
+|---------|------|
+| AI 에이전트 코드 생성 | Axol DSL (적은 토큰 = 낮은 비용) |
+| 대규모 상태 공간 (100+ 차원) | Axol (NumPy 가속 + 희소 표기법) |
+| 단순 스크립트 (10줄 미만) | Python (오버헤드 적음) |
+| 사람이 읽을 비즈니스 로직 | Python/C# (익숙한 문법) |
+
+---
+
+## 성능 벤치마크
+
+`pytest tests/test_performance_report.py -v -s`로 자동 생성됩니다. 전체 결과는 [PERFORMANCE_REPORT.md](PERFORMANCE_REPORT.md)를 참조하세요.
+
+### 토큰 효율성 (Axol vs Python vs C#)
+
+| 프로그램 | Axol | Python | C# | vs Python | vs C# |
+|---------|------|--------|----|-----------|-------|
+| Counter (0->5) | 11 | 45 | 78 | **76% 절약** | **86% 절약** |
+| 3-State FSM | 14 | 52 | 89 | **73% 절약** | **84% 절약** |
+| HP Decay | 14 | 58 | 95 | **76% 절약** | **85% 절약** |
+| Combat Pipeline | 14 | 55 | 92 | **75% 절약** | **85% 절약** |
+| Matrix Chain | 21 | 60 | 98 | **65% 절약** | **79% 절약** |
+
+평균: Python 대비 **74% 토큰 절약**, C# 대비 **85% 토큰 절약**.
+
+### 차원별 실행 시간
+
+| 차원 | 평균 시간 |
+|------|----------|
+| 4 | 0.25 ms |
+| 100 | 0.17 ms |
+| 1,000 | 1.41 ms |
+
+### 최적화 효과
+
+| 프로그램 | 이전 | 이후 | 시간 절감 |
+|---------|------|------|----------|
+| Pipeline (2 transforms) | 2 transitions | 1 transition | **-45%** |
+| Counter (loop) | 2 transitions | 2 transitions | - |
+| FSM (loop) | 2 transitions | 2 transitions | - |
+
+Transform 융합은 연속 행렬 연산이 있는 파이프라인 프로그램에서 가장 효과적입니다.
+
+### 암호화 오버헤드
+
+| 프로그램 | 평문 | 암호화 | 오버헤드 |
+|---------|------|--------|---------|
+| Pipeline (1 pass) | 0.12 ms | 0.12 ms | **~0%** |
+| 3-State FSM (loop) | 0.62 ms | 276.8 ms | +44,633% |
+
+파이프라인 모드: 오버헤드 무시 가능. 루프 모드: 암호화된 터미널 조건이 조기 종료를 트리거할 수 없어 `max_iterations`까지 실행되므로 높은 오버헤드.
+
+### 스케일링 (N-상태 오토마톤)
+
+| 상태 수 | 토큰 | 실행 시간 |
+|--------|------|----------|
+| 5 | 28 | 1.6 ms |
+| 20 | 388 | 4.3 ms |
+| 50 | 2,458 | 12.9 ms |
+| 100 | 9,908 | 27.9 ms |
+| 200 | 39,808 | 59.2 ms |
+
+희소 행렬 표기법 덕분에 토큰은 **O(N)**으로 증가합니다 (Python/C#의 O(N^2) 대비). 실행 시간은 행렬 곱셈으로 인해 ~O(N^2)이지만, 200-상태 프로그램에서도 60ms 미만을 유지합니다.
+
+---
+
+## API 레퍼런스
+
+### `parse(source, registry=None, source_path=None) -> Program`
+
+Axol DSL 소스 텍스트를 실행 가능한 `Program` 객체로 파싱합니다.
+
+```python
+from axol.core import parse
+program = parse("@test\ns v=[1 2 3]\n: t=transform(v;M=[1 0 0;0 1 0;0 0 1])")
+
+# 모듈 레지스트리를 사용한 import/use 지원
+from axol.core.module import ModuleRegistry
+registry = ModuleRegistry()
+program = parse(source, registry=registry, source_path="main.axol")
+```
+
+### `run_program(program: Program) -> ExecutionResult`
+
+프로그램을 실행하고 결과를 반환합니다.
+
+```python
+from axol.core import run_program
+result = run_program(program)
+result.final_state     # 최종 벡터 값을 가진 StateBundle
+result.steps_executed  # 총 전이 스텝 수
+result.terminated_by   # "pipeline_end" | "terminal_condition" | "max_iterations"
+result.trace           # 디버깅용 TraceEntry 리스트
+result.verification    # expected_state가 설정된 경우 VerifyResult
+```
+
+### `optimize(program, *, fuse=True, eliminate_dead=True, fold_constants=True) -> Program`
+
+원본을 변경하지 않고 프로그램을 최적화합니다.
+
+```python
+from axol.core import optimize
+optimized = optimize(program)                          # 모든 패스
+optimized = optimize(program, fold_constants=False)    # 선택적 패스
+```
+
+### `set_backend(name) / get_backend() / to_numpy(arr)`
+
+배열 연산 백엔드를 전환합니다.
+
+```python
+from axol.core import set_backend, get_backend, to_numpy
+set_backend("cupy")     # GPU로 전환
+xp = get_backend()      # cupy 모듈 반환
+arr = to_numpy(gpu_arr) # numpy로 변환
+```
+
+### `dispatch(request) -> dict`
+
+AI 에이전트용 Tool-Use API 진입점.
+
+```python
+from axol.api import dispatch
+result = dispatch({"action": "run", "source": "...", "optimize": True})
+```
+
+### 벡터 타입
+
+| 타입 | 설명 | 팩토리 메서드 |
+|------|------|-------------|
+| `FloatVec` | 32비트 실수 | `from_list([1.0, 2.0])`, `zeros(n)`, `ones(n)` |
+| `IntVec` | 64비트 정수 | `from_list([1, 2])`, `zeros(n)` |
+| `BinaryVec` | {0, 1} 원소 | `from_list([0, 1])`, `zeros(n)`, `ones(n)` |
+| `OneHotVec` | 정확히 1개의 1.0 | `from_index(idx, n)`, `from_list(...)` |
+| `GateVec` | {0.0, 1.0} 원소 | `from_list([1.0, 0.0])`, `zeros(n)`, `ones(n)` |
+| `TransMatrix` | M x N float32 행렬 | `from_list(rows)`, `identity(n)`, `zeros(m, n)` |
+
+### 연산 디스크립터
+
+```python
+from axol.core.program import (
+    # 암호화(E) 연산
+    TransformOp,  # TransformOp(key="v", matrix=M, out_key=None)
+    GateOp,       # GateOp(key="v", gate_key="g", out_key=None)
+    MergeOp,      # MergeOp(keys=["a","b"], weights=w, out_key="out")
+    DistanceOp,   # DistanceOp(key_a="a", key_b="b", metric="euclidean")
+    RouteOp,      # RouteOp(key="v", router=R, out_key="_route")
+    # 평문(P) 연산
+    StepOp,       # StepOp(key="v", threshold=0.0, out_key=None)
+    BranchOp,     # BranchOp(gate_key="g", then_key="a", else_key="b", out_key="out")
+    ClampOp,      # ClampOp(key="v", min_val=-inf, max_val=inf, out_key=None)
+    MapOp,        # MapOp(key="v", fn_name="relu", out_key=None)
+    # 이스케이프 해치
+    CustomOp,     # CustomOp(fn=callable, label="name")  -- security=P
+)
+```
+
+### 분석기
+
+```python
+from axol.core import analyze
+
+result = analyze(program)
+result.coverage_pct        # E / total * 100
+result.encrypted_count     # E 전이 수
+result.plaintext_count     # P 전이 수
+result.encryptable_keys    # E 연산만 접근하는 키
+result.plaintext_keys      # P 연산이 접근하는 키
+print(result.summary())    # 사람이 읽을 수 있는 보고서
+```
+
+### 검증
+
+```python
+from axol.core import verify_states, VerifySpec
+
+result = verify_states(
+    expected=expected_bundle,
+    actual=actual_bundle,
+    specs={"hp": VerifySpec.exact(tolerance=0.01)},
+    strict_keys=False,
+)
+print(result.passed)    # True/False
+print(result.summary()) # 상세 보고서
+```
 
 ---
 
@@ -517,16 +1033,90 @@ s atk=[50] def_val=[20] flag=[1]
 : combine=merge(scaled def_val;w=[1 -1])->damage
 ```
 
+### 5. ReLU 활성화 (map)
+
+```
+@relu
+s x=[-2 0 3 -1 5]
+:act=map(x;fn=relu)
+# Result: x = [0, 0, 3, 0, 5]
+```
+
+### 6. 임계값 선택 (step + branch)
+
+```
+@threshold_select
+s scores=[0.3 0.8 0.1 0.9] high=[100 200 300 400] low=[1 2 3 4]
+:s1=step(scores;t=0.5)->mask
+:b1=branch(mask;then=high,else=low)->result
+# mask = [0, 1, 0, 1]
+# result = [1, 200, 3, 400]
+```
+
+### 7. 데미지 파이프라인 (4개 새 연산 전부 사용)
+
+```
+@damage_pipe
+s raw=[50 30 80 20] armor=[10 40 5 25]
+s crit=[1 0 1 0] bonus=[20 20 20 20] zero=[0 0 0 0]
+:d1=merge(raw armor;w=[1 -1])->diff
+:d2=map(diff;fn=relu)->effective
+:d3=step(crit;t=0.5)->mask
+:d4=branch(mask;then=bonus,else=zero)->crit_bonus
+:d5=merge(effective crit_bonus;w=[1 1])->total
+:d6=clamp(total;min=0,max=9999)
+# diff=[40,-10,75,-5] -> relu=[40,0,75,0] -> +bonus=[60,0,95,0]
+```
+
+### 8. 100-상태 오토마톤 (희소)
+
+```
+@auto_100
+s s=onehot(0,100)
+: step=transform(s;M=sparse(100x100;0,1=1 1,2=1 ... 98,99=1 99,99=1))
+? done s[99]>=1
+```
+
 ---
 
 ## 테스트
 
 ```bash
-# 전체 테스트 (170개)
+# 전체 테스트 (~320개)
 pytest tests/ -v
 
-# DSL 파서 테스트
-pytest tests/test_dsl.py -v
+# 코어 테스트
+pytest tests/test_types.py tests/test_operations.py tests/test_program.py tests/test_dsl.py -v
+
+# 최적화 테스트 (18개)
+pytest tests/test_optimizer.py -v
+
+# 백엔드 테스트 (13개, cupy/jax 미설치 시 스킵)
+pytest tests/test_backend.py -v
+
+# Tool-Use API 테스트 (20개)
+pytest tests/test_api.py -v
+
+# 모듈 시스템 테스트 (18개)
+pytest tests/test_module.py -v
+
+# 암호화 증명 테스트 (21개)
+pytest tests/test_encryption.py -v -s
+
+# 새 연산 테스트 - step/branch/clamp/map (44개)
+pytest tests/test_new_ops.py -v
+
+# 분석기 테스트 - E/P 커버리지 분석 (7개)
+pytest tests/test_analyzer.py -v
+
+# 새 연산 벤치마크 - Python vs C# vs Axol (15개)
+pytest tests/test_benchmark_new_ops.py -v -s
+
+# 서버 엔드포인트 테스트 (13개, fastapi 필요)
+pytest tests/test_server.py -v
+
+# 성능 보고서 생성 (PERFORMANCE_REPORT.md)
+pytest tests/test_performance_report.py -v -s
 
 # 토큰 비용 비교
 pytest tests/test_token_cost.py -v -s
@@ -534,11 +1124,11 @@ pytest tests/test_token_cost.py -v -s
 # 3개 언어 벤치마크 (Python vs C# vs Axol)
 pytest tests/test_benchmark_trilingual.py -v -s
 
-# 암호화 증명 테스트 (21개)
-pytest tests/test_encryption.py -v -s
+# 웹 프론트엔드 실행
+python -m axol.server   # http://localhost:8080
 ```
 
-현재 테스트 수: **170개**, 전부 통과.
+현재 테스트 수: **~320개**, 전부 통과 (4개 스킵: cupy/jax 미설치).
 
 ---
 
@@ -552,11 +1142,13 @@ pytest tests/test_encryption.py -v -s
 - [x] Phase 2: 희소 행렬 표기법
 - [x] Phase 2: 토큰 비용 벤치마크 (Python, C#, Axol)
 - [x] Phase 2: 행렬 암호화 증명 (5개 연산 모두 검증, 21개 테스트)
-- [ ] Phase 3: 컴파일러 최적화 (연산 융합, 데드 상태 제거)
-- [ ] Phase 3: GPU 백엔드 (CuPy / JAX)
-- [ ] Phase 4: AI 에이전트 통합 (tool-use API)
-- [ ] Phase 4: 상태 추적 시각 디버거
-- [ ] Phase 5: 멀티 프로그램 합성 및 모듈 시스템
+- [x] Phase 3: 컴파일러 최적화 (transform 융합, 데드 상태 제거, 상수 폴딩)
+- [x] Phase 3: GPU 백엔드 (numpy/cupy/jax 교체 가능)
+- [x] Phase 4: AI 에이전트용 Tool-Use API (parse/run/inspect/verify/list_ops)
+- [x] Phase 4: 암호화 모듈 (encrypt_program, decrypt_state)
+- [x] Phase 5: 모듈 시스템 (레지스트리, import/use DSL, compose, 스키마 검증)
+- [x] 프론트엔드: FastAPI + 바닐라 HTML/JS 비주얼 디버거 (트레이스 뷰어, 상태 차트, 암호화 데모)
+- [x] 성능 벤치마크 (토큰 비용, 런타임 스케일링, 최적화 효과, 암호화 오버헤드)
 
 ---
 

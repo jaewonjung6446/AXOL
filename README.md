@@ -34,10 +34,11 @@ Instead of traditional control flow (if/else, for loops, function calls), Axol r
 
 - **30-50% fewer tokens** than equivalent Python code
 - **48-75% fewer tokens** than equivalent C# code
-- **5 primitive operations** cover all computation: `transform`, `gate`, `merge`, `distance`, `route`
+- **9 primitive operations** cover all computation: `transform`, `gate`, `merge`, `distance`, `route` (encrypted) + `step`, `branch`, `clamp`, `map` (plaintext)
 - **Sparse matrix notation** scales O(N) vs O(N^2) for dense representations
 - **Deterministic execution** with full state tracing
 - **NumPy backend** enables 500x+ speedup on large vector operations
+- **E/P security classification** - each operation is classified as Encrypted (E) or Plaintext (P), with built-in coverage analyzer
 - **Matrix-level encryption** - secret key matrices make programs cryptographically unreadable, a fundamental solution to the Shadow AI problem
 
 ---
@@ -47,6 +48,7 @@ Instead of traditional control flow (if/else, for loops, function calls), Axol r
 - [Theoretical Background](#theoretical-background)
 - [Shadow AI & Matrix Encryption](#shadow-ai--matrix-encryption)
   - [Encryption Proof: All 5 Operations Verified](#encryption-proof-all-5-operations-verified)
+- [Plaintext Operations & Security Classification](#plaintext-operations--security-classification)
 - [Architecture](#architecture)
 - [Quick Start](#quick-start)
 - [DSL Syntax](#dsl-syntax)
@@ -104,24 +106,33 @@ s state=onehot(0,3)
 
 The state machine's transition table becomes a **matrix**, and state advancement becomes **matrix multiplication**. The AI doesn't need to reason about string comparisons, dictionary lookups, or loop conditions - just a single matrix operation.
 
-### The Five Primitives
+### The Nine Primitives
 
-Axol reduces all computation to five operations, each corresponding to a fundamental linear algebra concept:
+Axol provides nine primitive operations. The first five are **Encrypted (E)** - they can run on encrypted data. The last four are **Plaintext (P)** - they require plaintext but add nonlinear expressiveness:
 
-| Operation | Mathematical Basis | Description |
-|-----------|-------------------|-------------|
-| `transform` | Matrix multiplication: `v @ M` | Linear state transformation |
-| `gate` | Hadamard product: `v * g` | Conditional masking |
-| `merge` | Weighted sum: `sum(v_i * w_i)` | Vector combination |
-| `distance` | L2 / cosine / dot | Similarity measurement |
-| `route` | `argmax(v @ R)` | Discrete branching |
+| Operation | Security | Mathematical Basis | Description |
+|-----------|:--------:|-------------------|-------------|
+| `transform` | **E** | Matrix multiplication: `v @ M` | Linear state transformation |
+| `gate` | **E** | Hadamard product: `v * g` | Conditional masking (0/1) |
+| `merge` | **E** | Weighted sum: `sum(v_i * w_i)` | Vector combination |
+| `distance` | **E** | L2 / cosine / dot | Similarity measurement |
+| `route` | **E** | `argmax(v @ R)` | Discrete branching |
+| `step` | **P** | `where(v >= t, 1, 0)` | Threshold to binary gate |
+| `branch` | **P** | `where(g, then, else)` | Conditional vector select |
+| `clamp` | **P** | `clip(v, min, max)` | Value range restriction |
+| `map` | **P** | `f(v)` element-wise | Nonlinear activation (relu, sigmoid, abs, neg, square, sqrt) |
 
-These five operations form a **computationally complete** basis for expressing:
+The five E operations form a **linear algebra basis** for encrypted computation:
 - State machines (transform)
 - Conditional logic (gate)
 - Accumulation/aggregation (merge)
 - Similarity search (distance)
 - Decision making (route)
+
+The four P operations add **nonlinear expressiveness** for AI/ML workloads:
+- Activation functions (map: relu, sigmoid)
+- Threshold decisions (step + branch)
+- Value normalization (clamp)
 
 ### Sparse Matrix Notation
 
@@ -266,6 +277,70 @@ The encryption compatibility of all 5 Axol operations has been **mathematically 
 
 ---
 
+## Plaintext Operations & Security Classification
+
+### Why Plaintext Operations?
+
+The original 5 encrypted operations are **linear** - they can only express linear transformations. Many real-world AI/ML workloads require **nonlinear** operations (activation functions, conditional branching, value clamping). The 4 new plaintext operations fill this gap.
+
+### SecurityLevel Enum
+
+Every operation carries a `SecurityLevel`:
+
+```python
+from axol.core import SecurityLevel
+
+SecurityLevel.ENCRYPTED  # "E" - can run on encrypted data
+SecurityLevel.PLAINTEXT  # "P" - requires plaintext
+```
+
+### Encryption Coverage Analyzer
+
+The built-in analyzer reports what percentage of a program can run encrypted:
+
+```python
+from axol.core import parse, analyze
+
+program = parse("""
+@damage_calc
+s raw=[50 30] armor=[10 5]
+: diff=merge(raw armor;w=[1 -1])->dmg
+: act=map(dmg;fn=relu)
+: safe=clamp(dmg;min=0,max=100)
+""")
+
+result = analyze(program)
+print(result.summary())
+# Program: damage_calc
+# Transitions: 3 total, 1 encrypted (E), 2 plaintext (P)
+# Coverage: 33.3%
+# Encryptable keys: (keys only E ops touch)
+# Plaintext keys: (keys any P op touches)
+```
+
+### New Ops Token Cost (Python vs C# vs Axol DSL)
+
+| Program | Python | C# | Axol DSL | vs Python | vs C# |
+|---------|-------:|---:|--------:|---------:|------:|
+| ReLU Activation | 48 | 82 | 28 | 42% | 66% |
+| Threshold Select | 140 | 184 | 80 | 43% | 57% |
+| Value Clamp | 66 | 95 | 31 | 53% | 67% |
+| Sigmoid Activation | 57 | 88 | 28 | 51% | 68% |
+| Damage Pipeline | 306 | 326 | 155 | 49% | 53% |
+| **Total** | **617** | **775** | **322** | **48%** | **59%** |
+
+### New Ops Runtime (dim=10,000)
+
+| Operation | Python Loop | Axol (NumPy) | Speedup |
+|-----------|----------:|----------:|--------:|
+| ReLU | 575 us | 21 us | **27x** |
+| Sigmoid | 1.7 ms | 42 us | **40x** |
+| Step+Branch | 889 us | 96 us | **9x** |
+| Clamp | 937 us | 16 us | **58x** |
+| Damage Pipeline | 3.8 ms | 191 us | **20x** |
+
+---
+
 ## Architecture
 
 ```
@@ -289,10 +364,11 @@ The encryption compatibility of all 5 Axol operations has been **mathematically 
                                     |      Types           |
                                     |   (types.py)         |
                     +-----------+   +----------------------+
-                    |Encryption |
-                    |(encryption.py)
-                    +-----------+
-
+                    |Encryption |   +-----------+
+                    |(encryption|   | Analyzer  |
+                    |       .py)|   |(analyzer  |
+                    +-----------+   |       .py)|
+                                    +-----------+
                     +-----------+    +-----------+
                     | Tool API  |    |  Server   |
                     |(api/)     |    |(server/)  |
@@ -306,13 +382,14 @@ The encryption compatibility of all 5 Axol operations has been **mathematically 
 | Module | Description |
 |--------|-------------|
 | `axol.core.types` | 7 vector types (`BinaryVec`, `IntVec`, `FloatVec`, `OneHotVec`, `GateVec`, `TransMatrix`) + `StateBundle` |
-| `axol.core.operations` | 5 primitive operations: `transform`, `gate`, `merge`, `distance`, `route` |
-| `axol.core.program` | Execution engine: `Program`, `Transition`, `run_program`, `UseOp` |
+| `axol.core.operations` | 9 primitive operations: `transform`, `gate`, `merge`, `distance`, `route`, `step`, `branch`, `clamp`, `map_fn` |
+| `axol.core.program` | Execution engine: `Program`, `Transition`, `run_program`, `SecurityLevel`, `StepOp`/`BranchOp`/`ClampOp`/`MapOp` |
 | `axol.core.verify` | State verification with exact/cosine/euclidean matching |
 | `axol.core.dsl` | DSL parser: `parse(source) -> Program` with `import`/`use()` support |
 | `axol.core.optimizer` | 3-pass compiler optimizer: transform fusion, dead state elimination, constant folding |
 | `axol.core.backend` | Pluggable array backend: `numpy` (default), `cupy`, `jax` |
-| `axol.core.encryption` | Similarity transformation encryption: `encrypt_program`, `decrypt_state` |
+| `axol.core.encryption` | Similarity transformation encryption: `encrypt_program`, `decrypt_state` (E/P-aware) |
+| `axol.core.analyzer` | Encryption coverage analyzer: `analyze(program) -> AnalysisResult` with E/P classification |
 | `axol.core.module` | Module system: `Module`, `ModuleRegistry`, `compose()`, schema validation |
 | `axol.api` | Tool-Use API for AI agents: `dispatch(request)`, `get_tool_definitions()` |
 | `axol.server` | FastAPI web server + vanilla HTML/JS visual debugger frontend |
@@ -414,6 +491,8 @@ s hp=[100] mp=[50] stamina=[75]     # Multiple vectors on one line
 ### Operations
 
 ```
+# --- Encrypted (E) operations ---
+
 # transform: matrix multiplication
 : decay=transform(hp;M=[0.8])
 : advance=transform(state;M=[0 1 0;0 0 1;0 0 1])
@@ -430,6 +509,21 @@ s hp=[100] mp=[50] stamina=[75]     # Multiple vectors on one line
 
 # route: argmax routing
 : choice=route(scores;R=[1 0 0;0 1 0;0 0 1])
+
+# --- Plaintext (P) operations ---
+
+# step: threshold to binary gate
+: mask=step(scores;t=0.5)->gate_out
+
+# branch: conditional vector select (requires ->out_key)
+: selected=branch(gate_key;then=high,else=low)->result
+
+# clamp: clip values to range
+: safe=clamp(values;min=0,max=100)
+
+# map: element-wise nonlinear function (relu, sigmoid, abs, neg, square, sqrt)
+: activated=map(x;fn=relu)
+: prob=map(logits;fn=sigmoid)->output
 ```
 
 ### Matrix Formats
@@ -852,13 +946,34 @@ result = dispatch({"action": "run", "source": "...", "optimize": True})
 
 ```python
 from axol.core.program import (
+    # Encrypted (E) operations
     TransformOp,  # TransformOp(key="v", matrix=M, out_key=None)
     GateOp,       # GateOp(key="v", gate_key="g", out_key=None)
     MergeOp,      # MergeOp(keys=["a","b"], weights=w, out_key="out")
     DistanceOp,   # DistanceOp(key_a="a", key_b="b", metric="euclidean")
     RouteOp,      # RouteOp(key="v", router=R, out_key="_route")
-    CustomOp,     # CustomOp(fn=callable, label="name")
+    # Plaintext (P) operations
+    StepOp,       # StepOp(key="v", threshold=0.0, out_key=None)
+    BranchOp,     # BranchOp(gate_key="g", then_key="a", else_key="b", out_key="out")
+    ClampOp,      # ClampOp(key="v", min_val=-inf, max_val=inf, out_key=None)
+    MapOp,        # MapOp(key="v", fn_name="relu", out_key=None)
+    # Escape hatch
+    CustomOp,     # CustomOp(fn=callable, label="name")  -- security=P
 )
+```
+
+### Analyzer
+
+```python
+from axol.core import analyze
+
+result = analyze(program)
+result.coverage_pct        # E / total * 100
+result.encrypted_count     # number of E transitions
+result.plaintext_count     # number of P transitions
+result.encryptable_keys    # keys only accessed by E ops
+result.plaintext_keys      # keys accessed by P ops
+print(result.summary())    # human-readable report
 ```
 
 ### Verification
@@ -918,7 +1033,42 @@ s atk=[50] def_val=[20] flag=[1]
 : combine=merge(scaled def_val;w=[1 -1])->damage
 ```
 
-### 5. 100-State Automaton (Sparse)
+### 5. ReLU Activation (map)
+
+```
+@relu
+s x=[-2 0 3 -1 5]
+:act=map(x;fn=relu)
+# Result: x = [0, 0, 3, 0, 5]
+```
+
+### 6. Threshold Select (step + branch)
+
+```
+@threshold_select
+s scores=[0.3 0.8 0.1 0.9] high=[100 200 300 400] low=[1 2 3 4]
+:s1=step(scores;t=0.5)->mask
+:b1=branch(mask;then=high,else=low)->result
+# mask = [0, 1, 0, 1]
+# result = [1, 200, 3, 400]
+```
+
+### 7. Damage Pipeline (all 4 new ops)
+
+```
+@damage_pipe
+s raw=[50 30 80 20] armor=[10 40 5 25]
+s crit=[1 0 1 0] bonus=[20 20 20 20] zero=[0 0 0 0]
+:d1=merge(raw armor;w=[1 -1])->diff
+:d2=map(diff;fn=relu)->effective
+:d3=step(crit;t=0.5)->mask
+:d4=branch(mask;then=bonus,else=zero)->crit_bonus
+:d5=merge(effective crit_bonus;w=[1 1])->total
+:d6=clamp(total;min=0,max=9999)
+# diff=[40,-10,75,-5] -> relu=[40,0,75,0] -> +bonus=[60,0,95,0]
+```
+
+### 8. 100-State Automaton (Sparse)
 
 ```
 @auto_100
@@ -932,7 +1082,7 @@ s s=onehot(0,100)
 ## Test Suite
 
 ```bash
-# Run all tests (260 tests)
+# Run all tests (~320 tests)
 pytest tests/ -v
 
 # Core tests
@@ -953,6 +1103,15 @@ pytest tests/test_module.py -v
 # Encryption proof-of-concept (21 tests)
 pytest tests/test_encryption.py -v -s
 
+# New ops tests - step/branch/clamp/map (44 tests)
+pytest tests/test_new_ops.py -v
+
+# Analyzer tests - E/P coverage analysis (7 tests)
+pytest tests/test_analyzer.py -v
+
+# New ops benchmark - Python vs C# vs Axol (15 tests)
+pytest tests/test_benchmark_new_ops.py -v -s
+
 # Server endpoint tests (13 tests, requires fastapi)
 pytest tests/test_server.py -v
 
@@ -969,7 +1128,7 @@ pytest tests/test_benchmark_trilingual.py -v -s
 python -m axol.server   # http://localhost:8080
 ```
 
-Current test count: **260 tests**, all passing (4 skipped: cupy/jax not installed).
+Current test count: **~320 tests**, all passing (4 skipped: cupy/jax not installed).
 
 ---
 

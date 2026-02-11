@@ -29,12 +29,22 @@ class OpKind(Enum):
     MERGE = auto()
     DISTANCE = auto()
     ROUTE = auto()
+    STEP = auto()
+    BRANCH = auto()
+    CLAMP = auto()
+    MAP = auto()
     CUSTOM = auto()
+
+
+class SecurityLevel(Enum):
+    ENCRYPTED = "E"   # can run on encrypted data
+    PLAINTEXT = "P"   # requires plaintext
 
 
 @dataclass(frozen=True)
 class TransformOp:
     kind: OpKind = field(default=OpKind.TRANSFORM, init=False)
+    security: SecurityLevel = field(default=SecurityLevel.ENCRYPTED, init=False)
     key: str
     matrix: TransMatrix
     out_key: str | None = None
@@ -43,6 +53,7 @@ class TransformOp:
 @dataclass(frozen=True)
 class GateOp:
     kind: OpKind = field(default=OpKind.GATE, init=False)
+    security: SecurityLevel = field(default=SecurityLevel.ENCRYPTED, init=False)
     key: str
     gate_key: str  # key of GateVec in the bundle
     out_key: str | None = None
@@ -51,6 +62,7 @@ class GateOp:
 @dataclass(frozen=True)
 class MergeOp:
     kind: OpKind = field(default=OpKind.MERGE, init=False)
+    security: SecurityLevel = field(default=SecurityLevel.ENCRYPTED, init=False)
     keys: list[str]
     weights: FloatVec
     out_key: str
@@ -59,6 +71,7 @@ class MergeOp:
 @dataclass(frozen=True)
 class DistanceOp:
     kind: OpKind = field(default=OpKind.DISTANCE, init=False)
+    security: SecurityLevel = field(default=SecurityLevel.ENCRYPTED, init=False)
     key_a: str
     key_b: str
     metric: str = "euclidean"
@@ -68,6 +81,7 @@ class DistanceOp:
 @dataclass(frozen=True)
 class RouteOp:
     kind: OpKind = field(default=OpKind.ROUTE, init=False)
+    security: SecurityLevel = field(default=SecurityLevel.ENCRYPTED, init=False)
     key: str
     router: TransMatrix
     out_key: str = "_route"
@@ -77,11 +91,58 @@ class RouteOp:
 class CustomOp:
     """Escape hatch: user-supplied function operating on the full StateBundle."""
     kind: OpKind = field(default=OpKind.CUSTOM, init=False)
+    security: SecurityLevel = field(default=SecurityLevel.PLAINTEXT, init=False)
     fn: Callable[[StateBundle], StateBundle]
     label: str = "custom"
 
 
-Operation = TransformOp | GateOp | MergeOp | DistanceOp | RouteOp | CustomOp
+@dataclass(frozen=True)
+class StepOp:
+    """Threshold → binary gate vector (Plaintext only)."""
+    kind: OpKind = field(default=OpKind.STEP, init=False)
+    security: SecurityLevel = field(default=SecurityLevel.PLAINTEXT, init=False)
+    key: str
+    threshold: float = 0.0
+    out_key: str | None = None
+
+
+@dataclass(frozen=True)
+class BranchOp:
+    """Conditional select via gate vector (Plaintext only)."""
+    kind: OpKind = field(default=OpKind.BRANCH, init=False)
+    security: SecurityLevel = field(default=SecurityLevel.PLAINTEXT, init=False)
+    gate_key: str
+    then_key: str
+    else_key: str
+    out_key: str
+
+
+@dataclass(frozen=True)
+class ClampOp:
+    """Clip values to [min, max] (Plaintext only)."""
+    kind: OpKind = field(default=OpKind.CLAMP, init=False)
+    security: SecurityLevel = field(default=SecurityLevel.PLAINTEXT, init=False)
+    key: str
+    min_val: float = float("-inf")
+    max_val: float = float("inf")
+    out_key: str | None = None
+
+
+@dataclass(frozen=True)
+class MapOp:
+    """Apply named element-wise function (Plaintext only)."""
+    kind: OpKind = field(default=OpKind.MAP, init=False)
+    security: SecurityLevel = field(default=SecurityLevel.PLAINTEXT, init=False)
+    key: str
+    fn_name: str
+    out_key: str | None = None
+
+
+Operation = (
+    TransformOp | GateOp | MergeOp | DistanceOp | RouteOp
+    | StepOp | BranchOp | ClampOp | MapOp
+    | CustomOp
+)
 
 
 # ---------------------------------------------------------------------------
@@ -163,6 +224,21 @@ def _apply(op: Operation, state: StateBundle) -> StateBundle:
         idx = ops.route(state[op.key], op.router)
         from axol.core.types import IntVec
         s[op.out_key] = IntVec.from_list([idx])
+
+    elif isinstance(op, StepOp):
+        s[op.out_key or op.key] = ops.step(state[op.key], op.threshold)
+
+    elif isinstance(op, BranchOp):
+        g = state[op.gate_key]
+        if not isinstance(g, GateVec):
+            raise TypeError(f"Expected GateVec at key '{op.gate_key}', got {type(g).__name__}")
+        s[op.out_key] = ops.branch(g, state[op.then_key], state[op.else_key])
+
+    elif isinstance(op, ClampOp):
+        s[op.out_key or op.key] = ops.clamp(state[op.key], op.min_val, op.max_val)
+
+    elif isinstance(op, MapOp):
+        s[op.out_key or op.key] = ops.map_fn(state[op.key], op.fn_name)
 
     elif isinstance(op, CustomOp):
         s = op.fn(state)

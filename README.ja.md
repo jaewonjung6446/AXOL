@@ -34,10 +34,11 @@
 
 - Pythonと比較して**30〜50%少ないトークン**消費
 - C#と比較して**48〜75%少ないトークン**消費
-- **5つのプリミティブ演算**ですべての計算を表現：`transform`、`gate`、`merge`、`distance`、`route`
+- **9つのプリミティブ演算**ですべての計算を表現：`transform`、`gate`、`merge`、`distance`、`route`（暗号化対応） + `step`、`branch`、`clamp`、`map`（平文演算）
 - **疎行列表記法**：密表現のO(N^2)に対しO(N)でスケーリング
 - 完全な状態トレーシングによる**決定論的実行**
 - **NumPyバックエンド**による大規模ベクトル演算の500倍以上の高速化
+- **E/Pセキュリティ分類** - 各演算が暗号化（E）または平文（P）に分類され、組み込みのカバレッジアナライザーを提供
 - **行列レベル暗号化** - 秘密鍵行列によりプログラムを暗号学的に解読不能にし、シャドーAI問題を根本的に解決
 
 ---
@@ -47,11 +48,18 @@
 - [理論的背景](#理論的背景)
 - [シャドーAIと行列暗号化](#シャドーaiと行列暗号化)
   - [暗号化証明：全5演算の検証完了](#暗号化証明全5演算の検証完了)
+- [平文演算とセキュリティ分類](#平文演算とセキュリティ分類)
 - [アーキテクチャ](#アーキテクチャ)
 - [クイックスタート](#クイックスタート)
 - [DSL構文](#dsl構文)
+- [コンパイラ最適化](#コンパイラ最適化)
+- [GPUバックエンド](#gpuバックエンド)
+- [モジュールシステム](#モジュールシステム)
+- [Tool-Use API](#tool-use-api)
+- [Webフロントエンド](#webフロントエンド)
 - [トークンコスト比較](#トークンコスト比較)
 - [ランタイム性能](#ランタイム性能)
+- [性能ベンチマーク](#性能ベンチマーク)
 - [APIリファレンス](#apiリファレンス)
 - [使用例](#使用例)
 - [テスト](#テスト)
@@ -98,24 +106,33 @@ s state=onehot(0,3)
 
 状態機械の遷移テーブルが**行列**となり、状態遷移が**行列乗算**になります。AIは文字列比較、辞書検索、ループ条件を推論する必要がなく、単一の行列演算だけで済みます。
 
-### 5つのプリミティブ演算
+### 9つのプリミティブ演算
 
-Axolはすべての計算を5つの演算に帰着させます。それぞれが基本的な線形代数の概念に対応します：
+Axolは9つのプリミティブ演算を提供します。最初の5つは**暗号化対応（E）** - 暗号化されたデータ上で実行可能です。残りの4つは**平文（P）** - 平文が必要ですが、非線形な表現力を追加します：
 
-| 演算 | 数学的基盤 | 説明 |
-|------|----------|------|
-| `transform` | 行列積：`v @ M` | 線形状態変換 |
-| `gate` | アダマール積：`v * g` | 条件付きマスキング |
-| `merge` | 加重和：`sum(v_i * w_i)` | ベクトル結合 |
-| `distance` | L2 / コサイン / 内積 | 類似度測定 |
-| `route` | `argmax(v @ R)` | 離散分岐 |
+| 演算 | セキュリティ | 数学的基盤 | 説明 |
+|------|:----------:|----------|------|
+| `transform` | **E** | 行列積：`v @ M` | 線形状態変換 |
+| `gate` | **E** | アダマール積：`v * g` | 条件付きマスキング（0/1） |
+| `merge` | **E** | 加重和：`sum(v_i * w_i)` | ベクトル結合 |
+| `distance` | **E** | L2 / コサイン / 内積 | 類似度測定 |
+| `route` | **E** | `argmax(v @ R)` | 離散分岐 |
+| `step` | **P** | `where(v >= t, 1, 0)` | 閾値によるバイナリゲート変換 |
+| `branch` | **P** | `where(g, then, else)` | 条件付きベクトル選択 |
+| `clamp` | **P** | `clip(v, min, max)` | 値範囲の制限 |
+| `map` | **P** | `f(v)` 要素ごと | 非線形活性化関数（relu、sigmoid、abs、neg、square、sqrt） |
 
-これら5つの演算で以下を表現できます：
+5つのE演算は暗号化計算のための**線形代数基盤**を形成します：
 - 状態機械 (transform)
 - 条件ロジック (gate)
 - 蓄積・集約 (merge)
 - 類似度検索 (distance)
 - 意思決定 (route)
+
+4つのP演算はAI/MLワークロード向けの**非線形表現力**を追加します：
+- 活性化関数 (map: relu, sigmoid)
+- 閾値判定 (step + branch)
+- 値の正規化 (clamp)
 
 ### 疎行列表記法
 
@@ -260,40 +277,122 @@ Axolの全5演算の暗号化互換性が**数学的に証明・テスト済み*
 
 ---
 
+## 平文演算とセキュリティ分類
+
+### なぜ平文演算が必要か？
+
+元の5つの暗号化対応演算は**線形**であり、線形変換のみ表現可能です。現実のAI/MLワークロードの多くは**非線形**演算（活性化関数、条件分岐、値のクランプ）を必要とします。4つの新しい平文演算がこのギャップを埋めます。
+
+### SecurityLevel列挙型
+
+すべての演算は`SecurityLevel`を持ちます：
+
+```python
+from axol.core import SecurityLevel
+
+SecurityLevel.ENCRYPTED  # "E" - 暗号化データ上で実行可能
+SecurityLevel.PLAINTEXT  # "P" - 平文が必要
+```
+
+### 暗号化カバレッジアナライザー
+
+組み込みのアナライザーが、プログラムのどの程度が暗号化状態で実行可能かを報告します：
+
+```python
+from axol.core import parse, analyze
+
+program = parse("""
+@damage_calc
+s raw=[50 30] armor=[10 5]
+: diff=merge(raw armor;w=[1 -1])->dmg
+: act=map(dmg;fn=relu)
+: safe=clamp(dmg;min=0,max=100)
+""")
+
+result = analyze(program)
+print(result.summary())
+# Program: damage_calc
+# Transitions: 3 total, 1 encrypted (E), 2 plaintext (P)
+# Coverage: 33.3%
+# Encryptable keys: (E演算のみがアクセスするキー)
+# Plaintext keys: (P演算がアクセスするキー)
+```
+
+### 新演算のトークンコスト（Python vs C# vs Axol DSL）
+
+| プログラム | Python | C# | Axol DSL | vs Python | vs C# |
+|-----------|-------:|---:|--------:|---------:|------:|
+| ReLU活性化 | 48 | 82 | 28 | 42% | 66% |
+| 閾値選択 | 140 | 184 | 80 | 43% | 57% |
+| 値クランプ | 66 | 95 | 31 | 53% | 67% |
+| Sigmoid活性化 | 57 | 88 | 28 | 51% | 68% |
+| ダメージパイプライン | 306 | 326 | 155 | 49% | 53% |
+| **合計** | **617** | **775** | **322** | **48%** | **59%** |
+
+### 新演算のランタイム（dim=10,000）
+
+| 演算 | Pythonループ | Axol（NumPy） | 高速化 |
+|------|----------:|----------:|--------:|
+| ReLU | 575 us | 21 us | **27x** |
+| Sigmoid | 1.7 ms | 42 us | **40x** |
+| Step+Branch | 889 us | 96 us | **9x** |
+| Clamp | 937 us | 16 us | **58x** |
+| ダメージパイプライン | 3.8 ms | 191 us | **20x** |
+
+---
+
 ## アーキテクチャ
 
 ```
-                    +-----------+
-  .axolソース ----->| パーサー  |----> Programオブジェクト
-                    | (dsl.py)  |         |
-                    +-----------+         |
-                                          v
+                                          +-------------+
+  .axolソース -----> パーサー (dsl.py) --> | Program     |
+                         |                | + optimize()|
+                         v                +------+------+
+                    モジュールシステム            |
+                    (module.py)                  v
+                      - import             +-----------+    +-----------+
+                      - use()              |  エンジン  |--->|  検証器   |
+                      - compose()          |(program.py)|    |(verify.py)|
+                                           +-----------+    +-----------+
+                                                |
+                    +-----------+    +----------+----------+
+                    | バックエンド|<---|    演算モジュール    |
+                    |(backend.py)|    | (operations.py)     |
+                    | numpy/cupy|    +---------------------+
+                    | /jax      |               |
+                    +-----------+    +-----------+----------+
+                                    |      型システム       |
+                                    |   (types.py)         |
+                    +-----------+   +----------------------+
+                    |  暗号化   |   +-----------+
+                    |(encryption|   |アナライザー|
+                    |       .py)|   |(analyzer  |
+                    +-----------+   |       .py)|
+                                    +-----------+
                     +-----------+    +-----------+
-                    | 検証器    |<---| 実行エンジン|
-                    |(verify.py)|    |(program.py)|
+                    | Tool API  |    |  Server   |
+                    |(api/)     |    |(server/)  |
+                    | dispatch  |    | FastAPI   |
+                    | tools     |    | HTML/JS   |
                     +-----------+    +-----------+
-                                          |
-                         使用             |
-                    +-----------+         |
-                    | 演算モジュール|<------+
-                    | (ops.py)  |
-                    +-----------+
-                         |
-                    +-----------+
-                    | 型システム |
-                    |(types.py) |
-                    +-----------+
 ```
 
 ### モジュール概要
 
 | モジュール | 説明 |
 |-----------|------|
-| `axol.core.types` | 7つのベクトル型 + `StateBundle` |
-| `axol.core.operations` | 5つのプリミティブ演算 |
-| `axol.core.program` | 実行エンジン：`Program`、`Transition`、`run_program` |
+| `axol.core.types` | 7つのベクトル型（`BinaryVec`、`IntVec`、`FloatVec`、`OneHotVec`、`GateVec`、`TransMatrix`）+ `StateBundle` |
+| `axol.core.operations` | 9つのプリミティブ演算：`transform`、`gate`、`merge`、`distance`、`route`、`step`、`branch`、`clamp`、`map_fn` |
+| `axol.core.program` | 実行エンジン：`Program`、`Transition`、`run_program`、`SecurityLevel`、`StepOp`/`BranchOp`/`ClampOp`/`MapOp` |
 | `axol.core.verify` | 状態検証（exact/cosine/euclidean マッチング） |
-| `axol.core.dsl` | DSLパーサー：`parse(source) -> Program` |
+| `axol.core.dsl` | DSLパーサー：`parse(source) -> Program`（`import`/`use()`サポート） |
+| `axol.core.optimizer` | 3パスコンパイラ最適化：transform融合、デッドステート除去、定数畳み込み |
+| `axol.core.backend` | プラガブル配列バックエンド：`numpy`（デフォルト）、`cupy`、`jax` |
+| `axol.core.encryption` | 相似変換暗号化：`encrypt_program`、`decrypt_state`（E/P対応） |
+| `axol.core.analyzer` | 暗号化カバレッジアナライザー：`analyze(program) -> AnalysisResult`（E/P分類） |
+| `axol.core.module` | モジュールシステム：`Module`、`ModuleRegistry`、`compose()`、スキーマ検証 |
+| `axol.api` | AIエージェント向けTool-Use API：`dispatch(request)`、`get_tool_definitions()` |
+| `axol.server` | FastAPI Webサーバー + バニラHTML/JSビジュアルデバッガーフロントエンド |
 
 ---
 
@@ -302,8 +401,11 @@ Axolの全5演算の暗号化互換性が**数学的に証明・テスト済み*
 ### インストール
 
 ```bash
+# リポジトリをクローン
 git clone https://github.com/your-username/AXOL.git
 cd AXOL
+
+# 依存関係をインストール
 pip install -e ".[dev]"
 ```
 
@@ -313,6 +415,9 @@ pip install -e ".[dev]"
 - NumPy >= 1.24.0
 - pytest >= 7.4.0（開発用）
 - tiktoken >= 0.5.0（開発用、トークン分析）
+- fastapi >= 0.100.0、uvicorn >= 0.23.0（オプション、Webフロントエンド用）
+- cupy-cuda12x >= 12.0.0（オプション、GPU用）
+- jax[cpu] >= 0.4.0（オプション、JAXバックエンド用）
 
 ### Hello World - DSL
 
@@ -386,6 +491,8 @@ s hp=[100] mp=[50] stamina=[75]     # 1行に複数ベクトル宣言
 ### 演算
 
 ```
+# --- 暗号化対応（E）演算 ---
+
 # transform：行列乗算
 : decay=transform(hp;M=[0.8])
 : advance=transform(state;M=[0 1 0;0 0 1;0 0 1])
@@ -402,6 +509,21 @@ s hp=[100] mp=[50] stamina=[75]     # 1行に複数ベクトル宣言
 
 # route：argmaxルーティング
 : choice=route(scores;R=[1 0 0;0 1 0;0 0 1])
+
+# --- 平文（P）演算 ---
+
+# step：閾値によるバイナリゲート変換
+: mask=step(scores;t=0.5)->gate_out
+
+# branch：条件付きベクトル選択（->out_keyが必要）
+: selected=branch(gate_key;then=high,else=low)->result
+
+# clamp：値を範囲内にクリップ
+: safe=clamp(values;min=0,max=100)
+
+# map：要素ごとの非線形関数（relu、sigmoid、abs、neg、square、sqrt）
+: activated=map(x;fn=relu)
+: prob=map(logits;fn=sigmoid)->output
 ```
 
 ### 行列形式
@@ -413,7 +535,7 @@ M=[1 0;0 1]                           # 2x2 単位行列
 M=[0 1 0;0 0 1;0 0 1]                # 3x3 シフト行列
 
 # 疎：非ゼロ要素のみ表記
-M=sparse(100x100;0,1=1 1,2=1 99,99=1)
+M=sparse(100x100;0,1=1 1,2=1 99,99=1) # 100x100、100エントリ
 ```
 
 ### ターミナル条件
@@ -426,11 +548,217 @@ M=sparse(100x100;0,1=1 1,2=1 99,99=1)
 
 `?`行がない場合は**パイプラインモード**で実行されます（すべての遷移が1回実行）。
 
+### コメント
+
+```
+# これはコメントです
+@my_program
+# コメントはどこにでも記述可能
+s v=[1 2 3]
+: t=transform(v;M=[1 0 0;0 1 0;0 0 1])
+```
+
+---
+
+## コンパイラ最適化
+
+`optimize()`は3つのパスを適用してプログラムサイズを削減し、定数を事前計算します：
+
+```python
+from axol.core import parse, optimize, run_program
+
+program = parse(source)
+optimized = optimize(program)   # 融合 + 除去 + 畳み込み
+result = run_program(optimized)
+```
+
+### パス1：Transform融合
+
+同じキーに対する連続した`TransformOp`を単一の行列乗算に融合します：
+
+```
+# 最適化前：2つの遷移、反復ごとに2回の行列乗算
+: t1=transform(v;M=[0 1 0;0 0 1;1 0 0])
+: t2=transform(v;M=[2 0 0;0 2 0;0 0 2])
+
+# 最適化後：1つの遷移、1回の行列乗算（M_fused = M1 @ M2）
+: t1+t2=transform(v;M_fused)
+```
+
+- `CustomOp`の境界を越えません
+- 固定点反復により3つ以上のチェーンを処理
+- 2つのtransformを持つパイプライン：**遷移数-50%、実行時間-45%**
+
+### パス2：デッドステート除去
+
+遷移で一度も読み取られない初期状態ベクトルを削除します：
+
+```
+s used=[1 0]  unused=[99 99]   # unusedは参照されない
+: t=transform(used;M=[...])
+
+# 最適化後：unusedが初期状態から削除
+```
+
+- `CustomOp`に対して保守的（すべての状態を保持）
+- `terminal_key`は常に「読み取り済み」として扱われる
+
+### パス3：定数畳み込み
+
+不変キー（書き込まれることのないキー）に対するtransformを事前計算します：
+
+```
+s constant=[1 0 0]
+: t=transform(constant;M=[0 1 0;0 0 1;1 0 0])->result
+
+# 最適化後：遷移が除去され、result=[0,1,0]が初期状態に格納
+```
+
+---
+
+## GPUバックエンド
+
+`numpy`（デフォルト）、`cupy`（NVIDIA GPU）、`jax`をサポートするプラガブル配列バックエンド：
+
+```python
+from axol.core import set_backend, get_backend_name
+
+set_backend("numpy")   # デフォルト - CPU
+set_backend("cupy")    # NVIDIA GPU（cupyのインストールが必要）
+set_backend("jax")     # Google JAX（jaxのインストールが必要）
+```
+
+オプションバックエンドのインストール：
+
+```bash
+pip install axol[gpu]   # cupy-cuda12x
+pip install axol[jax]   # jax[cpu]
+```
+
+既存のコードはすべて透過的に動作します - バックエンド切り替えはグローバルで、すべてのベクトル/行列演算に影響します。
+
+---
+
+## モジュールシステム
+
+スキーマ、インポート、サブモジュール実行を備えた、再利用・合成可能なプログラム。
+
+### モジュール定義
+
+```python
+from axol.core.module import Module, ModuleSchema, VecSchema, ModuleRegistry
+
+schema = ModuleSchema(
+    inputs=[VecSchema("atk", "float", 1), VecSchema("def_val", "float", 1)],
+    outputs=[VecSchema("dmg", "float", 1)],
+)
+module = Module(name="damage_calc", program=program, schema=schema)
+```
+
+### レジストリとファイル読み込み
+
+```python
+registry = ModuleRegistry()
+registry.load_from_file("damage_calc.axol")
+registry.resolve_import("heal", relative_to="main.axol")
+```
+
+### DSLのインポートとuse構文
+
+```
+@main
+import damage_calc from "damage_calc.axol"
+s atk=[50] def_val=[10]
+: calc=use(damage_calc;in=atk,def_val;out=dmg)
+```
+
+### プログラム合成
+
+```python
+from axol.core.module import compose
+combined = compose(program_a, program_b, name="combined")
+```
+
+---
+
+## Tool-Use API
+
+AIエージェントがAxolプログラムをパース、実行、検証するためのJSON呼び出しインターフェース：
+
+```python
+from axol.api import dispatch
+
+# パース
+result = dispatch({"action": "parse", "source": "@prog\ns v=[1]\n: t=transform(v;M=[2])"})
+# -> {"program_name": "prog", "state_keys": ["v"], "transition_count": 1, "has_terminal": false}
+
+# 実行
+result = dispatch({"action": "run", "source": "...", "optimize": True})
+# -> {"final_state": {"v": [2.0]}, "steps_executed": 1, "terminated_by": "pipeline_end"}
+
+# ステップごとの検査
+result = dispatch({"action": "inspect", "source": "...", "step": 1})
+
+# 演算一覧
+result = dispatch({"action": "list_ops"})
+
+# 期待出力の検証
+result = dispatch({"action": "verify", "source": "...", "expected": {"v": [2.0]}})
+```
+
+AIエージェント向けツール定義（JSON Schema）は`get_tool_definitions()`で取得できます。
+
+---
+
+## Webフロントエンド
+
+バニラHTML/JSビジュアルデバッガーを搭載したFastAPIサーバー：
+
+```bash
+pip install axol[server]    # fastapi + uvicorn
+python -m axol.server       # http://localhost:8080
+```
+
+### 機能
+
+| パネル | 説明 |
+|--------|------|
+| **DSLエディタ** | サンプルドロップダウン付きの構文編集 |
+| **実行** | 実行/最適化ボタン、結果サマリー（ステップ数、時間、終了条件） |
+| **トレースビューア** | ステップごとの状態テーブル（前へ/次へ/再生コントロール付き） |
+| **状態チャート** | Chart.js時系列グラフ（X=ステップ、Y=ベクトル値） |
+| **暗号化デモ** | 元の行列 vs 暗号化行列のヒートマップ、暗号化/実行/復号ワークフロー |
+| **パフォーマンス** | オプティマイザーの前後比較、トークンコスト分析 |
+
+### APIエンドポイント
+
+```
+POST /api/parse       - DSLソースをパース
+POST /api/run         - パース + 実行 + 完全なトレース
+POST /api/optimize    - オプティマイザーの前後比較
+POST /api/encrypt     - プログラムの暗号化 + 実行 + 復号
+GET  /api/examples    - 組み込みサンプルプログラム
+GET  /api/ops         - 演算の説明
+POST /api/token-cost  - トークン数分析（Axol vs Python vs C#）
+POST /api/module/run  - サブモジュール付きプログラムの実行
+```
+
 ---
 
 ## トークンコスト比較
 
 `tiktoken` cl100k_baseトークナイザーで測定（GPT-4 / Claude使用）。
+
+### Python vs Axol DSL
+
+| プログラム | Python | Axol DSL | 削減 |
+|-----------|--------|----------|------|
+| Counter (0->5) | 32 | 33 | -3.1% |
+| State Machine (3-state) | 67 | 47 | 29.9% |
+| HP Decay (3 rounds) | 51 | 32 | 37.3% |
+| RPG Damage Calc | 130 | 90 | 30.8% |
+| 100-State Automaton | 1,034 | 636 | 38.5% |
+| **合計** | **1,314** | **838** | **36.2%** |
 
 ### Python vs C# vs Axol DSL
 
@@ -447,15 +775,15 @@ M=sparse(100x100;0,1=1 1,2=1 99,99=1)
 
 ### 主な知見
 
-1. **単純なプログラム**（counter、hp_decay）：DSLはPythonと同等です。
+1. **単純なプログラム**（counter、hp_decay）：DSLはPythonと同等です。DSL構文のオーバーヘッドは、単純なプログラムにおけるPythonの最小限の構文とほぼ同じです。
 2. **構造化プログラム**（combat、data_heavy、pattern_match）：DSLはPython比**50〜68%**、C#比**67〜75%**のトークン削減を達成。ベクトル表現がクラス定義、制御フロー、ボイラープレートを排除します。
-3. **大規模状態空間**（100+状態）：疎行列表記法がPython比**約38%**、C#比**約27%**の一貫した削減を提供し、O(N)スケーリングを実現します。
+3. **大規模状態空間**（100+状態）：疎行列表記法がPython比**約38%**、C#比**約27%**の一貫した削減を提供し、O(N)スケーリング vs O(N^2)を実現します。
 
 ---
 
 ## ランタイム性能
 
-AxolはNumPyを計算バックエンドとして使用します。
+AxolはNumPyを計算バックエンドとして使用します。性能特性は以下の通りです：
 
 ### 小規模ベクトル（dim < 100）
 
@@ -464,6 +792,8 @@ AxolはNumPyを計算バックエンドとして使用します。
 | dim=4 | ~6 us | ~11 us | Python 2x |
 | dim=100 | ~14 us | ~20 us | Python 1.4x |
 
+小規模ベクトルでは、NumPyの呼び出しオーバーヘッドのためPythonのネイティブループが高速です。これは想定通りであり許容範囲です - 小規模プログラムはいずれにしても高速です。
+
 ### 大規模ベクトル（dim >= 1000）
 
 | 次元 | Pythonループ | Axol（NumPy） | 優位 |
@@ -471,7 +801,195 @@ AxolはNumPyを計算バックエンドとして使用します。
 | dim=1,000（行列積） | ~129 ms | ~0.2 ms | **Axol 573x** |
 | dim=10,000（行列積） | ~14,815 ms | ~381 ms | **Axol 39x** |
 
-大規模ベクトル演算（行列乗算）において、AxolのNumPyバックエンドは純粋なPythonループよりも**数百倍高速**です。
+大規模ベクトル演算（行列乗算）において、AxolのNumPyバックエンドは純粋なPythonループよりも**桁違いに高速**です。
+
+### 使い分けガイド
+
+| シナリオ | 推奨 |
+|---------|------|
+| AIエージェントのコード生成 | Axol DSL（トークン削減 = コスト削減） |
+| 大規模状態空間（100+次元） | Axol（NumPy高速化 + 疎表記法） |
+| シンプルなスクリプト（10行以下） | Python（オーバーヘッドが少ない） |
+| 人間が読めるビジネスロジック | Python/C#（慣れた構文） |
+
+---
+
+## 性能ベンチマーク
+
+`pytest tests/test_performance_report.py -v -s`で自動生成されます。詳細は[PERFORMANCE_REPORT.md](PERFORMANCE_REPORT.md)を参照してください。
+
+### トークン効率（Axol vs Python vs C#）
+
+| プログラム | Axol | Python | C# | vs Python | vs C# |
+|-----------|------|--------|----|-----------|-------|
+| Counter (0->5) | 11 | 45 | 78 | **76%削減** | **86%削減** |
+| 3-State FSM | 14 | 52 | 89 | **73%削減** | **84%削減** |
+| HP Decay | 14 | 58 | 95 | **76%削減** | **85%削減** |
+| Combat Pipeline | 14 | 55 | 92 | **75%削減** | **85%削減** |
+| Matrix Chain | 21 | 60 | 98 | **65%削減** | **79%削減** |
+
+平均：Pythonと比較して**74%少ないトークン**、C#と比較して**85%少ないトークン**。
+
+### 次元別実行時間
+
+| 次元 | 平均時間 |
+|------|---------|
+| 4 | 0.25 ms |
+| 100 | 0.17 ms |
+| 1,000 | 1.41 ms |
+
+### オプティマイザー効果
+
+| プログラム | 最適化前 | 最適化後 | 時間削減 |
+|-----------|---------|---------|---------|
+| Pipeline (2 transforms) | 2 transitions | 1 transition | **-45%** |
+| Counter (loop) | 2 transitions | 2 transitions | - |
+| FSM (loop) | 2 transitions | 2 transitions | - |
+
+Transform融合は、連続した行列演算を持つパイプラインプログラムで最も効果的です。
+
+### 暗号化オーバーヘッド
+
+| プログラム | 平文 | 暗号化 | オーバーヘッド |
+|-----------|------|--------|-------------|
+| Pipeline (1 pass) | 0.12 ms | 0.12 ms | **約0%** |
+| 3-State FSM (loop) | 0.62 ms | 276.8 ms | +44,633% |
+
+パイプラインモード：オーバーヘッドは無視できます。ループモード：暗号化されたターミナル条件が早期終了をトリガーできないため、`max_iterations`まで実行が継続し、高いオーバーヘッドが発生します。
+
+### スケーリング（N状態オートマトン）
+
+| 状態数 | トークン | 実行時間 |
+|--------|---------|---------|
+| 5 | 28 | 1.6 ms |
+| 20 | 388 | 4.3 ms |
+| 50 | 2,458 | 12.9 ms |
+| 100 | 9,908 | 27.9 ms |
+| 200 | 39,808 | 59.2 ms |
+
+疎行列表記法によりトークンは**O(N)**で増加します（Python/C#のO(N^2)と比較）。実行時間は行列乗算によりおよそO(N^2)で増加しますが、200状態のプログラムでも60ms以下です。
+
+---
+
+## APIリファレンス
+
+### `parse(source, registry=None, source_path=None) -> Program`
+
+Axol DSLソーステキストを実行可能な`Program`オブジェクトにパースします。
+
+```python
+from axol.core import parse
+program = parse("@test\ns v=[1 2 3]\n: t=transform(v;M=[1 0 0;0 1 0;0 0 1])")
+
+# import/useサポート付きのモジュールレジストリ
+from axol.core.module import ModuleRegistry
+registry = ModuleRegistry()
+program = parse(source, registry=registry, source_path="main.axol")
+```
+
+### `run_program(program: Program) -> ExecutionResult`
+
+プログラムを実行し、結果を返します。
+
+```python
+from axol.core import run_program
+result = run_program(program)
+result.final_state     # 最終ベクトル値を含むStateBundle
+result.steps_executed  # 遷移ステップの総数
+result.terminated_by   # "pipeline_end" | "terminal_condition" | "max_iterations"
+result.trace           # デバッグ用TraceEntryのリスト
+result.verification    # expected_stateが設定されている場合のVerifyResult
+```
+
+### `optimize(program, *, fuse=True, eliminate_dead=True, fold_constants=True) -> Program`
+
+元のプログラムを変更せずに最適化したプログラムを返します。
+
+```python
+from axol.core import optimize
+optimized = optimize(program)                          # 全パス
+optimized = optimize(program, fold_constants=False)    # 選択的パス
+```
+
+### `set_backend(name) / get_backend() / to_numpy(arr)`
+
+配列計算バックエンドを切り替えます。
+
+```python
+from axol.core import set_backend, get_backend, to_numpy
+set_backend("cupy")     # GPUに切り替え
+xp = get_backend()      # cupyモジュールを返す
+arr = to_numpy(gpu_arr) # numpyに変換
+```
+
+### `dispatch(request) -> dict`
+
+AIエージェント向けTool-Use APIのエントリポイント。
+
+```python
+from axol.api import dispatch
+result = dispatch({"action": "run", "source": "...", "optimize": True})
+```
+
+### ベクトル型
+
+| 型 | 説明 | ファクトリメソッド |
+|----|------|-----------------|
+| `FloatVec` | 32ビット浮動小数点 | `from_list([1.0, 2.0])`、`zeros(n)`、`ones(n)` |
+| `IntVec` | 64ビット整数 | `from_list([1, 2])`、`zeros(n)` |
+| `BinaryVec` | 要素が{0, 1} | `from_list([0, 1])`、`zeros(n)`、`ones(n)` |
+| `OneHotVec` | 正確に1つの1.0 | `from_index(idx, n)`、`from_list(...)` |
+| `GateVec` | 要素が{0.0, 1.0} | `from_list([1.0, 0.0])`、`zeros(n)`、`ones(n)` |
+| `TransMatrix` | M x N float32行列 | `from_list(rows)`、`identity(n)`、`zeros(m, n)` |
+
+### 演算ディスクリプター
+
+```python
+from axol.core.program import (
+    # 暗号化対応（E）演算
+    TransformOp,  # TransformOp(key="v", matrix=M, out_key=None)
+    GateOp,       # GateOp(key="v", gate_key="g", out_key=None)
+    MergeOp,      # MergeOp(keys=["a","b"], weights=w, out_key="out")
+    DistanceOp,   # DistanceOp(key_a="a", key_b="b", metric="euclidean")
+    RouteOp,      # RouteOp(key="v", router=R, out_key="_route")
+    # 平文（P）演算
+    StepOp,       # StepOp(key="v", threshold=0.0, out_key=None)
+    BranchOp,     # BranchOp(gate_key="g", then_key="a", else_key="b", out_key="out")
+    ClampOp,      # ClampOp(key="v", min_val=-inf, max_val=inf, out_key=None)
+    MapOp,        # MapOp(key="v", fn_name="relu", out_key=None)
+    # エスケープハッチ
+    CustomOp,     # CustomOp(fn=callable, label="name")  -- security=P
+)
+```
+
+### アナライザー
+
+```python
+from axol.core import analyze
+
+result = analyze(program)
+result.coverage_pct        # E / total * 100
+result.encrypted_count     # E遷移の数
+result.plaintext_count     # P遷移の数
+result.encryptable_keys    # E演算のみがアクセスするキー
+result.plaintext_keys      # P演算がアクセスするキー
+print(result.summary())    # 人間が読めるレポート
+```
+
+### 検証
+
+```python
+from axol.core import verify_states, VerifySpec
+
+result = verify_states(
+    expected=expected_bundle,
+    actual=actual_bundle,
+    specs={"hp": VerifySpec.exact(tolerance=0.01)},
+    strict_keys=False,
+)
+print(result.passed)    # True/False
+print(result.summary()) # 詳細レポート
+```
 
 ---
 
@@ -515,16 +1033,90 @@ s atk=[50] def_val=[20] flag=[1]
 : combine=merge(scaled def_val;w=[1 -1])->damage
 ```
 
+### 5. ReLU活性化（map）
+
+```
+@relu
+s x=[-2 0 3 -1 5]
+:act=map(x;fn=relu)
+# Result: x = [0, 0, 3, 0, 5]
+```
+
+### 6. 閾値選択（step + branch）
+
+```
+@threshold_select
+s scores=[0.3 0.8 0.1 0.9] high=[100 200 300 400] low=[1 2 3 4]
+:s1=step(scores;t=0.5)->mask
+:b1=branch(mask;then=high,else=low)->result
+# mask = [0, 1, 0, 1]
+# result = [1, 200, 3, 400]
+```
+
+### 7. ダメージパイプライン（新4演算すべて使用）
+
+```
+@damage_pipe
+s raw=[50 30 80 20] armor=[10 40 5 25]
+s crit=[1 0 1 0] bonus=[20 20 20 20] zero=[0 0 0 0]
+:d1=merge(raw armor;w=[1 -1])->diff
+:d2=map(diff;fn=relu)->effective
+:d3=step(crit;t=0.5)->mask
+:d4=branch(mask;then=bonus,else=zero)->crit_bonus
+:d5=merge(effective crit_bonus;w=[1 1])->total
+:d6=clamp(total;min=0,max=9999)
+# diff=[40,-10,75,-5] -> relu=[40,0,75,0] -> +bonus=[60,0,95,0]
+```
+
+### 8. 100状態オートマトン（疎行列）
+
+```
+@auto_100
+s s=onehot(0,100)
+: step=transform(s;M=sparse(100x100;0,1=1 1,2=1 ... 98,99=1 99,99=1))
+? done s[99]>=1
+```
+
 ---
 
 ## テスト
 
 ```bash
-# 全テスト（170件）
+# 全テスト（約320件）
 pytest tests/ -v
 
-# DSLパーサーテスト
-pytest tests/test_dsl.py -v
+# コアテスト
+pytest tests/test_types.py tests/test_operations.py tests/test_program.py tests/test_dsl.py -v
+
+# オプティマイザーテスト（18件）
+pytest tests/test_optimizer.py -v
+
+# バックエンドテスト（13件、cupy/jaxが未インストールの場合スキップ）
+pytest tests/test_backend.py -v
+
+# Tool-Use APIテスト（20件）
+pytest tests/test_api.py -v
+
+# モジュールシステムテスト（18件）
+pytest tests/test_module.py -v
+
+# 暗号化証明テスト（21件）
+pytest tests/test_encryption.py -v -s
+
+# 新演算テスト - step/branch/clamp/map（44件）
+pytest tests/test_new_ops.py -v
+
+# アナライザーテスト - E/Pカバレッジ分析（7件）
+pytest tests/test_analyzer.py -v
+
+# 新演算ベンチマーク - Python vs C# vs Axol（15件）
+pytest tests/test_benchmark_new_ops.py -v -s
+
+# サーバーエンドポイントテスト（13件、fastapi必要）
+pytest tests/test_server.py -v
+
+# 性能レポート（PERFORMANCE_REPORT.mdを生成）
+pytest tests/test_performance_report.py -v -s
 
 # トークンコスト比較
 pytest tests/test_token_cost.py -v -s
@@ -532,11 +1124,11 @@ pytest tests/test_token_cost.py -v -s
 # 3言語ベンチマーク（Python vs C# vs Axol）
 pytest tests/test_benchmark_trilingual.py -v -s
 
-# 暗号化証明テスト（21件）
-pytest tests/test_encryption.py -v -s
+# Webフロントエンドの起動
+python -m axol.server   # http://localhost:8080
 ```
 
-現在のテスト数：**170件**、すべて合格。
+現在のテスト数：**約320件**、すべて合格（4件スキップ：cupy/jax未インストール）。
 
 ---
 
@@ -550,11 +1142,13 @@ pytest tests/test_encryption.py -v -s
 - [x] Phase 2：疎行列表記法
 - [x] Phase 2：トークンコストベンチマーク（Python、C#、Axol）
 - [x] Phase 2：行列暗号化の概念実証（全5演算検証済み、21テスト）
-- [ ] Phase 3：コンパイラ最適化（演算融合、デッドステート除去）
-- [ ] Phase 3：GPUバックエンド（CuPy / JAX）
-- [ ] Phase 4：AIエージェント統合（tool-use API）
-- [ ] Phase 4：状態トレースビジュアルデバッガー
-- [ ] Phase 5：マルチプログラム合成とモジュールシステム
+- [x] Phase 3：コンパイラ最適化（transform融合、デッドステート除去、定数畳み込み）
+- [x] Phase 3：GPUバックエンド（numpy/cupy/jaxプラガブル）
+- [x] Phase 4：AIエージェント向けTool-Use API（parse/run/inspect/verify/list_ops）
+- [x] Phase 4：暗号化モジュール（encrypt_program、decrypt_state）
+- [x] Phase 5：モジュールシステム（レジストリ、import/use DSL、compose、スキーマ検証）
+- [x] フロントエンド：FastAPI + バニラHTML/JSビジュアルデバッガー（トレースビューア、状態チャート、暗号化デモ）
+- [x] 性能ベンチマーク（トークンコスト、ランタイムスケーリング、オプティマイザー効果、暗号化オーバーヘッド）
 
 ---
 

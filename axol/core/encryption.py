@@ -16,6 +16,7 @@ import numpy as np
 from axol.core.types import FloatVec, TransMatrix, StateBundle
 from axol.core.program import (
     Program, Transition, TransformOp, GateOp, MergeOp, CustomOp,
+    SecurityLevel,
     run_program,
 )
 
@@ -88,6 +89,13 @@ def encrypt_program(program: Program, K: np.ndarray, dim: int) -> Program:
     new_transitions = []
     for t in program.transitions:
         op = t.operation
+        security = getattr(op, "security", SecurityLevel.PLAINTEXT)
+
+        # Skip plaintext-only operations — pass through unchanged
+        if security == SecurityLevel.PLAINTEXT:
+            new_transitions.append(t)
+            continue
+
         if isinstance(op, TransformOp):
             m = op.matrix.data
             if m.shape == (dim, dim):
@@ -100,8 +108,6 @@ def encrypt_program(program: Program, K: np.ndarray, dim: int) -> Program:
             # Gate -> diagonal matrix transform, then encrypt
             # We need the gate vector from initial state to build diagonal
             # This is a compile-time operation
-            new_transitions.append(t)
-        elif isinstance(op, CustomOp):
             new_transitions.append(t)
         else:
             new_transitions.append(t)
