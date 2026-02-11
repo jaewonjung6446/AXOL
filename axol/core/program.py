@@ -34,6 +34,7 @@ class OpKind(Enum):
     CLAMP = auto()
     MAP = auto()
     CUSTOM = auto()
+    MEASURE = auto()
 
 
 class SecurityLevel(Enum):
@@ -138,10 +139,19 @@ class MapOp:
     out_key: str | None = None
 
 
+@dataclass(frozen=True)
+class MeasureOp:
+    """Born rule measurement (Plaintext only — applied once at end)."""
+    kind: OpKind = field(default=OpKind.MEASURE, init=False)
+    security: SecurityLevel = field(default=SecurityLevel.PLAINTEXT, init=False)
+    key: str
+    out_key: str | None = None
+
+
 Operation = (
     TransformOp | GateOp | MergeOp | DistanceOp | RouteOp
     | StepOp | BranchOp | ClampOp | MapOp
-    | CustomOp
+    | MeasureOp | CustomOp
 )
 
 
@@ -239,6 +249,9 @@ def _apply(op: Operation, state: StateBundle) -> StateBundle:
 
     elif isinstance(op, MapOp):
         s[op.out_key or op.key] = ops.map_fn(state[op.key], op.fn_name)
+
+    elif isinstance(op, MeasureOp):
+        s[op.out_key or op.key] = ops.measure(state[op.key])
 
     elif isinstance(op, CustomOp):
         s = op.fn(state)

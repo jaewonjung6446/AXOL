@@ -165,6 +165,7 @@ _MAP_FUNCTIONS: dict[str, callable] = {
     "neg": lambda x: -x,
     "square": lambda x: x * x,
     "sqrt": lambda x: np.sqrt(np.maximum(x, 0.0)),
+    "abs_sq": lambda x: x * x,
 }
 
 
@@ -175,6 +176,59 @@ def map_fn(vec: _VecBase, fn_name: str) -> FloatVec:
     v = vec.data.astype(np.float32)
     result = _MAP_FUNCTIONS[fn_name](v).astype(np.float32)
     return FloatVec(data=result)
+
+
+# ---------------------------------------------------------------------------
+# Quantum operations
+# ---------------------------------------------------------------------------
+
+def measure(vec: _VecBase) -> FloatVec:
+    """Born rule measurement: |alpha_i|^2 normalized to probabilities."""
+    v = vec.data.astype(np.float32)
+    probs = v * v  # |alpha|^2 — negative amplitudes also become positive
+    total = np.sum(probs)
+    if total > 0:
+        probs = probs / total
+    return FloatVec(data=probs)
+
+
+def hadamard_matrix(n: int) -> TransMatrix:
+    """N-dim Hadamard matrix (Walsh-Hadamard). N must be power of 2.
+
+    H = 1/sqrt(N) * H_N where H_N is constructed via Kronecker product.
+    All elements are real. Negative entries enable interference.
+    """
+    if n < 1 or (n & (n - 1)) != 0:
+        raise ValueError(f"hadamard_matrix requires power of 2, got {n}")
+    h = np.array([[1.0]], dtype=np.float32)
+    h2 = np.array([[1.0, 1.0], [1.0, -1.0]], dtype=np.float32)
+    k = int(np.log2(n))
+    for _ in range(k):
+        h = np.kron(h, h2)
+    h = h / np.sqrt(n)
+    return TransMatrix(data=h.astype(np.float32))
+
+
+def oracle_matrix(marked: list[int], n: int) -> TransMatrix:
+    """Oracle: flip the sign of marked indices (diagonal matrix).
+
+    O_ii = -1 if i in marked, else 1. Pure real.
+    """
+    diag = np.ones(n, dtype=np.float32)
+    for idx in marked:
+        if 0 <= idx < n:
+            diag[idx] = -1.0
+    return TransMatrix(data=np.diag(diag))
+
+
+def diffusion_matrix(n: int) -> TransMatrix:
+    """Grover diffusion operator: D = 2|s><s| - I, where |s> = 1/sqrt(N) * [1,...,1].
+
+    All elements are real. Negative entries enable interference.
+    """
+    s = np.ones((n, 1), dtype=np.float32) / np.sqrt(n)
+    D = 2.0 * (s @ s.T) - np.eye(n, dtype=np.float32)
+    return TransMatrix(data=D.astype(np.float32))
 
 
 # ---------------------------------------------------------------------------

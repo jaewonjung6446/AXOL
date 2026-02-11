@@ -37,9 +37,11 @@ from axol.core.program import (
     BranchOp,
     ClampOp,
     MapOp,
+    MeasureOp,
     Transition,
     Program,
 )
+from axol.core.operations import hadamard_matrix, oracle_matrix, diffusion_matrix
 
 
 class ParseError(Exception):
@@ -350,6 +352,14 @@ def _parse_op_call(
         return _parse_clamp_op(args_str, out_key, line_num)
     elif op_name == "map":
         return _parse_map_op(args_str, out_key, line_num)
+    elif op_name == "measure":
+        return _parse_measure_op(args_str, out_key, line_num)
+    elif op_name == "hadamard":
+        return _parse_hadamard_op(args_str, out_key, line_num)
+    elif op_name == "oracle":
+        return _parse_oracle_op(args_str, out_key, line_num)
+    elif op_name == "diffuse":
+        return _parse_diffuse_op(args_str, out_key, line_num)
     elif op_name == "use":
         return _parse_use_op(args_str, line_num, registry=registry, imports=imports)
     else:
@@ -533,6 +543,76 @@ def _parse_map_op(args: str, out_key: str | None, line_num: int) -> MapOp:
         raise ParseError("map requires fn= parameter", line_num)
 
     return MapOp(key=key, fn_name=fn_name, out_key=out_key)
+
+
+# ---------------------------------------------------------------------------
+# Quantum op parsers (measure, hadamard, oracle, diffuse)
+# ---------------------------------------------------------------------------
+
+def _parse_measure_op(args: str, out_key: str | None, line_num: int) -> MeasureOp:
+    """Parse 'measure(key)'."""
+    parts = _split_args(args)
+    key = parts[0].strip()
+    return MeasureOp(key=key, out_key=out_key)
+
+
+def _parse_hadamard_op(args: str, out_key: str | None, line_num: int) -> TransformOp:
+    """Parse 'hadamard(key;n=N)' → TransformOp with Hadamard matrix."""
+    parts = _split_args(args)
+    key = parts[0].strip()
+    n = None
+    for part in parts[1:]:
+        part = part.strip()
+        if part.startswith("n="):
+            n = int(part[2:].strip())
+    if n is None:
+        raise ParseError("hadamard requires n= parameter", line_num)
+    matrix = hadamard_matrix(n)
+    return TransformOp(key=key, matrix=matrix, out_key=out_key)
+
+
+def _parse_oracle_op(args: str, out_key: str | None, line_num: int) -> TransformOp:
+    """Parse 'oracle(key;marked=[i,...];n=N)' → TransformOp with oracle matrix."""
+    parts = _split_args(args)
+    key = parts[0].strip()
+    marked = None
+    n = None
+    for part in parts[1:]:
+        part = part.strip()
+        if part.startswith("marked="):
+            marked_str = part[7:].strip()
+            # Parse [i,j,...] or [i j ...]
+            m = re.match(r'^\[([^\]]*)\]$', marked_str)
+            if not m:
+                raise ParseError(f"Invalid marked list: '{marked_str}'", line_num)
+            inner = m.group(1).strip()
+            if ',' in inner:
+                marked = [int(x.strip()) for x in inner.split(',')]
+            else:
+                marked = [int(x) for x in inner.split()]
+        elif part.startswith("n="):
+            n = int(part[2:].strip())
+    if marked is None:
+        raise ParseError("oracle requires marked= parameter", line_num)
+    if n is None:
+        raise ParseError("oracle requires n= parameter", line_num)
+    matrix = oracle_matrix(marked, n)
+    return TransformOp(key=key, matrix=matrix, out_key=out_key)
+
+
+def _parse_diffuse_op(args: str, out_key: str | None, line_num: int) -> TransformOp:
+    """Parse 'diffuse(key;n=N)' → TransformOp with diffusion matrix."""
+    parts = _split_args(args)
+    key = parts[0].strip()
+    n = None
+    for part in parts[1:]:
+        part = part.strip()
+        if part.startswith("n="):
+            n = int(part[2:].strip())
+    if n is None:
+        raise ParseError("diffuse requires n= parameter", line_num)
+    matrix = diffusion_matrix(n)
+    return TransformOp(key=key, matrix=matrix, out_key=out_key)
 
 
 # ---------------------------------------------------------------------------

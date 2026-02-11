@@ -34,6 +34,11 @@ def random_orthogonal_key(n: int, seed: int | None = None) -> np.ndarray:
     """Generate a random orthogonal NxN matrix via QR decomposition.
 
     Orthogonal keys preserve distances (euclidean, cosine, dot).
+
+    Optimal for quantum programs:
+      - K^(-1) = K^T (transpose) — no matrix inversion needed, numerically stable.
+      - Preserves vector norms — Born rule probabilities are invariant.
+      - Real orthogonal matrix = real unitary — compatible with Tier 1 quantum ops.
     """
     rng = np.random.RandomState(seed if seed is not None else None)
     A = rng.randn(n, n).astype(np.float32)

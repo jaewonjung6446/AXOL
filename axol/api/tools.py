@@ -91,6 +91,56 @@ TOOL_DEFINITIONS: list[dict] = [
             "required": ["source", "expected"],
         },
     },
+    {
+        "name": "encrypted_run",
+        "description": "Run an Axol program with automatic encryption. "
+                       "The program runs on encrypted data and returns decrypted results. "
+                       "You don't need to handle encryption — it's automatic.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "source": {
+                    "type": "string",
+                    "description": "Axol DSL source code",
+                },
+                "dim": {
+                    "type": "integer",
+                    "description": "Vector dimension to encrypt",
+                },
+                "optimize": {
+                    "type": "boolean",
+                    "description": "Whether to optimize before execution",
+                    "default": True,
+                },
+            },
+            "required": ["source", "dim"],
+        },
+    },
+    {
+        "name": "quantum_search",
+        "description": "Search for a marked item using Grover's quantum algorithm. "
+                       "Finds the target with high probability using sqrt(N) iterations instead of N.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "n": {
+                    "type": "integer",
+                    "description": "Search space size (must be power of 2)",
+                },
+                "marked": {
+                    "type": "array",
+                    "items": {"type": "integer"},
+                    "description": "Target indices to search for",
+                },
+                "encrypt": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Run on encrypted data",
+                },
+            },
+            "required": ["n", "marked"],
+        },
+    },
 ]
 
 

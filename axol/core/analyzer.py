@@ -21,6 +21,7 @@ from axol.core.program import (
     BranchOp,
     ClampOp,
     MapOp,
+    MeasureOp,
     SecurityLevel,
     OpKind,
 )
@@ -78,6 +79,8 @@ def _get_read_keys(op) -> set[str]:
         return {op.key}
     elif isinstance(op, MapOp):
         return {op.key}
+    elif isinstance(op, MeasureOp):
+        return {op.key}
     else:
         return set()
 
@@ -100,6 +103,8 @@ def _get_write_keys(op) -> set[str]:
     elif isinstance(op, ClampOp):
         return {op.out_key if op.out_key is not None else op.key}
     elif isinstance(op, MapOp):
+        return {op.out_key if op.out_key is not None else op.key}
+    elif isinstance(op, MeasureOp):
         return {op.out_key if op.out_key is not None else op.key}
     else:
         return set()

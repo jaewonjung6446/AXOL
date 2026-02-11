@@ -11,11 +11,15 @@ import traceback
 
 import numpy as np
 
+import math
+
 from axol.core.dsl import parse, ParseError
 from axol.core.program import run_program, Program
 from axol.core.optimizer import optimize
 from axol.core.types import FloatVec, StateBundle
 from axol.core.verify import verify_states, VerifySpec
+from axol.core.encryption import random_orthogonal_key, encrypt_program, decrypt_state
+from axol.core.operations import measure as _measure_op
 from axol.api.tools import get_tool_definitions as _get_tool_defs
 
 
@@ -72,6 +76,10 @@ def dispatch(request: dict) -> dict:
             return _handle_list_ops()
         elif action == "verify":
             return _handle_verify(request)
+        elif action == "encrypted_run":
+            return _handle_encrypted_run(request)
+        elif action == "quantum_search":
+            return _handle_quantum_search(request)
         else:
             return {"error": f"Unknown action: {action!r}"}
     except ParseError as e:
@@ -193,4 +201,99 @@ def _handle_verify(request: dict) -> dict:
     return {
         "passed": vr.passed,
         "summary": vr.summary(),
+    }
+
+
+def _handle_encrypted_run(request: dict) -> dict:
+    """Run an Axol program with automatic encryption/decryption."""
+    source = request.get("source")
+    if not source:
+        return {"error": "Missing 'source' field"}
+
+    dim = request.get("dim")
+    if not dim:
+        return {"error": "Missing 'dim' field"}
+    dim = int(dim)
+
+    prog = parse(source)
+
+    if request.get("optimize", True):
+        prog = optimize(prog)
+
+    K = random_orthogonal_key(dim, seed=request.get("seed"))
+    prog_enc = encrypt_program(prog, K, dim)
+    result = run_program(prog_enc)
+    decrypted = decrypt_state(result.final_state, K)
+
+    final_state = {}
+    for key in decrypted.keys():
+        vec = decrypted[key]
+        final_state[key] = vec.to_list()
+
+    return {
+        "final_state": final_state,
+        "steps_executed": result.steps_executed,
+        "terminated_by": result.terminated_by,
+        "encrypted": True,
+    }
+
+
+def _handle_quantum_search(request: dict) -> dict:
+    """Run Grover's quantum search algorithm."""
+    n = request.get("n")
+    if not n:
+        return {"error": "Missing 'n' field"}
+    n = int(n)
+
+    if n < 2 or (n & (n - 1)) != 0:
+        return {"error": f"'n' must be a power of 2 >= 2, got {n}"}
+
+    marked = request.get("marked")
+    if marked is None:
+        return {"error": "Missing 'marked' field"}
+    marked = [int(x) for x in marked]
+
+    encrypt = request.get("encrypt", False)
+
+    # Build Grover DSL source with unrolled iterations
+    iterations = max(1, math.floor(math.pi / 4 * math.sqrt(n)))
+    amp = 1.0 / math.sqrt(n)
+    state_vals = " ".join([str(amp)] * n)
+
+    # Build transition lines: oracle + diffuse repeated
+    lines = [f"@grover_{n}"]
+    lines.append(f"s state=[{state_vals}]")
+    for i in range(iterations):
+        marked_str = ",".join(str(m) for m in marked)
+        lines.append(f": oracle_{i}=oracle(state;marked=[{marked_str}];n={n})")
+        lines.append(f": diffuse_{i}=diffuse(state;n={n})")
+
+    source = "\n".join(lines)
+
+    prog = parse(source)
+    prog = optimize(prog)
+
+    if encrypt:
+        K = random_orthogonal_key(n, seed=request.get("seed"))
+        prog_enc = encrypt_program(prog, K, n)
+        result = run_program(prog_enc)
+        decrypted = decrypt_state(result.final_state, K)
+        state_data = decrypted["state"].data
+    else:
+        result = run_program(prog)
+        state_data = result.final_state["state"].data
+
+    # Apply Born rule measurement
+    probs = state_data * state_data
+    total = np.sum(probs)
+    if total > 0:
+        probs = probs / total
+    found_index = int(np.argmax(probs))
+    prob = float(probs[found_index])
+
+    return {
+        "found_index": found_index,
+        "probability": prob,
+        "iterations": iterations,
+        "encrypted": encrypt,
     }
