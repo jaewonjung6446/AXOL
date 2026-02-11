@@ -64,6 +64,7 @@
 - [使用例](#使用例)
 - [テスト](#テスト)
 - [Phase 6: Quantum Axol](#phase-6-quantum-axol)
+- [Phase 8: カオス理論量子モジュール](#phase-8-カオス理論量子モジュール)
 - [ロードマップ](#ロードマップ)
 
 ---
@@ -1427,8 +1428,9 @@ pytest tests/test_quantum.py::TestAPI -v -s
 | ティア | 状態 | 振幅 | アルゴリズム | 暗号化 |
 |-------|------|------|-----------|-------|
 | 0 | Phase 1-5 | 非負実数 | 古典的FSM、ルーティング | 30-100%（混合E/P） |
-| **1** | **Phase 6（現在）** | **符号付き実数** | **Grover検索、量子ウォーク** | **100%（E-class）** |
-| 2 | 将来 | 複素数（a+bi） | Shor、QPE、QFT | 100%（複素ユニタリ） |
+| 1 | Phase 6 | 符号付き実数 | Grover検索、量子ウォーク | 100%（E-class） |
+| **2** | **Phase 8（現在）** | **カオス理論ベース** | **Declare->Weave->Observe、リアプノフ/フラクタル** | **Omega/Phi品質指標** |
+| 3 | 将来 | 複素数（a+bi） | Shor、QPE、QFT | 100%（複素ユニタリ） |
 
 ---
 
@@ -1458,6 +1460,114 @@ pytest tests/test_quantum.py::TestAPI -v -s
 - [x] Phase 7：パディングレイヤー — 次元隠蔽二重暗号化（均一max_dim）
 - [x] Phase 7：分岐→変換コンパイル（BranchOp → 暗号化対角TransformOp）
 - [x] Phase 7：AxolClient SDK — クライアント暗号化・サーバー計算アーキテクチャ
+- [x] Phase 8：カオス理論量子モジュール（`axol/quantum/`）— Declare -> Weave -> Observeパイプライン
+- [x] Phase 8：リアプノフ指数推定（Benettin QR法）+ Omega = 1/(1+max(lambda,0))
+- [x] Phase 8：フラクタル次元推定（ボックスカウンティング/相関次元）+ Phi = 1/(1+D/D_max)
+- [x] Phase 8：ウィーバー — 宣言からアトラクタベースのTapestryを構築
+- [x] Phase 8：オブザーバトリー — 単一/反復観測による品質向上
+- [x] Phase 8：合成規則（直列：ラムダ合算、並列：min/maxルール）
+- [x] Phase 8：エンタングルメントコスト推定 + 達成不可能検出
+- [x] Phase 8：量子DSLパーサー（entangle/observe/reobserve/ifブロック）
+- [x] Phase 8：101件の新テスト（合計545件パス、0失敗）
+
+---
+
+## Phase 8: カオス理論量子モジュール
+
+Phase 8はAXOLの理論的基盤（THEORY.md）を**カオス理論**で形式化し、**Declare -> Weave -> Observe**パイプラインを実行可能なコードとして実装します。既存の`axol/core`エンジンを変更なしに再利用し、独立した`axol/quantum/`パッケージとして実装されます。
+
+### コアマッピング
+
+| AXOLの概念 | カオス理論 | 数式 |
+|---|---|---|
+| Tapestry（タペストリー） | ストレンジアトラクタ | 位相空間のコンパクト不変集合 |
+| Omega（結束度） | リアプノフ安定性 | `1/(1+max(lambda,0))` |
+| Phi（鮮明度） | フラクタル次元の逆数 | `1/(1+D/D_max)` |
+| Weave（織り） | アトラクタ構築 | 反復写像の軌道行列 |
+| Observe（観測） | アトラクタ上の点崩壊 | 時間計算量 O(D) |
+| エンタングル範囲 | 吸引域 (Basin of Attraction) | 収束領域の境界 |
+
+### パイプライン
+
+```
+[Declare]                    [Weave]                       [Observe]
+関係宣言 + 品質目標       ->  アトラクタ構築 + コスト推定  ->  入力 -> 即時崩壊
+entangle search(q, db)        weave(declaration)              observe(tapestry, inputs)
+  @ Omega(0.9) Phi(0.7)        -> Tapestry                     -> Observation
+  { relevance <~> ... }        + WeaverReport                   + Omega, Phi
+```
+
+### 品質指標
+
+```
+        Phi（鮮明度）
+        ^
+   1.0  |  鋭いが不安定         理想的（強いエンタングル）
+        |
+   0.0  |  ノイズ               安定だがぼやけている
+        +-----------------------------> Omega（結束度）
+       0.0                             1.0
+```
+
+### 合成規則
+
+| モード | lambda | Omega | D | Phi |
+|--------|--------|-------|---|-----|
+| 直列 | lambda_A + lambda_B | 1/(1+max(sum,0)) | D_A + D_B | Phi_A * Phi_B |
+| 並列 | max(lambda_A, lambda_B) | min(Omega_A, Omega_B) | max(D_A, D_B) | min(Phi_A, Phi_B) |
+
+### DSL構文
+
+```
+entangle search(query: float[64], db: float[64]) @ Omega(0.9) Phi(0.7) {
+    relevance <~> similarity(query, db)
+    ranking <~> relevance
+}
+
+result = observe search(query_vec, db_vec)
+
+if result.Omega < 0.95 {
+    result = reobserve search(query_vec, db_vec) x 10
+}
+```
+
+### 使用例
+
+```python
+from axol.quantum import DeclarationBuilder, RelationKind, weave, observe
+from axol.core.types import FloatVec
+
+# 宣言
+decl = (
+    DeclarationBuilder("search")
+    .input("query", 64)
+    .input("db", 64)
+    .relate("relevance", ["query", "db"], RelationKind.PROPORTIONAL)
+    .output("relevance")
+    .quality(0.9, 0.7)
+    .build()
+)
+
+# 織り
+tapestry = weave(decl, seed=42)
+print(f"Omega: {tapestry.weaver_report.estimated_omega:.2f}")
+print(f"Phi: {tapestry.weaver_report.estimated_phi:.2f}")
+
+# 観測
+result = observe(tapestry, {"query": FloatVec.zeros(64), "db": FloatVec.zeros(64)})
+print(f"Result Omega: {result.omega:.2f}, Phi: {result.phi:.2f}")
+```
+
+### テスト
+
+```bash
+# 新規量子モジュールテストのみ実行
+pytest tests/test_quantum_*.py tests/test_lyapunov.py tests/test_fractal.py tests/test_compose.py -v
+
+# 全テスト（既存 + 新規）
+pytest tests/ -v
+# 545 passed, 0 failed, 4 skipped
+```
 
 ---
 

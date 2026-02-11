@@ -64,6 +64,7 @@ Axol不使用传统的控制流（if/else、for循环、函数调用），而是
 - [示例](#示例)
 - [测试](#测试)
 - [Phase 6: Quantum Axol](#phase-6-quantum-axol)
+- [Phase 8: 混沌理论量子模块](#phase-8-混沌理论量子模块)
 - [路线图](#路线图)
 
 ---
@@ -1427,8 +1428,9 @@ pytest tests/test_quantum.py::TestAPI -v -s
 | 层级 | 状态 | 振幅 | 算法 | 加密 |
 |------|------|------|------|------|
 | 0 | Phase 1-5 | 非负实数 | 经典FSM、路由 | 30-100%（混合E/P） |
-| **1** | **Phase 6（当前）** | **有符号实数** | **Grover搜索、量子行走** | **100%（E-class）** |
-| 2 | 未来 | 复数（a+bi） | Shor、QPE、QFT | 100%（复酉矩阵） |
+| 1 | Phase 6 | 有符号实数 | Grover搜索、量子行走 | 100%（E-class） |
+| **2** | **Phase 8（当前）** | **混沌理论基础** | **Declare->Weave->Observe、Lyapunov/分形** | **Omega/Phi质量指标** |
+| 3 | 未来 | 复数（a+bi） | Shor、QPE、QFT | 100%（复酉矩阵） |
 
 ---
 
@@ -1458,6 +1460,114 @@ pytest tests/test_quantum.py::TestAPI -v -s
 - [x] Phase 7：填充层 — 维度隐藏双重加密（统一max_dim）
 - [x] Phase 7：分支→变换编译（BranchOp → 加密对角TransformOp）
 - [x] Phase 7：AxolClient SDK — 客户端加密、服务器计算架构
+- [x] Phase 8：混沌理论量子模块（`axol/quantum/`）— Declare -> Weave -> Observe 管道
+- [x] Phase 8：Lyapunov指数估计（Benettin QR方法）+ Omega = 1/(1+max(lambda,0))
+- [x] Phase 8：分形维度估计（盒计数/相关维度）+ Phi = 1/(1+D/D_max)
+- [x] Phase 8：织机（weaver）— 从声明构建基于吸引子的Tapestry
+- [x] Phase 8：观测所（observatory）— 单次/重复观测实现质量提升
+- [x] Phase 8：合成规则（串行：lambda求和，并行：min/max规则）
+- [x] Phase 8：纠缠成本估算 + 不可达检测
+- [x] Phase 8：量子DSL解析器（entangle/observe/reobserve/if块）
+- [x] Phase 8：101项新测试（总计545项通过，0项失败）
+
+---
+
+## Phase 8: 混沌理论量子模块
+
+Phase 8将AXOL的理论基础（THEORY.md）用**混沌理论**形式化，并将**Declare -> Weave -> Observe**管道实现为可执行代码。它在不修改现有`axol/core`引擎的情况下进行复用，作为独立的`axol/quantum/`包实现。
+
+### 核心映射
+
+| AXOL概念 | 混沌理论 | 公式 |
+|---|---|---|
+| Tapestry（织物） | 奇异吸引子 (Strange Attractor) | 相空间中的紧致不变集 |
+| Omega（结合度） | Lyapunov稳定性 | `1/(1+max(lambda,0))` |
+| Phi（清晰度） | 分形维度倒数 | `1/(1+D/D_max)` |
+| Weave（织造） | 吸引子构建 | 迭代映射的轨迹矩阵 |
+| Observe（观测） | 吸引子上的点坍缩 | 时间复杂度 O(D) |
+| 纠缠范围 | 吸引域 (Basin of Attraction) | 收敛区域的边界 |
+
+### 管道
+
+```
+[Declare]                    [Weave]                       [Observe]
+关系声明 + 质量目标       ->  吸引子构建 + 成本估算       ->  输入 -> 即时坍缩
+entangle search(q, db)        weave(declaration)              observe(tapestry, inputs)
+  @ Omega(0.9) Phi(0.7)        -> Tapestry                     -> Observation
+  { relevance <~> ... }        + WeaverReport                   + Omega, Phi
+```
+
+### 质量指标
+
+```
+        Phi（清晰度）
+        ^
+   1.0  |  锐利但不稳定         理想（强纠缠）
+        |
+   0.0  |  噪声                 稳定但模糊
+        +-----------------------------> Omega（结合度）
+       0.0                             1.0
+```
+
+### 合成规则
+
+| 模式 | lambda | Omega | D | Phi |
+|------|--------|-------|---|-----|
+| 串行 | lambda_A + lambda_B | 1/(1+max(sum,0)) | D_A + D_B | Phi_A * Phi_B |
+| 并行 | max(lambda_A, lambda_B) | min(Omega_A, Omega_B) | max(D_A, D_B) | min(Phi_A, Phi_B) |
+
+### DSL语法
+
+```
+entangle search(query: float[64], db: float[64]) @ Omega(0.9) Phi(0.7) {
+    relevance <~> similarity(query, db)
+    ranking <~> relevance
+}
+
+result = observe search(query_vec, db_vec)
+
+if result.Omega < 0.95 {
+    result = reobserve search(query_vec, db_vec) x 10
+}
+```
+
+### 使用示例
+
+```python
+from axol.quantum import DeclarationBuilder, RelationKind, weave, observe
+from axol.core.types import FloatVec
+
+# 声明
+decl = (
+    DeclarationBuilder("search")
+    .input("query", 64)
+    .input("db", 64)
+    .relate("relevance", ["query", "db"], RelationKind.PROPORTIONAL)
+    .output("relevance")
+    .quality(0.9, 0.7)
+    .build()
+)
+
+# 织造
+tapestry = weave(decl, seed=42)
+print(f"Omega: {tapestry.weaver_report.estimated_omega:.2f}")
+print(f"Phi: {tapestry.weaver_report.estimated_phi:.2f}")
+
+# 观测
+result = observe(tapestry, {"query": FloatVec.zeros(64), "db": FloatVec.zeros(64)})
+print(f"Result Omega: {result.omega:.2f}, Phi: {result.phi:.2f}")
+```
+
+### 测试
+
+```bash
+# 仅运行新量子模块测试
+pytest tests/test_quantum_*.py tests/test_lyapunov.py tests/test_fractal.py tests/test_compose.py -v
+
+# 完整测试套件（现有 + 新增）
+pytest tests/ -v
+# 545 passed, 0 failed, 4 skipped
+```
 
 ---
 

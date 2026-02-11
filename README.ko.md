@@ -64,6 +64,7 @@
 - [예제](#예제)
 - [테스트](#테스트)
 - [Phase 6: Quantum Axol](#phase-6-quantum-axol)
+- [Phase 8: 카오스 이론 양자 모듈](#phase-8-카오스-이론-양자-모듈)
 - [로드맵](#로드맵)
 
 ---
@@ -1427,8 +1428,9 @@ pytest tests/test_quantum.py::TestAPI -v -s
 | 티어 | 상태 | 진폭 | 알고리즘 | 암호화 |
 |------|------|------|---------|-------|
 | 0 | Phase 1-5 | 비음수 실수 | 고전적 FSM, 라우팅 | 30-100% (혼합 E/P) |
-| **1** | **Phase 6 (현재)** | **부호 있는 실수** | **Grover 검색, 양자 워크** | **100% (E-class)** |
-| 2 | 미래 | 복소수 (a+bi) | Shor, QPE, QFT | 100% (복소 유니터리) |
+| 1 | Phase 6 | 부호 있는 실수 | Grover 검색, 양자 워크 | 100% (E-class) |
+| **2** | **Phase 8 (현재)** | **카오스 이론 기반** | **Declare->Weave->Observe, 리아푸노프/프랙탈** | **Omega/Phi 품질 척도** |
+| 3 | 미래 | 복소수 (a+bi) | Shor, QPE, QFT | 100% (복소 유니터리) |
 
 ---
 
@@ -1458,6 +1460,114 @@ pytest tests/test_quantum.py::TestAPI -v -s
 - [x] Phase 7: 패딩 레이어 — 차원 은닉 이중 암호화 (균일 max_dim)
 - [x] Phase 7: 분기→변환 컴파일 (BranchOp → 암호화된 대각 TransformOp)
 - [x] Phase 7: AxolClient SDK — 클라이언트 암호화, 서버 연산 아키텍처
+- [x] Phase 8: 카오스 이론 양자 모듈 (`axol/quantum/`) — Declare -> Weave -> Observe 파이프라인
+- [x] Phase 8: 리아푸노프 지수 추정 (Benettin QR법) + Omega = 1/(1+max(lambda,0))
+- [x] Phase 8: 프랙탈 차원 추정 (box-counting/correlation) + Phi = 1/(1+D/D_max)
+- [x] Phase 8: 직조기(weaver) — 선언으로부터 끌개(attractor) 기반 Tapestry 구축
+- [x] Phase 8: 관측소(observatory) — 단일/반복 관측으로 결과 붕괴 + 품질 향상
+- [x] Phase 8: 합성 규칙 (직렬: lambda 합산, 병렬: min/max 규칙)
+- [x] Phase 8: 얽힘 비용 산출 + 달성 불가 감지
+- [x] Phase 8: 양자 DSL 파서 (entangle/observe/reobserve/if 블록)
+- [x] Phase 8: 101개 신규 테스트 (전체 545 passed, 0 failed)
+
+---
+
+## Phase 8: 카오스 이론 양자 모듈
+
+Phase 8은 AXOL의 이론적 토대(THEORY.md)를 **카오스 이론**으로 형식화하고, **Declare -> Weave -> Observe** 파이프라인을 실행 가능한 코드로 구현합니다. 기존 `axol/core` 엔진을 변경 없이 재활용하며, `axol/quantum/` 패키지로 독립 구현됩니다.
+
+### 핵심 매핑
+
+| AXOL 개념 | 카오스 이론 대응 | 수식 |
+|-----------|-----------------|------|
+| Tapestry (직물) | 이상한 끌개 (Strange Attractor) | 위상 공간의 컴팩트 불변 집합 |
+| Omega (결속도) | 리아푸노프 안정성 | `1/(1+max(lambda,0))` |
+| Phi (선명도) | 프랙탈 차원 역수 | `1/(1+D/D_max)` |
+| Weave (직조) | 끌개 구조 구축 | 반복 사상의 궤적 행렬 |
+| Observe (관측) | 끌개 위 점 붕괴 | 시간 복잡도 O(D) |
+| 얽힘 범위 | 끌개 분지 (Basin of Attraction) | 수렴 영역의 경계 |
+
+### 파이프라인
+
+```
+[Declare]                    [Weave]                       [Observe]
+관계 선언 + 품질 목표    ->   끌개 구조 구축 + 비용 산출  ->   입력 -> 즉각 붕괴
+entangle search(q, db)        weave(declaration)              observe(tapestry, inputs)
+  @ Omega(0.9) Phi(0.7)        -> Tapestry                     -> Observation
+  { relevance <~> ... }        + WeaverReport                   + Omega, Phi
+```
+
+### 품질 척도
+
+```
+        Phi (선명도)
+        ^
+   1.0  |  날카롭지만 불안정    이상적 (강한 얽힘)
+        |
+   0.0  |  노이즈              안정적이지만 흐릿함
+        +-------------------------> Omega (결속도)
+       0.0                        1.0
+```
+
+### 합성 규칙
+
+| 합성 | lambda | Omega | D | Phi |
+|------|--------|-------|---|-----|
+| 직렬 | lambda_A + lambda_B | 1/(1+max(sum,0)) | D_A + D_B | Phi_A * Phi_B |
+| 병렬 | max(lambda_A, lambda_B) | min(Omega_A, Omega_B) | max(D_A, D_B) | min(Phi_A, Phi_B) |
+
+### DSL 문법
+
+```
+entangle search(query: float[64], db: float[64]) @ Omega(0.9) Phi(0.7) {
+    relevance <~> similarity(query, db)
+    ranking <~> relevance
+}
+
+result = observe search(query_vec, db_vec)
+
+if result.Omega < 0.95 {
+    result = reobserve search(query_vec, db_vec) x 10
+}
+```
+
+### 사용 예시
+
+```python
+from axol.quantum import DeclarationBuilder, RelationKind, weave, observe
+from axol.core.types import FloatVec
+
+# 선언
+decl = (
+    DeclarationBuilder("search")
+    .input("query", 64)
+    .input("db", 64)
+    .relate("relevance", ["query", "db"], RelationKind.PROPORTIONAL)
+    .output("relevance")
+    .quality(0.9, 0.7)
+    .build()
+)
+
+# 직조
+tapestry = weave(decl, seed=42)
+print(f"Omega: {tapestry.weaver_report.estimated_omega:.2f}")
+print(f"Phi: {tapestry.weaver_report.estimated_phi:.2f}")
+
+# 관측
+result = observe(tapestry, {"query": FloatVec.zeros(64), "db": FloatVec.zeros(64)})
+print(f"Result Omega: {result.omega:.2f}, Phi: {result.phi:.2f}")
+```
+
+### 테스트
+
+```bash
+# 신규 양자 모듈 테스트만 실행
+pytest tests/test_quantum_*.py tests/test_lyapunov.py tests/test_fractal.py tests/test_compose.py -v
+
+# 전체 테스트 (기존 + 신규)
+pytest tests/ -v
+# 545 passed, 0 failed, 4 skipped
+```
 
 ---
 

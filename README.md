@@ -64,6 +64,7 @@ Instead of traditional control flow (if/else, for loops, function calls), Axol r
 - [Examples](#examples)
 - [Test Suite](#test-suite)
 - [Phase 6: Quantum Axol](#phase-6-quantum-axol)
+- [Phase 8: Chaos Theory Quantum Module](#phase-8-chaos-theory-quantum-module)
 - [Roadmap](#roadmap)
 
 ---
@@ -1439,8 +1440,9 @@ pytest tests/test_quantum.py::TestAPI -v -s
 | Tier | Status | Amplitude | Algorithms | Encryption |
 |------|--------|-----------|-----------|-----------|
 | 0 | Phases 1-5 | Non-negative real | Classical FSM, routing | 30-100% (mixed E/P) |
-| **1** | **Phase 6 (current)** | **Signed real** | **Grover search, quantum walk** | **100% (E-class)** |
-| 2 | Future | Complex (a+bi) | Shor, QPE, QFT | 100% (complex unitary) |
+| 1 | Phase 6 | Signed real | Grover search, quantum walk | 100% (E-class) |
+| **2** | **Phase 8 (current)** | **Chaos theory based** | **Declare->Weave->Observe, Lyapunov/Fractal** | **Omega/Phi quality metrics** |
+| 3 | Future | Complex (a+bi) | Shor, QPE, QFT | 100% (complex unitary) |
 
 ---
 
@@ -1470,6 +1472,115 @@ pytest tests/test_quantum.py::TestAPI -v -s
 - [x] Phase 7: Padding layer — dimension-hiding double encryption (uniform max_dim)
 - [x] Phase 7: Branch-to-transform compilation (BranchOp → encrypted diagonal TransformOps)
 - [x] Phase 7: AxolClient SDK — encrypt-on-client, compute-on-server architecture
+- [x] Phase 8: Chaos theory quantum module (`axol/quantum/`) — Declare -> Weave -> Observe pipeline
+- [x] Phase 8: Lyapunov exponent estimation (Benettin QR method) + Omega = 1/(1+max(lambda,0))
+- [x] Phase 8: Fractal dimension estimation (box-counting/correlation) + Phi = 1/(1+D/D_max)
+- [x] Phase 8: Weaver — builds attractor-based Tapestry from declarations
+- [x] Phase 8: Observatory — single/repeated observation with quality improvement
+- [x] Phase 8: Composition rules (serial: lambda sum, parallel: min/max rules)
+- [x] Phase 8: Entanglement cost estimation + infeasibility detection
+- [x] Phase 8: Quantum DSL parser (entangle/observe/reobserve/if blocks)
+- [x] Phase 8: 101 new tests (total 545 passed, 0 failed)
+
+---
+
+## Phase 8: Chaos Theory Quantum Module
+
+Phase 8 formalizes AXOL's theoretical foundation (THEORY.md) using **chaos theory** and implements the **Declare -> Weave -> Observe** pipeline as executable code. It reuses the existing `axol/core` engine without modification, implemented as the independent `axol/quantum/` package.
+
+### Core Mapping
+
+| AXOL Concept | Chaos Theory | Formula |
+|---|---|---|
+| Tapestry | Strange Attractor | Compact invariant set in phase space |
+| Omega (Cohesion) | Lyapunov Stability | `1/(1+max(lambda,0))` |
+| Phi (Clarity) | Fractal Dim Inverse | `1/(1+D/D_max)` |
+| Weave | Attractor Construction | Trajectory matrix of iterative map |
+| Observe | Point Collapse on Attractor | Time complexity O(D) |
+| Entanglement Range | Basin of Attraction | Boundary of convergence region |
+
+### Pipeline
+
+```
+[Declare]                    [Weave]                       [Observe]
+Relation declaration +   ->  Attractor construction +   ->  Input -> instant collapse
+quality target                cost estimation
+entangle search(q, db)       weave(declaration)             observe(tapestry, inputs)
+  @ Omega(0.9) Phi(0.7)       -> Tapestry                    -> Observation
+  { relevance <~> ... }       + WeaverReport                  + Omega, Phi
+```
+
+### Quality Metrics
+
+```
+        Phi (Clarity)
+        ^
+   1.0  |  Sharp but unstable    Ideal (strong entanglement)
+        |
+   0.0  |  Noise                 Stable but blurry
+        +-----------------------------> Omega (Cohesion)
+       0.0                             1.0
+```
+
+### Composition Rules
+
+| Mode | lambda | Omega | D | Phi |
+|------|--------|-------|---|-----|
+| Serial | lambda_A + lambda_B | 1/(1+max(sum,0)) | D_A + D_B | Phi_A * Phi_B |
+| Parallel | max(lambda_A, lambda_B) | min(Omega_A, Omega_B) | max(D_A, D_B) | min(Phi_A, Phi_B) |
+
+### DSL Syntax
+
+```
+entangle search(query: float[64], db: float[64]) @ Omega(0.9) Phi(0.7) {
+    relevance <~> similarity(query, db)
+    ranking <~> relevance
+}
+
+result = observe search(query_vec, db_vec)
+
+if result.Omega < 0.95 {
+    result = reobserve search(query_vec, db_vec) x 10
+}
+```
+
+### Usage Example
+
+```python
+from axol.quantum import DeclarationBuilder, RelationKind, weave, observe
+from axol.core.types import FloatVec
+
+# Declare
+decl = (
+    DeclarationBuilder("search")
+    .input("query", 64)
+    .input("db", 64)
+    .relate("relevance", ["query", "db"], RelationKind.PROPORTIONAL)
+    .output("relevance")
+    .quality(0.9, 0.7)
+    .build()
+)
+
+# Weave
+tapestry = weave(decl, seed=42)
+print(f"Omega: {tapestry.weaver_report.estimated_omega:.2f}")
+print(f"Phi: {tapestry.weaver_report.estimated_phi:.2f}")
+
+# Observe
+result = observe(tapestry, {"query": FloatVec.zeros(64), "db": FloatVec.zeros(64)})
+print(f"Result Omega: {result.omega:.2f}, Phi: {result.phi:.2f}")
+```
+
+### Tests
+
+```bash
+# Run only the new quantum module tests
+pytest tests/test_quantum_*.py tests/test_lyapunov.py tests/test_fractal.py tests/test_compose.py -v
+
+# Full test suite (existing + new)
+pytest tests/ -v
+# 545 passed, 0 failed, 4 skipped
+```
 
 ---
 
