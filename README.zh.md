@@ -840,6 +840,10 @@ Axol使用NumPy作为计算后端。
 |------|------|
 | AI智能体加密计算 | Axol Tool-Use API（LLM无需加密知识） |
 | 大型状态空间（100+维） | Axol（NumPy加速 + 稀疏表示法） |
+| 客户端-服务器加密委托 | AxolClient SDK（本地加密，远程计算） |
+| 可变维度状态转换 | KeyFamily + 矩形加密（N→M） |
+| 维度隐藏隐私 | 填充加密（统一max_dim） |
+| 函数→矩阵编译 | `fn_to_matrix` / `truth_table_to_matrix` 编译器 |
 | 简单脚本（< 10行） | Python（更少开销） |
 | 人类可读的业务逻辑 | Python/C#（熟悉的语法） |
 
@@ -847,9 +851,10 @@ Axol使用NumPy作为计算后端。
 
 - **有限的领域**: Axol只能表达向量/矩阵计算。不支持字符串处理、I/O、网络和通用编程。
 - **无LLM训练数据**: 与Python或JavaScript不同，没有LLM在Axol代码上进行过训练。AI智能体在上下文中没有示例的情况下可能难以生成正确的Axol程序。
-- **仅线性操作支持加密**: 9个操作中只有5个支持加密执行。使用非线性操作（step、branch、clamp、map）的程序加密覆盖率会降低。
+- **仅线性操作支持加密**: 9个操作中只有5个支持加密执行。使用非线性操作（step、branch、clamp、map）的程序加密覆盖率会降低。但BranchOp在编译时门已知的情况下，可以编译为加密的TransformOp。
 - **循环模式加密开销**: 循环模式下的加密程序无法评估终端条件，会运行到max_iterations。这在基准测试中导致400倍以上的开销。
 - **Token节省是领域特定的**: DSL Token节省是领域特定的（向量/矩阵程序30-50%）。但Tool-Use API通过完全抽象加密，提供相比Python+FHE 80-85%的节省。
+- **填充开销**: 填充加密将所有维度扩展到max_dim，计算量增加O(max_dim²/dim²)。仅在需要维度隐藏时使用。
 
 ---
 
@@ -1447,6 +1452,62 @@ pytest tests/test_quantum.py::TestAPI -v -s
 - [x] Phase 6：量子干涉（有符号振幅、Hadamard/Oracle/Diffusion矩阵、测量操作）
 - [x] Phase 6：量子程序100%加密覆盖率（除最终测量外所有操作均为E-class）
 - [x] Phase 6：加密透明Tool-Use API（encrypted_run、quantum_search — LLM无需加密知识）
+- [x] Phase 7：KeyFamily — 从单一种子确定性派生多维度密钥
+- [x] Phase 7：矩形矩阵加密（通过KeyFamily实现N→M维度变换）
+- [x] Phase 7：函数→矩阵编译器（fn_to_matrix、truth_table_to_matrix）
+- [x] Phase 7：填充层 — 维度隐藏双重加密（统一max_dim）
+- [x] Phase 7：分支→变换编译（BranchOp → 加密对角TransformOp）
+- [x] Phase 7：AxolClient SDK — 客户端加密、服务器计算架构
+
+---
+
+## 客户端-服务器架构
+
+Phase 7引入了客户端加密、不受信任服务器计算的分离架构：
+
+```
+┌─────────────────┐         ┌─────────────────────┐
+│  客户端（密钥）   │         │  服务器（无密钥）     │
+│                 │         │                      │
+│  程序 ──────────►│  加密   │  加密程序             │
+│  fn_to_matrix() │────────►│  run_program()       │
+│  pad_and_encrypt│         │  （对噪声执行计算）   │
+│                 │◄────────│  加密结果             │
+│  decrypt_result │  解密   │                      │
+│  ──────► 结果   │         │                      │
+└─────────────────┘         └─────────────────────┘
+```
+
+### 关键组件
+
+| 组件 | 说明 |
+|------|------|
+| `KeyFamily(seed)` | 从单一种子派生所有维度的正交密钥 |
+| `fn_to_matrix(fn, N, M)` | 将Python函数编译为变换矩阵 |
+| `encrypt_matrix_rect(M, kf)` | 加密N×M矩形矩阵 |
+| `pad_and_encrypt(prog, kf, max_dim)` | 将所有维度填充至max_dim后加密 |
+| `AxolClient(seed, max_dim)` | 高层SDK：prepare → 发送 → decrypt |
+
+### 使用方法
+
+```python
+from axol.api.client import AxolClient
+from axol.core.compiler import fn_to_matrix
+
+# 将函数编译为矩阵
+M = fn_to_matrix(lambda x: (x + 1) % 4, 4, 4)
+
+# 构建并加密
+client = AxolClient(seed=42, max_dim=8, use_padding=True)
+result = client.run_local(program)  # 加密 → 执行 → 解密
+```
+
+### 安全属性
+
+- **维度隐藏**: 使用填充后，服务器无法确定原始向量维度。
+- **密钥隔离**: 每个维度拥有唯一的派生密钥——一个泄露不会暴露其他密钥。
+- **分支编译**: 具有编译时门的BranchOp被转换为加密变换，提高E-class覆盖率。
+- **透明I/O**: 客户端处理所有加密/解密，服务器仅对噪声执行线性代数运算。
 
 ---
 

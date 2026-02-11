@@ -141,6 +141,51 @@ TOOL_DEFINITIONS: list[dict] = [
             "required": ["n", "marked"],
         },
     },
+    {
+        "name": "padded_run",
+        "description": "Run an Axol program with padding + encryption. "
+                       "All vectors are padded to a uniform dimension before encryption, "
+                       "hiding both data and dimension structure from the server.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "source": {
+                    "type": "string",
+                    "description": "Axol DSL source code",
+                },
+                "max_dim": {
+                    "type": "integer",
+                    "description": "Uniform dimension for padding (must be >= largest vector)",
+                },
+                "seed": {
+                    "type": "integer",
+                    "description": "Key derivation seed",
+                    "default": 42,
+                },
+                "optimize": {
+                    "type": "boolean",
+                    "description": "Whether to optimize before execution",
+                    "default": True,
+                },
+            },
+            "required": ["source", "max_dim"],
+        },
+    },
+    {
+        "name": "run_encrypted_payload",
+        "description": "Run a pre-encrypted program payload from AxolClient. "
+                       "The server executes the encrypted program without access to plaintext.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "program": {
+                    "type": "object",
+                    "description": "Serialized encrypted program (from AxolClient.prepare)",
+                },
+            },
+            "required": ["program"],
+        },
+    },
 ]
 
 

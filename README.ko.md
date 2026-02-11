@@ -840,6 +840,10 @@ Axol은 NumPy를 연산 백엔드로 사용합니다.
 |---------|------|
 | AI 에이전트 암호화 연산 | Axol Tool-Use API (LLM이 암호화를 몰라도 됨) |
 | 대규모 상태 공간 (100+ 차원) | Axol (NumPy 가속 + 희소 표기법) |
+| 클라이언트-서버 암호화 위임 | AxolClient SDK (로컬 암호화, 원격 연산) |
+| 가변 차원 상태 전이 | KeyFamily + 직사각 암호화 (N→M) |
+| 차원 은닉 프라이버시 | 패딩 암호화 (균일 max_dim) |
+| 함수→행렬 컴파일 | `fn_to_matrix` / `truth_table_to_matrix` 컴파일러 |
 | 단순 스크립트 (10줄 미만) | Python (오버헤드 적음) |
 | 사람이 읽을 비즈니스 로직 | Python/C# (익숙한 문법) |
 
@@ -847,9 +851,10 @@ Axol은 NumPy를 연산 백엔드로 사용합니다.
 
 - **제한된 도메인**: Axol은 벡터/행렬 연산만 표현할 수 있습니다. 문자열 처리, I/O, 네트워킹, 범용 프로그래밍은 지원되지 않습니다.
 - **LLM 학습 데이터 없음**: Python이나 JavaScript와 달리, 어떤 LLM도 Axol 코드로 학습되지 않았습니다. AI 에이전트가 컨텍스트에 예제 없이 올바른 Axol 프로그램을 생성하는 데 어려움을 겪을 수 있습니다.
-- **선형 연산만 암호화**: 9개 연산 중 5개만 암호화 실행을 지원합니다. 비선형 연산(step, branch, clamp, map)을 사용하는 프로그램은 암호화 커버리지가 감소합니다.
+- **선형 연산만 암호화**: 9개 연산 중 5개만 암호화 실행을 지원합니다. 비선형 연산(step, branch, clamp, map)을 사용하는 프로그램은 암호화 커버리지가 감소합니다. 단, BranchOp은 컴파일 타임 게이트가 알려진 경우 암호화된 TransformOp으로 컴파일 가능합니다.
 - **루프 모드 암호화 오버헤드**: 루프 모드의 암호화된 프로그램은 터미널 조건을 평가할 수 없어 max_iterations까지 실행됩니다. 이로 인해 벤치마크에서 400배 이상의 오버헤드가 발생합니다.
 - **토큰 절약은 도메인 특화**: DSL 토큰 절약은 도메인 특화(벡터/행렬 프로그램에서 30-50%)입니다. 하지만 Tool-Use API는 암호화를 완전히 추상화하여 Python+FHE 대비 80-85% 절약을 제공합니다.
+- **패딩 오버헤드**: 패딩 암호화는 모든 차원을 max_dim으로 확장하여 연산량이 O(max_dim²/dim²) 증가합니다. 차원 은닉이 필요한 경우에만 사용하세요.
 
 ---
 
@@ -1447,6 +1452,62 @@ pytest tests/test_quantum.py::TestAPI -v -s
 - [x] Phase 6: 양자 간섭 (부호 있는 진폭, Hadamard/Oracle/Diffusion 행렬, 측정 연산)
 - [x] Phase 6: 양자 프로그램 100% 암호화 커버리지 (최종 측정을 제외한 모든 연산이 E-class)
 - [x] Phase 6: 암호화 투명 Tool-Use API (encrypted_run, quantum_search — LLM이 암호화 지식 불필요)
+- [x] Phase 7: KeyFamily — 단일 시드에서 다차원 키 결정적 파생
+- [x] Phase 7: 직사각 행렬 암호화 (KeyFamily를 통한 N→M 차원 변환)
+- [x] Phase 7: 함수→행렬 컴파일러 (fn_to_matrix, truth_table_to_matrix)
+- [x] Phase 7: 패딩 레이어 — 차원 은닉 이중 암호화 (균일 max_dim)
+- [x] Phase 7: 분기→변환 컴파일 (BranchOp → 암호화된 대각 TransformOp)
+- [x] Phase 7: AxolClient SDK — 클라이언트 암호화, 서버 연산 아키텍처
+
+---
+
+## 클라이언트-서버 아키텍처
+
+Phase 7에서는 클라이언트에서 암호화하고 신뢰할 수 없는 서버에서 연산하는 분리 아키텍처를 도입합니다:
+
+```
+┌─────────────────┐         ┌─────────────────────┐
+│  클라이언트 (키) │         │  서버 (키 없음)      │
+│                 │         │                      │
+│  프로그램 ──────►│ 암호화  │  암호화된 프로그램    │
+│  fn_to_matrix() │────────►│  run_program()       │
+│  pad_and_encrypt│         │  (노이즈에 대해 연산) │
+│                 │◄────────│  암호화된 결과        │
+│  decrypt_result │ 복호화  │                      │
+│  ──────► 결과   │         │                      │
+└─────────────────┘         └─────────────────────┘
+```
+
+### 핵심 구성 요소
+
+| 구성 요소 | 설명 |
+|----------|------|
+| `KeyFamily(seed)` | 단일 시드에서 모든 차원의 직교 키 파생 |
+| `fn_to_matrix(fn, N, M)` | Python 함수를 변환 행렬로 컴파일 |
+| `encrypt_matrix_rect(M, kf)` | N×M 직사각 행렬 암호화 |
+| `pad_and_encrypt(prog, kf, max_dim)` | 모든 차원을 max_dim으로 패딩 후 암호화 |
+| `AxolClient(seed, max_dim)` | 상위 SDK: prepare → 전송 → decrypt |
+
+### 사용법
+
+```python
+from axol.api.client import AxolClient
+from axol.core.compiler import fn_to_matrix
+
+# 함수를 행렬로 컴파일
+M = fn_to_matrix(lambda x: (x + 1) % 4, 4, 4)
+
+# 빌드 및 암호화
+client = AxolClient(seed=42, max_dim=8, use_padding=True)
+result = client.run_local(program)  # 암호화 → 실행 → 복호화
+```
+
+### 보안 속성
+
+- **차원 은닉**: 패딩을 사용하면 서버가 원본 벡터 차원을 파악할 수 없습니다.
+- **키 격리**: 각 차원은 고유한 파생 키를 가져 하나가 유출되어도 다른 키는 안전합니다.
+- **분기 컴파일**: 컴파일 타임 게이트를 가진 BranchOp은 암호화된 변환으로 변환되어 E-class 커버리지가 증가합니다.
+- **투명한 I/O**: 클라이언트가 모든 암호화/복호화를 처리하며, 서버는 노이즈에 대한 선형대수만 실행합니다.
 
 ---
 

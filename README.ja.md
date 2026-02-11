@@ -840,6 +840,10 @@ AxolはNumPyを計算バックエンドとして使用します。
 |---------|------|
 | AIエージェントの暗号化計算 | Axol Tool-Use API（LLMは暗号化知識不要） |
 | 大規模状態空間（100+次元） | Axol（NumPy高速化 + 疎表記法） |
+| クライアント-サーバー暗号化委譲 | AxolClient SDK（ローカル暗号化、リモート計算） |
+| 可変次元状態遷移 | KeyFamily + 長方形暗号化（N→M） |
+| 次元隠蔽プライバシー | パディング暗号化（均一max_dim） |
+| 関数→行列コンパイル | `fn_to_matrix` / `truth_table_to_matrix` コンパイラ |
 | シンプルなスクリプト（10行以下） | Python（オーバーヘッドが少ない） |
 | 人間が読めるビジネスロジック | Python/C#（慣れた構文） |
 
@@ -847,9 +851,10 @@ AxolはNumPyを計算バックエンドとして使用します。
 
 - **限定されたドメイン**: Axolはベクトル/行列計算のみ表現可能です。文字列処理、I/O、ネットワーキング、汎用プログラミングはサポートされていません。
 - **LLM学習データなし**: PythonやJavaScriptとは異なり、AxolコードでトレーニングされたLLMはありません。AIエージェントはコンテキストに例がなければ正しいAxolプログラムの生成に苦労する可能性があります。
-- **線形演算のみ暗号化**: 9つの演算のうち5つのみが暗号化実行をサポートします。非線形演算（step、branch、clamp、map）を使用するプログラムは暗号化カバレッジが低下します。
+- **線形演算のみ暗号化**: 9つの演算のうち5つのみが暗号化実行をサポートします。非線形演算（step、branch、clamp、map）を使用するプログラムは暗号化カバレッジが低下します。ただし、BranchOpはコンパイル時ゲートが既知の場合、暗号化されたTransformOpにコンパイル可能です。
 - **ループモード暗号化オーバーヘッド**: ループモードの暗号化プログラムはターミナル条件を評価できず、max_iterationsまで実行されます。ベンチマークで400倍以上のオーバーヘッドが発生します。
 - **トークン削減はドメイン固有**: DSLトークン削減はドメイン固有（ベクトル/行列プログラムで30〜50%）です。ただし、Tool-Use APIは暗号化を完全に抽象化し、Python+FHE比で80〜85%の削減を提供します。
+- **パディングオーバーヘッド**: パディング暗号化はすべての次元をmax_dimに拡張し、計算量がO(max_dim²/dim²)増加します。次元隠蔽が必要な場合のみ使用してください。
 
 ---
 
@@ -1447,6 +1452,62 @@ pytest tests/test_quantum.py::TestAPI -v -s
 - [x] Phase 6：量子干渉（符号付き振幅、Hadamard/Oracle/Diffusion行列、測定演算）
 - [x] Phase 6：量子プログラムの100%暗号化カバレッジ（最終測定を除く全演算がE-class）
 - [x] Phase 6：暗号化透過Tool-Use API（encrypted_run、quantum_search — LLMは暗号化知識不要）
+- [x] Phase 7：KeyFamily — 単一シードからの多次元鍵決定的導出
+- [x] Phase 7：長方形行列暗号化（KeyFamilyによるN→M次元変換）
+- [x] Phase 7：関数→行列コンパイラ（fn_to_matrix、truth_table_to_matrix）
+- [x] Phase 7：パディングレイヤー — 次元隠蔽二重暗号化（均一max_dim）
+- [x] Phase 7：分岐→変換コンパイル（BranchOp → 暗号化対角TransformOp）
+- [x] Phase 7：AxolClient SDK — クライアント暗号化・サーバー計算アーキテクチャ
+
+---
+
+## クライアント-サーバーアーキテクチャ
+
+Phase 7では、クライアントで暗号化し信頼できないサーバーで計算する分離アーキテクチャを導入します：
+
+```
+┌─────────────────┐         ┌─────────────────────┐
+│ クライアント(鍵) │         │  サーバー（鍵なし）   │
+│                 │         │                      │
+│  プログラム ────►│ 暗号化  │  暗号化プログラム     │
+│  fn_to_matrix() │────────►│  run_program()       │
+│  pad_and_encrypt│         │ （ノイズに対して計算） │
+│                 │◄────────│  暗号化結果           │
+│  decrypt_result │ 復号化  │                      │
+│  ──────► 結果   │         │                      │
+└─────────────────┘         └─────────────────────┘
+```
+
+### 主要コンポーネント
+
+| コンポーネント | 説明 |
+|--------------|------|
+| `KeyFamily(seed)` | 単一シードから全次元の直交鍵を導出 |
+| `fn_to_matrix(fn, N, M)` | Python関数を変換行列にコンパイル |
+| `encrypt_matrix_rect(M, kf)` | N×M長方形行列の暗号化 |
+| `pad_and_encrypt(prog, kf, max_dim)` | 全次元をmax_dimにパディング後暗号化 |
+| `AxolClient(seed, max_dim)` | 上位SDK：prepare → 送信 → decrypt |
+
+### 使用方法
+
+```python
+from axol.api.client import AxolClient
+from axol.core.compiler import fn_to_matrix
+
+# 関数を行列にコンパイル
+M = fn_to_matrix(lambda x: (x + 1) % 4, 4, 4)
+
+# ビルドと暗号化
+client = AxolClient(seed=42, max_dim=8, use_padding=True)
+result = client.run_local(program)  # 暗号化 → 実行 → 復号化
+```
+
+### セキュリティ特性
+
+- **次元隠蔽**: パディングにより、サーバーは元のベクトル次元を特定できません。
+- **鍵分離**: 各次元は固有の導出鍵を持ち、1つが漏洩しても他の鍵は安全です。
+- **分岐コンパイル**: コンパイル時ゲートを持つBranchOpは暗号化変換に変換され、E-classカバレッジが向上します。
+- **透明なI/O**: クライアントが全暗号化/復号化を処理し、サーバーはノイズに対する線形代数のみ実行します。
 
 ---
 

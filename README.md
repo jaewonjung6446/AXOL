@@ -849,6 +849,10 @@ For large-scale vector operations (matrix multiplication), NumPy's optimized C/F
 |----------|---------------|
 | AI agent encrypted computation | Axol Tool-Use API (LLM doesn't need to know encryption) |
 | Large state spaces (100+ dimensions) | Axol (NumPy speedup + sparse notation) |
+| Client-server encrypted delegation | AxolClient SDK (encrypt locally, compute remotely) |
+| Variable-dimension state transitions | KeyFamily + rectangular encryption (N→M) |
+| Dimension-hiding privacy | Padded encryption (uniform max_dim) |
+| Compiling functions to matrices | `fn_to_matrix` / `truth_table_to_matrix` compiler |
 | Simple scripts (< 10 lines) | Python (less overhead) |
 | Human-readable business logic | Python/C# (familiar syntax) |
 
@@ -856,9 +860,10 @@ For large-scale vector operations (matrix multiplication), NumPy's optimized C/F
 
 - **Limited domain**: Axol can only express vector/matrix computations. String processing, I/O, networking, and general-purpose programming are not supported.
 - **No LLM training data**: Unlike Python or JavaScript, no LLM has been trained on Axol code. AI agents may struggle to generate correct Axol programs without examples in context.
-- **Encryption only for linear ops**: Only 5 of 9 operations support encrypted execution. Programs using nonlinear ops (step, branch, clamp, map) have reduced encryption coverage.
+- **Encryption only for linear ops**: Only 5 of 9 operations support encrypted execution. Programs using nonlinear ops (step, branch, clamp, map) have reduced encryption coverage. However, BranchOp can now be compiled to encrypted TransformOps when the gate vector is known at compile time.
 - **Loop-mode encryption overhead**: Encrypted programs in loop mode cannot evaluate terminal conditions, running until max_iterations. This causes significant overhead (400x+ in benchmarks).
 - **Token savings are domain-specific**: DSL token savings are domain-specific (30-50% for vector/matrix programs). However, the Tool-Use API provides 80-85% savings vs Python+FHE by abstracting encryption entirely.
+- **Padding overhead**: Padded encryption inflates all dimensions to max_dim, increasing computation by O(max_dim²/dim²). Use only when dimension hiding is required.
 
 ---
 
@@ -1459,6 +1464,62 @@ pytest tests/test_quantum.py::TestAPI -v -s
 - [x] Phase 6: Quantum interference (signed amplitudes, Hadamard/Oracle/Diffusion matrices, measure operation)
 - [x] Phase 6: 100% encryption coverage for quantum programs (all ops except final measure are E-class)
 - [x] Phase 6: Encryption-transparent Tool-Use API (encrypted_run, quantum_search — LLM needs zero encryption knowledge)
+- [x] Phase 7: KeyFamily — deterministic multi-dimension key derivation from a single seed
+- [x] Phase 7: Rectangular matrix encryption (N→M dimension changes via KeyFamily)
+- [x] Phase 7: Function-to-matrix compiler (fn_to_matrix, truth_table_to_matrix)
+- [x] Phase 7: Padding layer — dimension-hiding double encryption (uniform max_dim)
+- [x] Phase 7: Branch-to-transform compilation (BranchOp → encrypted diagonal TransformOps)
+- [x] Phase 7: AxolClient SDK — encrypt-on-client, compute-on-server architecture
+
+---
+
+## Client-Server Architecture
+
+Phase 7 introduces a client-server separation where encryption happens on the client and computation on an untrusted server:
+
+```
+┌─────────────────┐         ┌─────────────────────┐
+│   Client (key)  │         │  Server (no key)     │
+│                 │         │                      │
+│  Program ──────►│ encrypt │  Encrypted Program   │
+│  fn_to_matrix() │────────►│  run_program()       │
+│  pad_and_encrypt│         │  (operates on noise) │
+│                 │◄────────│  Encrypted Result    │
+│  decrypt_result │ decrypt │                      │
+│  ──────► Result │         │                      │
+└─────────────────┘         └─────────────────────┘
+```
+
+### Key Components
+
+| Component | Description |
+|-----------|------------|
+| `KeyFamily(seed)` | Derives orthogonal keys for any dimension from one seed |
+| `fn_to_matrix(fn, N, M)` | Compiles Python functions into transformation matrices |
+| `encrypt_matrix_rect(M, kf)` | Encrypts N×M rectangular matrices |
+| `pad_and_encrypt(prog, kf, max_dim)` | Pads all dimensions to max_dim, then encrypts |
+| `AxolClient(seed, max_dim)` | High-level SDK: prepare → send → decrypt |
+
+### Usage
+
+```python
+from axol.api.client import AxolClient
+from axol.core.compiler import fn_to_matrix
+
+# Compile function to matrix
+M = fn_to_matrix(lambda x: (x + 1) % 4, 4, 4)
+
+# Build and encrypt
+client = AxolClient(seed=42, max_dim=8, use_padding=True)
+result = client.run_local(program)  # encrypt → run → decrypt
+```
+
+### Security Properties
+
+- **Dimension hiding**: With padding, the server cannot determine original vector dimensions.
+- **Key isolation**: Each dimension has a unique derived key — compromising one doesn't reveal others.
+- **Branch compilation**: BranchOps with compile-time gates are converted to encrypted transforms, increasing E-class coverage.
+- **Transparent I/O**: The client handles all encryption/decryption — the server just runs linear algebra on noise.
 
 ---
 

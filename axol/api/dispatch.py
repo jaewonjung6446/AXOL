@@ -18,7 +18,11 @@ from axol.core.program import run_program, Program
 from axol.core.optimizer import optimize
 from axol.core.types import FloatVec, StateBundle
 from axol.core.verify import verify_states, VerifySpec
-from axol.core.encryption import random_orthogonal_key, encrypt_program, decrypt_state
+from axol.core.encryption import (
+    random_orthogonal_key, encrypt_program, decrypt_state,
+    KeyFamily, encrypt_program_full, decrypt_state_full,
+)
+from axol.core.padding import pad_and_encrypt, unpad_and_decrypt
 from axol.core.operations import measure as _measure_op
 from axol.api.tools import get_tool_definitions as _get_tool_defs
 
@@ -80,6 +84,10 @@ def dispatch(request: dict) -> dict:
             return _handle_encrypted_run(request)
         elif action == "quantum_search":
             return _handle_quantum_search(request)
+        elif action == "padded_run":
+            return _handle_padded_run(request)
+        elif action == "run_encrypted_payload":
+            return _handle_run_encrypted_payload(request)
         else:
             return {"error": f"Unknown action: {action!r}"}
     except ParseError as e:
@@ -296,4 +304,66 @@ def _handle_quantum_search(request: dict) -> dict:
         "probability": prob,
         "iterations": iterations,
         "encrypted": encrypt,
+    }
+
+
+def _handle_padded_run(request: dict) -> dict:
+    """Run an Axol program with padding + encryption (dimension hiding)."""
+    source = request.get("source")
+    if not source:
+        return {"error": "Missing 'source' field"}
+
+    max_dim = request.get("max_dim")
+    if not max_dim:
+        return {"error": "Missing 'max_dim' field"}
+    max_dim = int(max_dim)
+
+    seed = request.get("seed", 42)
+
+    prog = parse(source)
+    if request.get("optimize", True):
+        prog = optimize(prog)
+
+    kf = KeyFamily(seed=seed)
+    padded = pad_and_encrypt(prog, kf, max_dim)
+    result = run_program(padded.encrypted_program)
+    decrypted = unpad_and_decrypt(result.final_state, padded)
+
+    final_state = {}
+    for key in decrypted.keys():
+        final_state[key] = decrypted[key].to_list()
+
+    return {
+        "final_state": final_state,
+        "steps_executed": result.steps_executed,
+        "terminated_by": result.terminated_by,
+        "padded": True,
+        "max_dim": max_dim,
+    }
+
+
+def _handle_run_encrypted_payload(request: dict) -> dict:
+    """Run a pre-encrypted program payload (from AxolClient.prepare)."""
+    from axol.api.client import deserialize_program
+
+    payload = request.get("program")
+    if not payload:
+        return {"error": "Missing 'program' field"}
+
+    try:
+        prog = deserialize_program(payload)
+    except Exception as e:
+        return {"error": f"Deserialization failed: {e}"}
+
+    result = run_program(prog)
+
+    final_state = {}
+    for key in result.final_state.keys():
+        vec = result.final_state[key]
+        final_state[key] = vec.to_list()
+
+    return {
+        "final_state": final_state,
+        "steps_executed": result.steps_executed,
+        "terminated_by": result.terminated_by,
     }

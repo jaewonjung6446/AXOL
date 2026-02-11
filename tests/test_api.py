@@ -159,7 +159,7 @@ class TestToolDefinitions:
     def test_tool_definitions_list(self):
         defs = get_tool_definitions()
         assert isinstance(defs, list)
-        assert len(defs) == 7
+        assert len(defs) == 9
 
     def test_tool_definitions_structure(self):
         defs = get_tool_definitions()
@@ -172,4 +172,4 @@ class TestToolDefinitions:
     def test_tool_names(self):
         defs = get_tool_definitions()
         names = {d["name"] for d in defs}
-        assert names == {"parse", "run", "inspect", "list_ops", "verify", "encrypted_run", "quantum_search"}
+        assert names == {"parse", "run", "inspect", "list_ops", "verify", "encrypted_run", "quantum_search", "padded_run", "run_encrypted_payload"}

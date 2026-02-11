@@ -22,6 +22,17 @@ from axol.core.optimizer import optimize
 from axol.core.analyzer import analyze, AnalysisResult
 from axol.core.backend import get_backend, set_backend, get_backend_name, to_numpy
 
+from axol.core.encryption import (
+    KeyFamily,
+    encrypt_matrix_rect,
+    encrypt_program_full,
+    decrypt_state_full,
+)
+
+from axol.core.compiler import fn_to_matrix, truth_table_to_matrix
+
+from axol.core.padding import PaddedProgram, pad_and_encrypt, unpad_and_decrypt
+
 __all__ = [
     "BinaryVec", "IntVec", "FloatVec", "OneHotVec", "GateVec",
     "TransMatrix", "StateBundle",
@@ -34,4 +45,7 @@ __all__ = [
     "optimize",
     "analyze", "AnalysisResult",
     "get_backend", "set_backend", "get_backend_name", "to_numpy",
+    "KeyFamily", "encrypt_matrix_rect", "encrypt_program_full", "decrypt_state_full",
+    "fn_to_matrix", "truth_table_to_matrix",
+    "PaddedProgram", "pad_and_encrypt", "unpad_and_decrypt",
 ]
