@@ -49,6 +49,7 @@ AXOL:
 - **平均63%のトークン削減** — 等価なPythonと比較（量子DSL）
 - **実現不可能性検出** — 目標が数学的に達成不可能な場合、計算前に警告
 - **Lyapunov推定精度**: 平均誤差 0.0002
+- **3つの非線形合成アプローチ**: 純粋ユニタリ（方向のみ）、ハイブリッド（方向 + 大きさ）、Koopman（EDMDによる高次元リフティング）
 - **基盤層の9つのプリミティブ演算**: `transform`, `gate`, `merge`, `distance`, `route`（暗号化対応）+ `step`, `branch`, `clamp`, `map`（平文）
 - **行列レベル暗号化** — 相似変換によりプログラムを暗号学的に読み取り不可能にする
 - **NumPyバックエンド** — オプションでGPUアクセラレーション対応（CuPy/JAX）
@@ -72,6 +73,7 @@ AXOL:
   - [GPUバックエンド](#gpuバックエンド)
   - [モジュールシステム](#モジュールシステム)
   - [量子干渉 (Phase 6)](#量子干渉-phase-6)
+  - [非線形合成 (Phase 9)](#非線形合成-phase-9)
   - [クライアント・サーバーアーキテクチャ](#クライアントサーバーアーキテクチャ)
 - [アーキテクチャ](#アーキテクチャ)
 - [クイックスタート](#クイックスタート)
@@ -575,6 +577,43 @@ s state=[0.5 0.5 0.5 0.5]
 ? found state[3]>=0.9
 ```
 
+### 非線形合成 (Phase 9)
+
+非線形パイプラインを合成するための3つのアプローチ。精度と速度のトレードオフを提供します：
+
+| アプローチ | 手法 | 次元 | 精度 | 速度 |
+|-----------|------|:----:|:----:|:----:|
+| **純粋ユニタリ** | SVD極分解: `A = U @ S @ Vh → U @ Vh` | dim x dim | 方向のみ | 最速 |
+| **ハイブリッド** | SVD全体: 回転 + 特異値 | dim x dim | 方向 + 大きさ | 高速 |
+| **Koopman** | EDMDによる多項式空間へのリフティング | lifted_dim x lifted_dim | 完全非線形 | 最遅 |
+
+```python
+from axol.quantum import (
+    estimate_unitary_step, compose_unitary_chain,       # 純粋ユニタリ
+    estimate_hybrid_step, compose_hybrid_chain,          # ハイブリッド
+    estimate_koopman_matrix, compose_koopman_chain,      # Koopman
+    lift, unlift, lifted_dim,                            # Koopmanユーティリティ
+)
+
+# 純粋ユニタリ: 方向のみの合成
+U1 = estimate_unitary_step(step_fn, dim=4)
+U2 = estimate_unitary_step(step_fn2, dim=4)
+U_chain = compose_unitary_chain([U1, U2])  # 再直交化済み
+
+# ハイブリッド: 方向 + 大きさ (開放量子系)
+A1 = estimate_hybrid_step(step_fn, dim=4)
+A2 = estimate_hybrid_step(step_fn2, dim=4)
+composed, rotation, scales = compose_hybrid_chain([A1, A2])
+# rotation = 量子ゲート (ユニタリ), scales = デコヒーレンス重み
+
+# Koopman: EDMDによる完全非線形
+K = estimate_koopman_matrix(step_fn, dim=4, degree=2)  # lifted_dim=15
+K_chain = compose_koopman_chain([K1, K2])
+y = unlift(lift(x) @ K_chain.data, dim=4)
+```
+
+ハイブリッドは開放量子系に自然にマッピングされます：ユニタリ部分 = 孤立量子進化、スケール部分 = 環境との相互作用（デコヒーレンス）。
+
 ### クライアント・サーバーアーキテクチャ
 
 クライアントで暗号化し、信頼できないサーバーで計算：
@@ -603,6 +642,8 @@ Client (鍵あり)            Server (鍵なし)
    observe,        │  types.py   cost.py    lyapunov.py          │
    reobserve)      │               │        fractal.py           │
                     │           compose.py                        │
+                    │           koopman.py  (EDMDリフティング)      │
+                    │           unitary.py  (SVD合成)             │
                     │               │                             │
                     │           observatory.py ──► Observation    │
                     └──────────────┬──────────────────────────────┘
@@ -635,6 +676,8 @@ Client (鍵あり)            Server (鍵なし)
 | Born ruleの確率 | `operations.measure()` |
 | Weaveのtransform構築 | `TransformOp`, `MergeOp` |
 | アトラクタ探索の拡散 | `hadamard_matrix()`, `diffusion_matrix()` |
+| Koopmanリフティング / EDMD | `TransMatrix`, `np.linalg.lstsq` |
+| ユニタリ / ハイブリッドSVD | `TransMatrix`, `np.linalg.svd` |
 
 ---
 
@@ -748,6 +791,21 @@ can_reuse_after_observe(lyapunov) -> bool
 
 # コスト
 estimate_cost(declaration) -> CostEstimate
+
+# Koopman
+lifted_dim(dim, degree?, basis?) -> int
+lift(x, degree?, basis?) -> ndarray
+unlift(y_lifted, dim, degree?, basis?) -> ndarray
+estimate_koopman_matrix(step_fn, dim, degree?, n_samples?, seed?, basis?) -> TransMatrix
+compose_koopman_chain(matrices) -> TransMatrix
+
+# ユニタリ / ハイブリッド
+nearest_unitary(A) -> ndarray
+reorthogonalize(U) -> ndarray
+estimate_unitary_step(step_fn, dim, n_samples?, seed?) -> TransMatrix
+compose_unitary_chain(matrices) -> TransMatrix
+estimate_hybrid_step(step_fn, dim, n_samples?, seed?) -> TransMatrix
+compose_hybrid_chain(matrices) -> tuple[TransMatrix, TransMatrix, ndarray]
 ```
 
 ### コア型
@@ -858,11 +916,14 @@ decrypted = decrypt_state(result.final_state, key)
 ## テストスイート
 
 ```bash
-# 完全テストスイート（545テスト）
+# 完全テストスイート（767テスト）
 pytest tests/ -v
 
 # 量子モジュールテスト（101テスト）
 pytest tests/test_quantum_*.py tests/test_lyapunov.py tests/test_fractal.py tests/test_compose.py -v
+
+# Koopman / ユニタリ / ハイブリッドテスト
+pytest tests/test_koopman.py tests/test_unitary.py tests/test_hybrid.py tests/test_distill.py -v
 
 # 性能ベンチマーク（レポート生成）
 pytest tests/test_quantum_performance.py -v -s
@@ -884,7 +945,7 @@ pytest tests/test_api.py tests/test_server.py -v
 python -m axol.server   # http://localhost:8080
 ```
 
-現在: **545テスト合格**、0失敗、4スキップ（cupy/jax未インストール）。
+現在: **767テスト合格**、0失敗、4スキップ（cupy/jax未インストール）。
 
 ---
 
@@ -903,9 +964,12 @@ python -m axol.server   # http://localhost:8080
 - [x] Phase 8: フラクタル次元推定（ボックスカウンティング/相関）+ Phi = 1/(1+D/D_max)
 - [x] Phase 8: Weaver、Observatory、合成規則、コスト推定、DSLパーサー
 - [x] Phase 8: 101の新テスト（合計545、0失敗）
-- [ ] Phase 9: 複素振幅 (a+bi) — Shor、QPE、QFT — 完全位相干渉
-- [ ] Phase 10: 複数ノードにわたる分散Tapestry織り上げ
-- [ ] Phase 11: 適応品質 — 観測中の動的Omega/Phi調整
+- [x] Phase 9: 非線形合成 — 純粋ユニタリ（SVD極分解）、ハイブリッド（方向 + 大きさ）、Koopman（EDMDリフティング）
+- [x] Phase 9: 多項式 & 拡張基底によるKoopman演算子（PWAキャプチャ）
+- [x] Phase 9: 222の新テスト（合計767、0失敗）
+- [ ] Phase 10: 複素振幅 (a+bi) — Shor、QPE、QFT — 完全位相干渉
+- [ ] Phase 11: 複数ノードにわたる分散Tapestry織り上げ
+- [ ] Phase 12: 適応品質 — 観測中の動的Omega/Phi調整
 
 ---
 

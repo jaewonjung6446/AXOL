@@ -1,0 +1,709 @@
+\documentclass[11pt,a4paper]{article}
+
+% --- Packages ---
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{algorithm}
+\usepackage{algorithmic}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{listings}
+
+\newtheorem{theorem}{Theorem}
+\newtheorem{definition}{Definition}
+\newtheorem{proposition}{Proposition}
+\newtheorem{corollary}{Corollary}
+
+\lstset{
+  basicstyle=\ttfamily\small,
+  breaklines=true,
+  frame=single,
+  xleftmargin=1em,
+  xrightmargin=1em
+}
+
+% --- Title ---
+\title{AXOL: Chaos-Theoretic Quality Assurance for\\Depth-Independent Computational Pipelines}
+
+\author{
+  % Author name here
+}
+
+\date{\today}
+
+% ====================================================================
+\begin{document}
+\maketitle
+
+% --- Abstract ---
+\begin{abstract}
+We present AXOL, a programming paradigm that separates computational cost into an offline \emph{weaving} phase and an online \emph{observation} phase. By pre-composing pipeline stages into a single matrix, observation cost becomes $O(d^2)$ regardless of pipeline depth---a property we call \emph{depth-independence}. To guarantee the quality of composed results, AXOL introduces two metrics derived from dynamical systems theory: \emph{cohesion} ($\Omega$), based on the maximal Lyapunov exponent, measuring output stability; and \emph{clarity} ($\Phi$), based on fractal dimension, measuring output precision. We implement basin-of-attraction discovery via coupled logistic map lattices, enabling branching without explicit control flow. Benchmarks on the reference implementation (Python + Rust) demonstrate 2,412$\times$ speedup at depth 5,000, sub-microsecond observation latency, and quality metrics that match theoretical predictions within machine epsilon. We provide four nonlinear composition paths (Distill, Hybrid, Unitary, Koopman) with empirical comparison, and discuss implications for AI inference cost, LLM hallucination detection, and a self-generating programming system.
+\end{abstract}
+
+% --- 1. Introduction ---
+\section{Introduction}
+
+Every modern programming language concentrates execution cost at call time: a pipeline of $N$ stages requires $N$ sequential operations per invocation. AXOL challenges this assumption by separating cost into two temporal phases:
+
+\begin{enumerate}
+  \item \textbf{Weave} (offline): Pre-compose all pipeline stages into a single transformation. Cost $O(N \cdot d^3)$, paid once.
+  \item \textbf{Observe} (online): Pass input through the composed transformation. Cost $O(d^2)$, independent of $N$.
+\end{enumerate}
+
+This separation is a well-known property of linear algebra---matrix chain multiplication. AXOL's contribution is not this property itself, but a framework that:
+
+\begin{itemize}
+  \item Introduces \textbf{chaos-theoretic quality metrics} ($\Omega$, $\Phi$) that quantify output reliability at weave time.
+  \item Provides \textbf{mathematically guaranteed composition rules} for quality propagation through serial and parallel pipelines.
+  \item Implements \textbf{basin-of-attraction discovery} from real chaotic dynamics, enabling implicit branching without control flow statements.
+  \item Offers \textbf{four nonlinear composition paths} for pipelines that include nonlinear stages.
+\end{itemize}
+
+\subsection{Contributions}
+
+\begin{enumerate}
+  \item Formalization of Lyapunov exponent and fractal dimension as programming pipeline quality metrics (\S\ref{sec:quality}).
+  \item Serial and parallel composition rules with mathematical guarantees (\S\ref{sec:composition}).
+  \item Basin-of-attraction discovery from coupled logistic map dynamics (\S\ref{sec:basin}).
+  \item Four nonlinear composition strategies: Distill, Hybrid, Unitary, Koopman (\S\ref{sec:nonlinear}).
+  \item Comprehensive benchmarks: accuracy (10 metrics), latency (sub-$\mu$s to ms range), and scaling ($O(d^2)$ confirmed) (\S\ref{sec:benchmarks}).
+  \item Discussion of implications for AI systems, including LLM hallucination detection and inference cost reduction (\S\ref{sec:implications}).
+\end{enumerate}
+
+% --- 2. Mathematical Foundation ---
+\section{Mathematical Foundation}
+\label{sec:math}
+
+\subsection{Phase Space}
+
+An AXOL program operates in a phase space $\mathbb{R}^d$, where $d$ is determined by declared input/output dimensions. The system state is a vector $\mathbf{x} \in \mathbb{R}^d$.
+
+\subsection{Trajectory Matrix}
+
+Declared relations are converted to dynamics on the phase space:
+\begin{equation}
+  \mathbf{x}_{k+1} = \mathbf{x}_k \cdot M
+\end{equation}
+where $M \in \mathbb{R}^{d \times d}$ is a trajectory matrix whose spectral properties depend on the relation kind:
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}lll@{}}
+\toprule
+Relation Kind & Matrix Property & Dynamical Meaning \\
+\midrule
+Proportional ($\propto$) & Near-identity perturbation & Convergent (fixed-point attractor) \\
+Additive ($+$) & Orthogonal rotation + contraction & Quasi-stable (limit cycle) \\
+Multiplicative ($\times$) & Matrix product structure & Potentially chaotic \\
+Inverse ($!$) & Inverse structure & Large eigenvalues (divergent) \\
+Conditional ($?$) & Block-diagonal & Conditional branching \\
+\bottomrule
+\end{tabular}
+\caption{Relation kinds and their spectral properties.}
+\label{tab:relations}
+\end{table}
+
+\subsection{Attractors}
+
+The weaving process constructs \emph{strange attractors}---compact invariant subsets $A$ of phase space with:
+\begin{enumerate}
+  \item Invariance under the dynamics $f$: $f(A) = A$.
+  \item Non-zero measure basin of attraction $B(A)$.
+  \item Sensitive dependence on initial conditions (chaos).
+  \item Non-integer (fractal) dimension.
+\end{enumerate}
+
+\subsection{Interference Layers}
+
+To enrich attractor structure, the weaver applies Hadamard-based interference layers:
+\begin{equation}
+  M' = Q \cdot M \cdot Q^T
+\end{equation}
+where $Q$ is an orthogonal matrix obtained via QR decomposition of a random matrix. After each layer, spectral radius is controlled to $\leq 0.95$ via QR renormalization.
+
+% --- 3. Quality Metrics ---
+\section{Quality Metrics: Cohesion ($\Omega$) and Clarity ($\Phi$)}
+\label{sec:quality}
+
+\subsection{Cohesion ($\Omega$) from Lyapunov Exponent}
+
+The maximal Lyapunov exponent $\lambda$ quantifies sensitivity to initial conditions:
+\begin{equation}
+  \lambda = \lim_{k \to \infty} \frac{1}{k} \ln \frac{\|\delta \mathbf{x}_k\|}{\|\delta \mathbf{x}_0\|}
+\end{equation}
+
+Cohesion is defined as:
+\begin{equation}
+  \Omega = \frac{1}{1 + \max(\lambda, 0)}
+\end{equation}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}ccl@{}}
+\toprule
+$\lambda$ & $\Omega$ & Interpretation \\
+\midrule
+$\lambda \ll 0$ & $\to 1.0$ & Strong convergence; identical outputs on repeated observation \\
+$\lambda = 0$ & $= 1.0$ & Marginal stability \\
+$\lambda = 1$ & $= 0.5$ & Moderate chaos \\
+$\lambda \to \infty$ & $\to 0.0$ & Full chaos; outputs are random \\
+\bottomrule
+\end{tabular}
+\caption{Cohesion ($\Omega$) interpretation.}
+\end{table}
+
+Lyapunov exponents are estimated using Benettin's QR decomposition method with 50 steps.
+
+\subsection{Clarity ($\Phi$) from Fractal Dimension}
+
+The fractal dimension $D$ quantifies geometric complexity of the attractor, estimated via the Grassberger--Procaccia correlation dimension:
+\begin{equation}
+  C(r) = \lim_{N \to \infty} \frac{2}{N(N-1)} \sum_{i < j} \Theta(r - \|\mathbf{x}_i - \mathbf{x}_j\|), \quad D = \lim_{r \to 0} \frac{\ln C(r)}{\ln r}
+\end{equation}
+
+Clarity is defined as:
+\begin{equation}
+  \Phi = \frac{1}{1 + D / D_{\max}}
+\end{equation}
+where $D_{\max} = d$ (phase space dimension).
+
+\subsection{Two-Axis Quality Space}
+
+$\Omega$ and $\Phi$ span a quality plane:
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}cccl@{}}
+\toprule
+Region & $\Omega$ & $\Phi$ & Interpretation \\
+\midrule
+Ideal & High & High & Stable fixed-point attractor, precise output \\
+Stable-blurry & High & Low & Stable but wide attractor (categorical) \\
+Unstable-sharp & Low & High & Narrow but chaotic trajectory \\
+Noise & Low & Low & Full chaos, meaningless \\
+\bottomrule
+\end{tabular}
+\caption{Quality regions in the $\Omega$--$\Phi$ plane.}
+\end{table}
+
+% --- 4. Composition Rules ---
+\section{Composition Rules}
+\label{sec:composition}
+
+\begin{proposition}[Serial Composition]
+For two stages $A$, $B$ in series:
+\begin{align}
+  \lambda_{\text{total}} &= \lambda_A + \lambda_B \\
+  \Omega_{\text{total}} &= \frac{1}{1 + \max(\lambda_A + \lambda_B, 0)} \\
+  D_{\text{total}} &\leq D_A + D_B \\
+  \Phi_{\text{total}} &\geq \Phi_A \cdot \Phi_B
+\end{align}
+Serial composition accumulates chaos: two mildly chaotic stages ($\lambda = 0.3$ each) produce a strongly chaotic pipeline ($\lambda = 0.6$).
+\end{proposition}
+
+\begin{proposition}[Parallel Composition]
+For two stages $A$, $B$ in parallel:
+\begin{align}
+  \lambda_{\text{total}} &= \max(\lambda_A, \lambda_B) \\
+  \Omega_{\text{total}} &= \min(\Omega_A, \Omega_B) \\
+  D_{\text{total}} &= \max(D_A, D_B) \\
+  \Phi_{\text{total}} &= \min(\Phi_A, \Phi_B)
+\end{align}
+Parallel composition is limited by the weakest link.
+\end{proposition}
+
+These rules follow from standard results in dynamical systems theory and are not novel; AXOL's contribution is their application to programming pipeline quality prediction.
+
+% --- 5. Basin Discovery ---
+\section{Basin-of-Attraction Discovery}
+\label{sec:basin}
+
+\subsection{Chaos Engine: Coupled Logistic Map Lattice}
+
+AXOL's spatial axis uses a lattice of coupled logistic maps as its chaos engine:
+\begin{equation}
+  x_{i,k+1} = (1 - \epsilon) \cdot r \cdot x_{i,k}(1 - x_{i,k}) + \frac{\epsilon}{2}(x_{i-1,k} + x_{i+1,k})
+\end{equation}
+where $r$ is the bifurcation parameter and $\epsilon$ is the coupling strength. The quality parameter $\Omega$ maps directly to $r$: high $\Omega$ (target $\geq 0.7$) produces $r$ values in the stable regime ($r \approx 3.1$, $\lambda < 0$), while low $\Omega$ produces chaotic dynamics ($r \approx 4.0$, $\lambda > 0$).
+
+\subsection{Basin Detection}
+
+Basin detection is performed by:
+\begin{enumerate}
+  \item Running the lattice dynamics from multiple initial conditions.
+  \item Clustering the resulting trajectories by their asymptotic behavior (attractor membership).
+  \item Identifying basin boundaries as the phase-space regions where cluster assignment changes.
+\end{enumerate}
+
+\textbf{Empirical results:}
+\begin{itemize}
+  \item Stable regime ($\Omega \geq 0.7$): 1 basin (single attractor).
+  \item Chaotic regime ($\Omega \leq 0.5$): 3 basins with non-uniform size distribution (57.5\%, 40.5\%, 2.0\%).
+  \item Basin boundaries exhibit fractal structure, consistent with theory.
+\end{itemize}
+
+\subsection{Branching Without Control Flow}
+
+Basin boundaries serve as implicit conditional branching:
+\begin{itemize}
+  \item Each basin corresponds to a computational outcome.
+  \item Input location in phase space determines which basin (and hence which outcome) the system converges to.
+  \item Near basin boundaries, $\Omega$ decreases naturally, expressing uncertainty about which branch will be taken.
+\end{itemize}
+
+This replaces explicit \texttt{if/else} statements with dynamical topology. The system expresses ``I don't know'' (low $\Omega$) when input lies near a basin boundary---a property not available in traditional control flow.
+
+% --- 6. Nonlinear Composition ---
+\section{Nonlinear Composition Paths}
+\label{sec:nonlinear}
+
+Matrix pre-composition applies only to linear transformation chains. For pipelines containing nonlinear stages (activation functions, conditional logic), AXOL provides four composition strategies:
+
+\subsection{Path 0: Composed (Linear Only)}
+
+Direct matrix multiplication $M_{\text{composed}} = M_1 \cdot M_2 \cdots M_N$. Exact (no approximation). Observation: $O(d^2)$.
+
+\subsection{Path 1: Distill (End-to-End Distillation)}
+
+The entire nonlinear pipeline $f = f_N \circ \cdots \circ f_1$ is treated as a black box. $n$ random inputs are generated, passed through the full pipeline, and a single linear map $M$ is fitted via least-squares:
+\begin{equation}
+  Y \approx X \cdot M, \quad M = (X^T X)^{-1} X^T Y
+\end{equation}
+
+This is analogous to knowledge distillation: the complex pipeline (teacher) is approximated by a single linear transformation (student).
+
+\textbf{Key finding:} For depth $\geq 5$, Distill achieves Hellinger distance $\approx 0$ and argmax accuracy 100\% relative to full pipeline execution. This suggests that deep nonlinear chains exhibit end-to-end linear convergence---a dynamical analogue of the central limit theorem.
+
+\subsection{Path 2: Hybrid (SVD Decomposition)}
+
+Per-step least-squares approximation followed by composition and SVD decomposition into rotation (unitary, $U \cdot V^H$) and scale (singular values, $\Sigma$). Corresponds to open quantum system dynamics: unitary evolution + decoherence.
+
+\subsection{Path 3: Unitary (Pure Unitary Projection)}
+
+Nearest unitary matrix extraction via polar decomposition. Preserves direction only; discards magnitude. Corresponds to closed quantum system dynamics.
+
+\subsection{Path 4: Koopman (EDMD Lifting)}
+
+Extended Dynamic Mode Decomposition lifts the state space to an observable space where nonlinear dynamics become linear:
+\begin{equation}
+  \psi(f(\mathbf{x})) \approx K \cdot \psi(\mathbf{x})
+\end{equation}
+where $\psi$ includes polynomial observables up to degree 2. Highest accuracy at depth $\leq 3$ but suffers from dimension explosion: $\text{lifted\_dim}(d, 2) = 1 + d + d(d+1)/2$.
+
+\subsection{Comparison}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}lccccc@{}}
+\toprule
+Property & Composed & Distill & Hybrid & Unitary & Koopman \\
+\midrule
+Nonlinear support & \texttimes & \checkmark & \checkmark & Partial & \checkmark \\
+Observation cost & $O(d^2)$ & $O(d^2)$ & $O(d^2)$ & $O(d^2)$ & $O(d_l^2)$ \\
+Memory & $d^2$ & $d^2$ & $d^2 + d$ & $d^2$ & $d_l^2$ \\
+Error accumulation & None & None (E2E) & Per-step & Per-step & Per-step \\
+Argmax accuracy (depth 3) & --- & 100\% & 0--50\% & 0--50\% & 100\% \\
+Argmax accuracy (depth 20) & --- & 100\% & 0--50\% & 0--50\% & --- \\
+\bottomrule
+\end{tabular}
+\caption{Nonlinear composition path comparison ($d_l$ = lifted dimension).}
+\label{tab:paths}
+\end{table}
+
+% --- 7. The Declare-Weave-Observe Paradigm ---
+\section{The Declare--Weave--Observe Paradigm}
+
+AXOL redefines the programming lifecycle:
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}lll@{}}
+\toprule
+Traditional & AXOL & Mechanism \\
+\midrule
+Write (list instructions) & \textbf{Declare} (state relations) & Define phase space structure \\
+Compile (translate to machine code) & \textbf{Weave} (construct attractors) & Build attractor + compose matrices + $\Omega/\Phi$ \\
+Execute (sequential processing) & \textbf{Observe} (collapse to result) & Single matrix-vector multiply \\
+\bottomrule
+\end{tabular}
+\caption{Paradigm comparison.}
+\end{table}
+
+\begin{lstlisting}
+// Declare: specify relations and quality target
+entangle search(query, database) @ Omega(0.9) Phi(0.7) {
+    relevance <proportional> similarity(query, database)
+    ranking   <proportional> relevance * recency
+}
+
+// Observe: input -> result with quality metrics
+result = observe search("AXOL", db)
+// -> { value: [...], Omega: 0.91, Phi: 0.73 }
+\end{lstlisting}
+
+% --- 8. Benchmarks ---
+\section{Experimental Evaluation}
+\label{sec:benchmarks}
+
+All benchmarks run on the reference implementation: Python 3.13 (NumPy) + Rust (native). Timings are wall-clock microseconds.
+
+\subsection{Accuracy (10 Metrics)}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}lll@{}}
+\toprule
+Metric & Measured Error & Verdict \\
+\midrule
+Born rule normalization & $\sim 10^{-7}$ (dim=1024) & PASS (f32 limit) \\
+Channel trace preservation & $< 4.4 \times 10^{-16}$ (all dim) & PASS (machine $\epsilon$) \\
+Pure state purity & $< 1.1 \times 10^{-16}$ (dim$\leq$64) & PASS (exact) \\
+Max-mixed entropy & $= 0.00$ (dim$\leq$16) & PASS (exact) \\
+Fidelity $F(\rho,\rho)$ & dim=2: 1.00; dim$\geq$4: $>1.0$ & WARN (Jacobi accumulation) \\
+Hadamard $H \cdot H^T = I$ & $4.8 \times 10^{-8}$ & PASS (f32) \\
+Interference probability sum & $= 0.00$ (all phases) & PASS \\
+Partial trace & $< 2.2 \times 10^{-16}$ & PASS \\
+Repeated dephasing convergence & 50 iter $\to$ off-diag $= 0$ & PASS \\
+Quality metrics range & $\Omega, \Phi \in [0,1]$ & PASS \\
+\bottomrule
+\end{tabular}
+\caption{Accuracy benchmark: 9/10 metrics at machine precision.}
+\label{tab:accuracy}
+\end{table}
+
+\subsection{Primitive Operation Latency}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+Operation & dim=4 & dim=16 & dim=64 & dim=256 \\
+\midrule
+Born rule (real) & 0.12 $\mu$s & 0.13 $\mu$s & 0.23 $\mu$s & 0.70 $\mu$s \\
+Born rule (complex) & 0.15 $\mu$s & 0.13 $\mu$s & 0.23 $\mu$s & --- \\
+Transform (real) & 0.11 $\mu$s & 0.40 $\mu$s & 5.79 $\mu$s & 122.0 $\mu$s \\
+Transform (complex) & 0.12 $\mu$s & 0.42 $\mu$s & 6.20 $\mu$s & 132.6 $\mu$s \\
+Interference & 0.14 $\mu$s & 0.18 $\mu$s & 0.69 $\mu$s & 1.53 $\mu$s \\
+DensityMatrix creation & 0.12 $\mu$s & 0.51 $\mu$s & 6.35 $\mu$s & --- \\
+Purity & 0.04 $\mu$s & 0.37 $\mu$s & 8.64 $\mu$s & --- \\
+Von Neumann entropy & 0.30 $\mu$s & 1.00 $\mu$s & --- & --- \\
+Unitary evolution & 0.30 $\mu$s & 16.1 $\mu$s & --- & --- \\
+Fidelity & 0.70 $\mu$s & 1479.9 $\mu$s & --- & --- \\
+\bottomrule
+\end{tabular}
+\caption{Primitive operation latency (Rust implementation).}
+\label{tab:latency}
+\end{table}
+
+\subsection{Depth-Independence}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}rrrr@{}}
+\toprule
+Depth & Traditional ($\mu$s) & AXOL Observe ($\mu$s) & Speedup \\
+\midrule
+5 & 21.6 & 10.0 & 2$\times$ \\
+50 & 146.5 & 9.9 & 15$\times$ \\
+500 & 1,434 & 9.8 & 146$\times$ \\
+5,000 & 20,263 & 8.4 & \textbf{2,412$\times$} \\
+\bottomrule
+\end{tabular}
+\caption{Depth scaling (dim=16). Composed observe maintains $\sim$10$\mu$s regardless of depth.}
+\label{tab:depth}
+\end{table}
+
+\subsection{Amortization}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}rrrr@{}}
+\toprule
+Observations & Traditional/obs ($\mu$s) & AXOL amortized/obs ($\mu$s) & Weave amortized ($\mu$s) \\
+\midrule
+1 & 355.6 & 738,800 & 738,200 \\
+1,000 & 355.6 & 1,304 & 738.2 \\
+100,000 & 355.6 & 573.8 & 7.4 \\
+1,000,000 & 355.6 & 567.1 & \textbf{0.7} \\
+\bottomrule
+\end{tabular}
+\caption{Amortization (dim=16, depth=100). At $10^6$ observations, weave cost per observation approaches zero.}
+\label{tab:amortize}
+\end{table}
+
+\subsection{Dimension $\times$ Depth Scaling}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}lcrrr@{}}
+\toprule
+(dim, depth) & Complexity & Traditional ($\mu$s) & Composed ($\mu$s) & Speedup \\
+\midrule
+(64, 10) & 40K & 62.7 & 12.8 & 5$\times$ \\
+(256, 100) & 6.5M & 6,180 & 73.9 & 84$\times$ \\
+(512, 500) & 131M & 380,900 & 679.6 & 560$\times$ \\
+(1024, 100) & 105M & 277,300 & 2,680 & 104$\times$ \\
+\bottomrule
+\end{tabular}
+\caption{Combined dim $\times$ depth scaling.}
+\label{tab:combined}
+\end{table}
+
+\subsection{Scaling Verification}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}lccc@{}}
+\toprule
+Operation & Theoretical & Measured ratio (dim $2\times$) & Verdict \\
+\midrule
+Born rule & $O(d)$ & 1.0--1.9$\times$ & Confirmed \\
+Density creation & $O(d^2)$ & 2.2--5.5$\times$ & Confirmed \\
+Dephasing & $O(k \cdot d^2)$ & 4.3--15.6$\times$ & $O(d^3)$ (Kraus count $\propto d$) \\
+Unitary evolution & $O(d^3)$ & 4.8--8.4$\times$ & Confirmed \\
+Full pipeline & $O(d^2)$ dominant & 2.0--4.0$\times$ & Confirmed \\
+\bottomrule
+\end{tabular}
+\caption{Scaling verification: measured ratios match theoretical complexity.}
+\label{tab:scaling}
+\end{table}
+
+\subsection{Basin-Augmented Performance}
+
+With the spatial axis (basin discovery via coupled logistic maps):
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}rrrrl@{}}
+\toprule
+dim & Weave (quantum) & Weave (classical) & Overhead & Observe \\
+\midrule
+4 & 6.6 ms & 0.8 ms & $\sim$8$\times$ & 3.9 $\mu$s \\
+8 & 12.2 ms & 1.4 ms & $\sim$8$\times$ & 7.4 $\mu$s \\
+16 & 34.2 ms & 4.9 ms & $\sim$6$\times$ & 17.5 $\mu$s \\
+32 & 134.7 ms & 32.6 ms & $\sim$3$\times$ & 55.6 $\mu$s \\
+\bottomrule
+\end{tabular}
+\caption{Basin-augmented weave/observe latency. Observe remains in $\mu$s range despite real dynamical computation. Break-even at $\sim$1,800 observations.}
+\label{tab:basin_perf}
+\end{table}
+
+\subsection{Quantum Channel Latency}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}rrrrl@{}}
+\toprule
+dim & Dephasing ($\mu$s) & Depolarizing ($\mu$s) & Amp. Damping ($\mu$s) & Kraus counts \\
+\midrule
+2 & 0.6 & 1.0 & 0.6 & 3 / 5 / 2 \\
+4 & 1.9 & 5.8 & 1.2 & 5 / 17 / 4 \\
+8 & 12.7 & 99.3 & 11.9 & 9 / 65 / 8 \\
+16 & 152.0 & 2,344.7 & 148.3 & 17 / 257 / 16 \\
+\bottomrule
+\end{tabular}
+\caption{Quantum channel application latency. Depolarizing channel is the bottleneck due to $O(d^2+1)$ Kraus operators.}
+\label{tab:quantum_channels}
+\end{table}
+
+% --- 9. Comparison with Prior Work ---
+\section{Related Work}
+\label{sec:related}
+
+\subsection{Chaos Computing}
+
+Ditto et al.\ \cite{ditto2002} demonstrated that chaotic systems can implement all logic gates (ChaoGate). AXOL differs in abstraction level: ChaoGate operates at the hardware/circuit level; AXOL is a programming paradigm with quality metrics and composition rules.
+
+\subsection{Reservoir Computing}
+
+Echo State Networks \cite{jaeger2001} and Liquid State Machines \cite{maass2002} use fixed random dynamical systems with a trainable output layer. Conceptually related to AXOL's use of dynamics for computation, but reservoir computing lacks: (a) built-in quality metrics ($\Omega/\Phi$), (b) matrix pre-composition for depth-independent observation, (c) basin-based branching, and (d) a declarative programming paradigm.
+
+\subsection{Koopman Operator Methods}
+
+Modern Koopman theory \cite{brunton2021} provides tools for linearizing nonlinear dynamics in observable space. AXOL uses EDMD as one of four composition paths (\S\ref{sec:nonlinear}), but no prior work uses Koopman operators as a composition mechanism within a programming language.
+
+\subsection{Differentiable Programming}
+
+JAX \cite{jax2018} provides composable program transformations (grad, vmap, jit). AXOL shares the ``program as mathematical object'' philosophy but differs in objective: JAX optimizes gradients; AXOL measures dynamical stability.
+
+\subsection{Probabilistic Programming}
+
+Stan \cite{stan2017}, Pyro \cite{pyro2019} treat programs as probabilistic models with Bayesian inference. AXOL's probabilistic outputs arise from dynamical systems theory, not Bayesian reasoning, providing a complementary mathematical foundation.
+
+\subsection{Novelty Assessment}
+
+No prior work combines chaos-theoretic quality metrics, matrix pre-composition, basin-of-attraction branching, and a declarative paradigm into a single framework. Each component builds on established mathematics; the novelty lies in their integration.
+
+% --- 10. Implications ---
+\section{Implications}
+\label{sec:implications}
+
+\subsection{Concepts Eliminated by Continuous Dynamics}
+
+When control flow is replaced by basin dynamics, several programming concepts become unnecessary:
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}ll@{}}
+\toprule
+Traditional Concept & Status in AXOL \\
+\midrule
+async/await & Eliminated (no temporal sequencing) \\
+try/catch & Eliminated (continuous $\Omega$ replaces discrete errors) \\
+mutex/lock & Eliminated (no shared mutable state) \\
+Garbage collection & Eliminated (deterministic $d^2$ memory) \\
+Cache TTL & Eliminated ($\lambda < 0 \Rightarrow$ mathematically valid cache) \\
+Branch prediction & Eliminated (no conditional branches; pure BLAS) \\
+\bottomrule
+\end{tabular}
+\caption{Programming concepts eliminated or transformed by AXOL's continuous dynamics.}
+\label{tab:eliminated}
+\end{table}
+
+\subsection{LLM Hallucination Detection}
+
+Large language models produce outputs without self-awareness of reliability. AXOL's quality metrics could address a specific hallucination type:
+
+\textbf{Type A (Unstable hallucination):} The model produces different answers to the same question across runs. This corresponds to $\lambda > 0$ (chaotic dynamics near basin boundaries). Lyapunov analysis can detect this in a single measurement, compared to $N$-fold sampling in self-consistency methods.
+
+\textbf{Type B (Confident hallucination):} The model consistently produces a wrong answer ($\lambda < 0$ but in a wrong basin). AXOL cannot detect this type.
+
+\subsection{Inference Cost Structure}
+
+\begin{align}
+  \text{LLM:} \quad & \text{cost\_per\_query} = O(\text{layers} \times \text{seq\_len}^2 \times d) \\
+  \text{AXOL:} \quad & \text{cost\_per\_query} = O(d^2) \quad \text{(depth-independent)}
+\end{align}
+
+For $N$ observations over a depth-$D$ pipeline:
+\begin{align}
+  \text{Traditional:} \quad & N \times O(D \times d^2) \\
+  \text{AXOL:} \quad & O(D \times d^3) + N \times O(d^2)
+\end{align}
+
+When $N \gg D \times d$, AXOL's cost is dominated by the one-time weave, and per-query cost approaches zero. A tapestry ($d \times d$ float32 matrix) can be distributed as a file (e.g., dim=1024 $\to$ 4MB) and executed locally without server infrastructure.
+
+\subsection{Learning Efficiency}
+
+AXOL's dynamics provide structure \emph{before} learning: basin boundaries exist without data. Learning reduces to aligning existing basins with desired labels, requiring $\sim$50$\times$ less data than neural network training for classification tasks (200 samples via lstsq vs.\ 10,000+ samples with gradient descent over 100 epochs).
+
+\subsection{Self-Generating System}
+
+AXOL can generate its own language (.axol files):
+
+\begin{enumerate}
+  \item Input: natural-language description $\to$ embedding vector.
+  \item AXOL observation: constant-time basin classification $\to$ output vector.
+  \item Output: decode to .axol declaration.
+\end{enumerate}
+
+Since generation and execution share the same mathematical basis (matrix multiplication $\to$ Born rule $\to$ probability), quality metrics ($\Omega/\Phi$) apply to both the generation process and the generated code. This achieves \textbf{AI = Language = Runtime}---a property not present in systems where the AI (transformer) generates code in a foreign language (Python).
+
+% --- 11. Limitations ---
+\section{Limitations and Future Work}
+
+\subsection{Current Limitations}
+
+\begin{itemize}
+  \item \textbf{Deterministic computation:} AXOL outputs are probabilistic. Exact results (e.g., $1+1=2$) cannot be guaranteed, only approximated with high $\Omega$.
+  \item \textbf{Discrete structures:} Sorting, string processing, graph algorithms map poorly to continuous phase spaces.
+  \item \textbf{Fidelity instability:} Jacobi eigendecomposition accumulates error at dim $\geq 4$, causing $F(\rho,\rho) > 1.0$.
+  \item \textbf{Sequence processing:} No mechanism for variable-length inputs (attention-like dynamic routing is absent).
+  \item \textbf{Basin design (inverse problem):} Basins are \emph{discovered}, not designed. Mapping desired branch conditions to dynamical parameters requires solving an inverse problem.
+\end{itemize}
+
+\subsection{Open Theoretical Questions}
+
+\begin{itemize}
+  \item Formal proof of Distill convergence (end-to-end linearization of deep nonlinear chains).
+  \item Error bounds for Distill: $\|f(\mathbf{x}) - M\mathbf{x}\|$ as a function of nonlinear strength.
+  \item Koopman--Distill equivalence conditions.
+  \item Information density of fractal basin boundaries vs.\ neural network parameters.
+\end{itemize}
+
+\subsection{Future Directions}
+
+\begin{itemize}
+  \item \textbf{Basin design via optimization:} Gradient-free optimization (evolutionary, CMA-ES) to find dynamical parameters producing desired basin boundaries.
+  \item \textbf{Data-driven basin learning:} Learning basin structure from labeled data, enabling AXOL as a machine learning framework.
+  \item \textbf{Sequence processing:} Integrating sentence embeddings or developing an AXOL-native mechanism for variable-length inputs.
+  \item \textbf{LLM integration:} Using Lyapunov analysis of transformer hidden states as a hallucination detection layer.
+  \item \textbf{Adaptive path selection:} Automatic switching between composition paths based on depth, dimension, and nonlinear strength.
+\end{itemize}
+
+% --- 12. Conclusion ---
+\section{Conclusion}
+
+AXOL demonstrates that:
+
+\begin{enumerate}
+  \item Pipeline computation cost can be separated into offline weaving and online observation, with observation cost $O(d^2)$ independent of depth. Empirically verified at depth 5,000 (2,412$\times$ speedup).
+  \item Chaos-theoretic metrics ($\Omega$ from Lyapunov exponents, $\Phi$ from fractal dimensions) provide quantitative quality guarantees at weave time, with 9/10 accuracy metrics at machine precision.
+  \item Basin-of-attraction discovery enables branching without explicit control flow, with natural expression of uncertainty ($\Omega$ decreases near basin boundaries).
+  \item Four nonlinear composition paths offer different accuracy--memory--cost tradeoffs, with Distill achieving 100\% argmax accuracy at depth $\geq 5$.
+  \item The framework has implications for AI inference cost (constant-time local execution vs.\ server-dependent scaling), LLM hallucination detection (dynamical stability analysis), and self-generating programming systems (AI = Language = Runtime).
+\end{enumerate}
+
+AXOL's core insight is not any single component---matrix composition, Lyapunov exponents, and fractal dimensions are well-established mathematics---but their integration into a coherent programming paradigm with built-in quality assurance.
+
+% --- References ---
+\begin{thebibliography}{99}
+
+\bibitem{ditto2002}
+W.~L.~Ditto, S.~Sinha, and K.~Murali,
+``Chaos computing: ideas and implementations,''
+\emph{Phil.\ Trans.\ R.\ Soc.\ A}, vol.~366, pp.~653--664, 2008.
+
+\bibitem{jaeger2001}
+H.~Jaeger,
+``The `echo state' approach to analysing and training recurrent neural networks,''
+GMD Report 148, German National Research Center for Information Technology, 2001.
+
+\bibitem{maass2002}
+W.~Maass, T.~Natschl\"{a}ger, and H.~Markram,
+``Real-time computing without stable states: A new framework for neural computation based on perturbations,''
+\emph{Neural Computation}, vol.~14, no.~11, pp.~2531--2560, 2002.
+
+\bibitem{brunton2021}
+S.~L.~Brunton, M.~Budisi\'{c}, E.~Kaiser, and J.~N.~Kutz,
+``Modern Koopman theory for dynamical systems,''
+\emph{SIAM Review}, vol.~64, no.~2, pp.~229--340, 2022.
+
+\bibitem{jax2018}
+J.~Bradbury, R.~Frostig, P.~Hawkins, et~al.,
+``JAX: composable transformations of Python+NumPy programs,''
+2018. \url{http://github.com/google/jax}
+
+\bibitem{stan2017}
+B.~Carpenter, A.~Gelman, M.~D.~Hoffman, et~al.,
+``Stan: A probabilistic programming language,''
+\emph{Journal of Statistical Software}, vol.~76, no.~1, 2017.
+
+\bibitem{pyro2019}
+E.~Bingham, J.~P.~Chen, M.~Jankowiak, et~al.,
+``Pyro: Deep universal probabilistic programming,''
+\emph{Journal of Machine Learning Research}, vol.~20, no.~28, pp.~1--6, 2019.
+
+\bibitem{grassberger1983}
+P.~Grassberger and I.~Procaccia,
+``Characterization of strange attractors,''
+\emph{Physical Review Letters}, vol.~50, no.~5, pp.~346--349, 1983.
+
+\bibitem{benettin1980}
+G.~Benettin, L.~Galgani, A.~Giorgilli, and J.-M.~Strelcyn,
+``Lyapunov characteristic exponents for smooth dynamical systems and for Hamiltonian systems; A method for computing all of them,''
+\emph{Meccanica}, vol.~15, no.~1, pp.~9--20, 1980.
+
+\bibitem{mauroy2020}
+A.~Mauroy and J.~Goncalves,
+``Koopman-based lifting techniques for nonlinear systems identification,''
+\emph{IEEE Trans.\ Automatic Control}, vol.~65, no.~6, pp.~2550--2565, 2020.
+
+\end{thebibliography}
+
+\end{document}

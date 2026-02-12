@@ -90,7 +90,7 @@ def _build_chain_declaration(depth, dim=4, transform_fn=None):
 
 def _evaluate_pipeline(decl, dim, n_test=30):
     """Evaluate a pipeline: Koopman vs fallback. Uses the first input name."""
-    tap_k = weave(decl, seed=42, optimize=True)
+    tap_k = weave(decl, seed=42, optimize=True, nonlinear_method="koopman")
     tap_f = weave(decl, seed=42, optimize=False)
 
     input_name = decl.input_names[0]
@@ -241,7 +241,7 @@ class TestExp2_DepthScaling:
 
     def _measure_depth_error(self, dim, depth, degree=2):
         decl = _build_chain_declaration(depth, dim=dim, transform_fn=_sigmoid)
-        tap_k = weave(decl, seed=42, optimize=True, koopman_degree=degree)
+        tap_k = weave(decl, seed=42, optimize=True, nonlinear_method="koopman", koopman_degree=degree)
         tap_f = weave(decl, seed=42, optimize=False)
 
         rng = np.random.default_rng(123)
@@ -323,7 +323,7 @@ class TestExp3_SpeedBenchmark:
 
             for depth in depths:
                 decl = _build_chain_declaration(depth, dim=dim, transform_fn=_sigmoid)
-                tap_k = weave(decl, seed=42, optimize=True)
+                tap_k = weave(decl, seed=42, optimize=True, nonlinear_method="koopman")
                 tap_f = weave(decl, seed=42, optimize=False)
 
                 t_k = self._time_observe(tap_k, {"x": x}, self.N_ITER)
@@ -337,7 +337,7 @@ class TestExp3_SpeedBenchmark:
 
         # Koopman should be faster than fallback at depth>=50
         decl = _build_chain_declaration(50, dim=4, transform_fn=_sigmoid)
-        tap_k = weave(decl, seed=42, optimize=True)
+        tap_k = weave(decl, seed=42, optimize=True, nonlinear_method="koopman")
         tap_f = weave(decl, seed=42, optimize=False)
         x = FloatVec.from_list([0.3, -0.1, 0.5, 0.2])
         t_k = self._time_observe(tap_k, {"x": x}, 30)
@@ -368,7 +368,7 @@ class TestExp4_Amortization:
             x = FloatVec(data=np.random.default_rng(42).standard_normal(dim).astype(np.float32) * 0.3)
 
             t0 = time.perf_counter()
-            tap = weave(decl, seed=42, optimize=True)
+            tap = weave(decl, seed=42, optimize=True, nonlinear_method="koopman")
             weave_time = time.perf_counter() - t0
 
             observe(tap, {"x": x})
@@ -414,7 +414,7 @@ class TestExp5_DegreeTradeoff:
             decl = _build_chain_declaration(depth, dim=dim, transform_fn=_sigmoid)
 
             t0 = time.perf_counter()
-            tap_k = weave(decl, seed=42, optimize=True, koopman_degree=deg, koopman_samples=500)
+            tap_k = weave(decl, seed=42, optimize=True, nonlinear_method="koopman", koopman_degree=deg, koopman_samples=500)
             weave_ms = (time.perf_counter() - t0) * 1e3
 
             tap_f = weave(decl, seed=42, optimize=False)
@@ -477,7 +477,7 @@ class TestExp6_OmegaPhiCorrelation:
 
         for dim, depth, fn, label in configs:
             decl = _build_chain_declaration(depth, dim=dim, transform_fn=fn)
-            tap_k = weave(decl, seed=42, optimize=True)
+            tap_k = weave(decl, seed=42, optimize=True, nonlinear_method="koopman")
             tap_f = weave(decl, seed=42, optimize=False)
 
             rng = np.random.default_rng(55)

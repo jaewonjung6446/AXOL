@@ -1,0 +1,32 @@
+# AXOL AI Generated: my_logic
+# Task: Pipeline (3 stages, dim=16, omega=0.85, phi=0.75)
+# Decisions made by AXOL basin observation
+
+declare "my_logic_stage_0" {
+    input x(16)
+    output y
+    relate y <- x via <~>
+    quality omega=0.85 phi=0.75
+}
+weave my_logic_stage_0 quantum=1 seed=42
+
+declare "my_logic_stage_1" {
+    input x(16)
+    output y
+    relate y <- x via <~>
+    quality omega=0.85 phi=0.75
+}
+weave my_logic_stage_1 quantum=1 seed=43
+
+declare "my_logic_stage_2" {
+    input x(16)
+    output y
+    relate y <- x via <~>
+    quality omega=0.85 phi=0.75
+}
+weave my_logic_stage_2 quantum=1 seed=44
+
+compose "my_logic" stages=[my_logic_stage_0, my_logic_stage_1, my_logic_stage_2]
+
+# Observe through composed pipeline
+observe my_logic_stage_0 { x = [0.5, 0.6917702154416812, 0.8365883939231586, 0.8989979946416218, 0.8637189707302727, 0.7393888576415826, 0.5564480032239469, 0.35968670892415205, 0.19727900187682867, 0.10898795293396119, 0.1164302901347446, 0.21778386977184322, 0.3882338007204297, 0.5860479952351262, 0.7627946394875156, 0.8751999907098955] }

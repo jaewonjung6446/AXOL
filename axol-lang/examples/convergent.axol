@@ -1,0 +1,13 @@
+# AXOL Convergent Iteration: convergent
+# Iterates until probability delta < 0.001
+
+declare "convergent" {
+    input x(4)
+    output result
+    relate result <- x via <~>
+    quality omega=0.9 phi=0.8
+}
+
+weave convergent quantum=1 seed=42
+
+iterate convergent max=50 converge=prob_delta value=0.001 { x = [0.5, 0.8133307638509935, 0.8895390523512781, 0.6709519520935319] }

@@ -49,6 +49,7 @@ AXOL:
 - **63% 평균 토큰 절약** (동등한 Python 대비, Quantum DSL)
 - **비실현성 감지** -- 목표가 수학적으로 달성 불가능할 때 연산 전에 경고
 - **Lyapunov 추정 정확도**: 평균 오차 0.0002
+- **3가지 비선형 합성 방식**: 순수 유니터리 (방향만), 하이브리드 (방향 + 크기), Koopman (EDMD를 통한 고차원 리프팅)
 - **9개 원시 연산** (기반 계층): `transform`, `gate`, `merge`, `distance`, `route` (암호화) + `step`, `branch`, `clamp`, `map` (평문)
 - **행렬 수준 암호화** -- 유사 변환이 프로그램을 암호학적으로 해독 불가능하게 만듦
 - **NumPy 백엔드** + 선택적 GPU 가속 (CuPy/JAX)
@@ -72,6 +73,7 @@ AXOL:
   - [GPU 백엔드](#gpu-백엔드)
   - [모듈 시스템](#모듈-시스템)
   - [양자 간섭 (Phase 6)](#양자-간섭-phase-6)
+  - [비선형 합성 (Phase 9)](#비선형-합성-phase-9)
   - [클라이언트-서버 아키텍처](#클라이언트-서버-아키텍처)
 - [아키텍처](#아키텍처)
 - [빠른 시작](#빠른-시작)
@@ -575,6 +577,43 @@ s state=[0.5 0.5 0.5 0.5]
 ? found state[3]>=0.9
 ```
 
+### 비선형 합성 (Phase 9)
+
+비선형 파이프라인을 합성하는 3가지 접근법으로, 정확도와 속도를 트레이드오프합니다:
+
+| 접근법 | 방법 | 차원 | 정확도 | 속도 |
+|--------|------|:----:|:------:|:----:|
+| **순수 유니터리** | SVD 극분해: `A = U @ S @ Vh → U @ Vh` | dim x dim | 방향만 | 가장 빠름 |
+| **하이브리드** | SVD 전체: 회전 + 특이값 | dim x dim | 방향 + 크기 | 빠름 |
+| **Koopman** | EDMD를 통한 다항식 공간 리프팅 | lifted_dim x lifted_dim | 완전 비선형 | 가장 느림 |
+
+```python
+from axol.quantum import (
+    estimate_unitary_step, compose_unitary_chain,       # 순수 유니터리
+    estimate_hybrid_step, compose_hybrid_chain,          # 하이브리드
+    estimate_koopman_matrix, compose_koopman_chain,      # Koopman
+    lift, unlift, lifted_dim,                            # Koopman 유틸리티
+)
+
+# 순수 유니터리: 방향만 합성
+U1 = estimate_unitary_step(step_fn, dim=4)
+U2 = estimate_unitary_step(step_fn2, dim=4)
+U_chain = compose_unitary_chain([U1, U2])  # 재직교화 적용
+
+# 하이브리드: 방향 + 크기 (개방 양자 시스템)
+A1 = estimate_hybrid_step(step_fn, dim=4)
+A2 = estimate_hybrid_step(step_fn2, dim=4)
+composed, rotation, scales = compose_hybrid_chain([A1, A2])
+# rotation = 양자 게이트 (유니터리), scales = 결맞음 깨짐 가중치
+
+# Koopman: EDMD를 통한 완전 비선형
+K = estimate_koopman_matrix(step_fn, dim=4, degree=2)  # lifted_dim=15
+K_chain = compose_koopman_chain([K1, K2])
+y = unlift(lift(x) @ K_chain.data, dim=4)
+```
+
+하이브리드는 개방 양자 시스템에 자연스럽게 대응됩니다: 유니터리 부분 = 고립 양자 진화, 스케일 부분 = 환경 상호작용 (결맞음 깨짐).
+
 ### 클라이언트-서버 아키텍처
 
 클라이언트에서 암호화하고, 신뢰할 수 없는 서버에서 연산:
@@ -603,6 +642,8 @@ s state=[0.5 0.5 0.5 0.5]
    observe,        │  types.py   cost.py    lyapunov.py          │
    reobserve)      │               │        fractal.py           │
                     │           compose.py                        │
+                    │           koopman.py  (EDMD 리프팅)          │
+                    │           unitary.py  (SVD 합성)            │
                     │               │                             │
                     │           observatory.py ──► Observation    │
                     └──────────────┬──────────────────────────────┘
@@ -635,6 +676,8 @@ s state=[0.5 0.5 0.5 0.5]
 | Born rule 확률 | `operations.measure()` |
 | 직조 변환 구성 | `TransformOp`, `MergeOp` |
 | 끌개 탐색 확산 | `hadamard_matrix()`, `diffusion_matrix()` |
+| Koopman 리프팅 / EDMD | `TransMatrix`, `np.linalg.lstsq` |
+| 유니터리 / 하이브리드 SVD | `TransMatrix`, `np.linalg.svd` |
 
 ---
 
@@ -748,6 +791,21 @@ can_reuse_after_observe(lyapunov) -> bool
 
 # 비용
 estimate_cost(declaration) -> CostEstimate
+
+# Koopman
+lifted_dim(dim, degree?, basis?) -> int
+lift(x, degree?, basis?) -> ndarray
+unlift(y_lifted, dim, degree?, basis?) -> ndarray
+estimate_koopman_matrix(step_fn, dim, degree?, n_samples?, seed?, basis?) -> TransMatrix
+compose_koopman_chain(matrices) -> TransMatrix
+
+# 유니터리 / 하이브리드
+nearest_unitary(A) -> ndarray
+reorthogonalize(U) -> ndarray
+estimate_unitary_step(step_fn, dim, n_samples?, seed?) -> TransMatrix
+compose_unitary_chain(matrices) -> TransMatrix
+estimate_hybrid_step(step_fn, dim, n_samples?, seed?) -> TransMatrix
+compose_hybrid_chain(matrices) -> tuple[TransMatrix, TransMatrix, ndarray]
 ```
 
 ### 코어 타입
@@ -858,11 +916,14 @@ decrypted = decrypt_state(result.final_state, key)
 ## 테스트 스위트
 
 ```bash
-# 전체 테스트 스위트 (545개 테스트)
+# 전체 테스트 스위트 (767개 테스트)
 pytest tests/ -v
 
 # 양자 모듈 테스트 (101개 테스트)
 pytest tests/test_quantum_*.py tests/test_lyapunov.py tests/test_fractal.py tests/test_compose.py -v
+
+# Koopman / 유니터리 / 하이브리드 테스트
+pytest tests/test_koopman.py tests/test_unitary.py tests/test_hybrid.py tests/test_distill.py -v
 
 # 성능 벤치마크 (보고서 생성)
 pytest tests/test_quantum_performance.py -v -s
@@ -884,7 +945,7 @@ pytest tests/test_api.py tests/test_server.py -v
 python -m axol.server   # http://localhost:8080
 ```
 
-현재: **545개 테스트 통과**, 0 실패, 4 건너뜀 (cupy/jax 미설치).
+현재: **767개 테스트 통과**, 0 실패, 4 건너뜀 (cupy/jax 미설치).
 
 ---
 
@@ -903,9 +964,12 @@ python -m axol.server   # http://localhost:8080
 - [x] Phase 8: 프랙탈 차원 추정 (박스 카운팅/상관) + Phi = 1/(1+D/D_max)
 - [x] Phase 8: 직조기, 관측소, 합성 규칙, 비용 추정, DSL 파서
 - [x] Phase 8: 101개 신규 테스트 (총 545개, 0 실패)
-- [ ] Phase 9: 복소 진폭 (a+bi) -- Shor, QPE, QFT를 위한 완전 위상 간섭
-- [ ] Phase 10: 분산 tapestry 직조 (다중 노드)
-- [ ] Phase 11: 적응형 품질 -- 관측 중 동적 Omega/Phi 조정
+- [x] Phase 9: 비선형 합성 -- 순수 유니터리 (SVD 극분해), 하이브리드 (방향 + 크기), Koopman (EDMD 리프팅)
+- [x] Phase 9: 다항식 & 확장 기저를 갖춘 Koopman 연산자 (PWA 포착)
+- [x] Phase 9: 222개 신규 테스트 (총 767개, 0 실패)
+- [ ] Phase 10: 복소 진폭 (a+bi) -- Shor, QPE, QFT를 위한 완전 위상 간섭
+- [ ] Phase 11: 분산 tapestry 직조 (다중 노드)
+- [ ] Phase 12: 적응형 품질 -- 관측 중 동적 Omega/Phi 조정
 
 ---
 

@@ -49,6 +49,7 @@ AXOL:
 - **63% average token savings** vs equivalent Python (quantum DSL)
 - **Infeasibility detection** — warns before computation when targets are mathematically unachievable
 - **Lyapunov estimation accuracy**: average error 0.0002
+- **Three nonlinear composition approaches**: Pure Unitary (direction-only), Hybrid (direction + magnitude), Koopman (high-dimensional lifting via EDMD)
 - **9 primitive operations** in the foundation layer: `transform`, `gate`, `merge`, `distance`, `route` (encrypted) + `step`, `branch`, `clamp`, `map` (plaintext)
 - **Matrix-level encryption** — similarity transformation makes programs cryptographically unreadable
 - **NumPy backend** with optional GPU acceleration (CuPy/JAX)
@@ -72,6 +73,7 @@ AXOL:
   - [GPU Backend](#gpu-backend)
   - [Module System](#module-system)
   - [Quantum Interference (Phase 6)](#quantum-interference-phase-6)
+  - [Nonlinear Composition (Phase 9)](#nonlinear-composition-phase-9)
   - [Client-Server Architecture](#client-server-architecture)
 - [Architecture](#architecture)
 - [Quick Start](#quick-start)
@@ -575,6 +577,43 @@ s state=[0.5 0.5 0.5 0.5]
 ? found state[3]>=0.9
 ```
 
+### Nonlinear Composition (Phase 9)
+
+Three approaches for composing nonlinear pipelines, each trading off accuracy vs speed:
+
+| Approach | Method | Dimension | Accuracy | Speed |
+|----------|--------|:---------:|:--------:|:-----:|
+| **Pure Unitary** | SVD polar: `A = U @ S @ Vh → U @ Vh` | dim x dim | Direction only | Fastest |
+| **Hybrid** | SVD full: rotation + singular values | dim x dim | Direction + magnitude | Fast |
+| **Koopman** | EDMD lifting to polynomial space | lifted_dim x lifted_dim | Full nonlinear | Slowest |
+
+```python
+from axol.quantum import (
+    estimate_unitary_step, compose_unitary_chain,       # Pure unitary
+    estimate_hybrid_step, compose_hybrid_chain,          # Hybrid
+    estimate_koopman_matrix, compose_koopman_chain,      # Koopman
+    lift, unlift, lifted_dim,                            # Koopman utilities
+)
+
+# Pure unitary: direction-only composition
+U1 = estimate_unitary_step(step_fn, dim=4)
+U2 = estimate_unitary_step(step_fn2, dim=4)
+U_chain = compose_unitary_chain([U1, U2])  # reorthogonalized
+
+# Hybrid: direction + magnitude (open quantum systems)
+A1 = estimate_hybrid_step(step_fn, dim=4)
+A2 = estimate_hybrid_step(step_fn2, dim=4)
+composed, rotation, scales = compose_hybrid_chain([A1, A2])
+# rotation = quantum gate (unitary), scales = decoherence weights
+
+# Koopman: full nonlinear via EDMD
+K = estimate_koopman_matrix(step_fn, dim=4, degree=2)  # lifted_dim=15
+K_chain = compose_koopman_chain([K1, K2])
+y = unlift(lift(x) @ K_chain.data, dim=4)
+```
+
+Hybrid maps naturally to open quantum systems: unitary part = isolated quantum evolution, scale part = environment interaction (decoherence).
+
 ### Client-Server Architecture
 
 Encrypt on client, compute on untrusted server:
@@ -603,6 +642,8 @@ Key components: `KeyFamily(seed)`, `fn_to_matrix()`, `pad_and_encrypt()`, `AxolC
    observe,        │  types.py   cost.py    lyapunov.py          │
    reobserve)      │               │        fractal.py           │
                     │           compose.py                        │
+                    │           koopman.py  (EDMD lifting)        │
+                    │           unitary.py  (SVD composition)     │
                     │               │                             │
                     │           observatory.py ──► Observation    │
                     └──────────────┬──────────────────────────────┘
@@ -635,6 +676,8 @@ The quantum module reuses `axol/core` without modification:
 | Born rule probabilities | `operations.measure()` |
 | Weave transform construction | `TransformOp`, `MergeOp` |
 | Attractor exploration diffusion | `hadamard_matrix()`, `diffusion_matrix()` |
+| Koopman lifting / EDMD | `TransMatrix`, `np.linalg.lstsq` |
+| Unitary / Hybrid SVD | `TransMatrix`, `np.linalg.svd` |
 
 ---
 
@@ -748,6 +791,21 @@ can_reuse_after_observe(lyapunov) -> bool
 
 # Cost
 estimate_cost(declaration) -> CostEstimate
+
+# Koopman
+lifted_dim(dim, degree?, basis?) -> int
+lift(x, degree?, basis?) -> ndarray
+unlift(y_lifted, dim, degree?, basis?) -> ndarray
+estimate_koopman_matrix(step_fn, dim, degree?, n_samples?, seed?, basis?) -> TransMatrix
+compose_koopman_chain(matrices) -> TransMatrix
+
+# Unitary / Hybrid
+nearest_unitary(A) -> ndarray
+reorthogonalize(U) -> ndarray
+estimate_unitary_step(step_fn, dim, n_samples?, seed?) -> TransMatrix
+compose_unitary_chain(matrices) -> TransMatrix
+estimate_hybrid_step(step_fn, dim, n_samples?, seed?) -> TransMatrix
+compose_hybrid_chain(matrices) -> tuple[TransMatrix, TransMatrix, ndarray]
 ```
 
 ### Core Types
@@ -858,11 +916,14 @@ decrypted = decrypt_state(result.final_state, key)
 ## Test Suite
 
 ```bash
-# Full test suite (545 tests)
+# Full test suite (767 tests)
 pytest tests/ -v
 
 # Quantum module tests (101 tests)
 pytest tests/test_quantum_*.py tests/test_lyapunov.py tests/test_fractal.py tests/test_compose.py -v
+
+# Koopman / Unitary / Hybrid tests
+pytest tests/test_koopman.py tests/test_unitary.py tests/test_hybrid.py tests/test_distill.py -v
 
 # Performance benchmarks (generates reports)
 pytest tests/test_quantum_performance.py -v -s
@@ -884,7 +945,7 @@ pytest tests/test_api.py tests/test_server.py -v
 python -m axol.server   # http://localhost:8080
 ```
 
-Current: **545 tests passed**, 0 failed, 4 skipped (cupy/jax not installed).
+Current: **767 tests passed**, 0 failed, 4 skipped (cupy/jax not installed).
 
 ---
 
@@ -903,9 +964,12 @@ Current: **545 tests passed**, 0 failed, 4 skipped (cupy/jax not installed).
 - [x] Phase 8: Fractal dimension estimation (box-counting/correlation) + Phi = 1/(1+D/D_max)
 - [x] Phase 8: Weaver, Observatory, Composition rules, Cost estimation, DSL parser
 - [x] Phase 8: 101 new tests (545 total, 0 failed)
-- [ ] Phase 9: Complex amplitudes (a+bi) for Shor, QPE, QFT — full phase interference
-- [ ] Phase 10: Distributed tapestry weaving across multiple nodes
-- [ ] Phase 11: Adaptive quality — dynamic Omega/Phi adjustment during observation
+- [x] Phase 9: Nonlinear composition — Pure Unitary (SVD polar), Hybrid (direction + magnitude), Koopman (EDMD lifting)
+- [x] Phase 9: Koopman operator with polynomial & augmented basis (PWA capture)
+- [x] Phase 9: 222 new tests (767 total, 0 failed)
+- [ ] Phase 10: Complex amplitudes (a+bi) for Shor, QPE, QFT — full phase interference
+- [ ] Phase 11: Distributed tapestry weaving across multiple nodes
+- [ ] Phase 12: Adaptive quality — dynamic Omega/Phi adjustment during observation
 
 ---
 

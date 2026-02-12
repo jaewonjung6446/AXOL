@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from axol.core.types import FloatVec, TransMatrix, StateBundle
+from axol.core.types import FloatVec, TransMatrix, StateBundle, ComplexVec, DensityMatrix
 from axol.core.program import Program
 from axol.core import operations as ops
 
@@ -23,19 +23,32 @@ from axol.core import operations as ops
 
 @dataclass(frozen=True)
 class SuperposedState:
-    """A state vector in phase space with labelled basis states."""
+    """A state vector in phase space with labelled basis states.
+
+    Supports both real (FloatVec) and complex (ComplexVec) amplitudes.
+    When complex_amplitudes is set, Born rule uses |alpha_i|^2 with
+    full phase information, enabling interference effects.
+    """
 
     name: str
     amplitudes: FloatVec
     labels: dict[int, str] = field(default_factory=dict)
+    complex_amplitudes: ComplexVec | None = None
 
     @property
     def dim(self) -> int:
         return self.amplitudes.size
 
     @property
+    def is_quantum(self) -> bool:
+        """True if complex amplitudes are available."""
+        return self.complex_amplitudes is not None
+
+    @property
     def probabilities(self) -> FloatVec:
         """Born rule: |alpha_i|^2 normalised."""
+        if self.complex_amplitudes is not None:
+            return ops.measure_complex(self.complex_amplitudes)
         return ops.measure(self.amplitudes)
 
     @property
@@ -144,6 +157,18 @@ class Tapestry:
     _composed_chain_info: dict | None = None  # {"input_key": str, "output_key": str, "num_composed": int}
     _koopman_matrix: TransMatrix | None = None
     _koopman_chain_info: dict | None = None  # {"input_key", "output_key", "num_composed", "original_dim", "lifted_dim", "degree"}
+    _unitary_matrix: TransMatrix | None = None
+    _unitary_chain_info: dict | None = None  # {"input_key", "output_key", "num_composed", "dim"}
+    _hybrid_matrix: TransMatrix | None = None  # composed raw A, for observation
+    _hybrid_rotation: TransMatrix | None = None  # U@Vh (unitary, quantum gate)
+    _hybrid_scales: np.ndarray | None = None  # singular values (decoherence)
+    _hybrid_chain_info: dict | None = None  # {"input_key", "output_key", "num_composed", "dim"}
+    _distilled_matrix: TransMatrix | None = None
+    _distilled_chain_info: dict | None = None  # {"input_key", "output_key", "dim"}
+    # --- Quantum structure (Direction B) ---
+    _quantum: bool = False  # True when complex amplitudes are used
+    _density_matrix: DensityMatrix | None = None  # global density matrix
+    _kraus_operators: list | None = None  # Kraus ops from Hybrid SVD
 
 
 # ---------------------------------------------------------------------------
@@ -162,3 +187,7 @@ class Observation:
     probabilities: FloatVec
     tapestry_name: str
     observation_count: int = 1
+    # --- Quantum extensions ---
+    density_matrix: DensityMatrix | None = None  # post-observation density matrix
+    quantum_phi: float | None = None  # Phi from purity (when quantum=True)
+    quantum_omega: float | None = None  # Omega from coherence (when quantum=True)

@@ -1,0 +1,16 @@
+# AXOL Half Adder
+# Inputs: A=true, B=true
+# Expected: Sum=false, Carry=true
+
+# Carry = AND(A, B)
+gate and { a = [0.1, 0.9], b = [0.1, 0.9] }
+
+# Sum = XOR(A, B)
+#   Step 1: OR(A, B)
+gate or { a = [0.1, 0.9], b = [0.1, 0.9] }
+#   Step 2: AND(A, B)
+gate and { a = [0.1, 0.9], b = [0.1, 0.9] }
+#   Step 3: NOT(AND(A, B))
+gate not { x = [0.1, 0.9] }
+#   Step 4: AND(OR, NAND) = XOR = Sum
+gate and { a = [0.1, 0.9], b = [0.9, 0.1] }

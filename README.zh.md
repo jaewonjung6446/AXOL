@@ -49,6 +49,7 @@ AXOL：
 - 相比等效Python代码**平均节省63% token**（量子DSL）
 - **不可达检测** — 在计算之前警告目标是否在数学上不可达
 - **Lyapunov估计精度**：平均误差0.0002
+- **三种非线性组合方法**：纯酉矩阵（仅方向）、混合（方向 + 幅度）、Koopman（通过EDMD高维提升）
 - 基础层中的**9个原语操作**：`transform`、`gate`、`merge`、`distance`、`route`（加密）+ `step`、`branch`、`clamp`、`map`（明文）
 - **矩阵级加密** — 相似变换使程序在密码学层面不可读
 - **NumPy后端**，可选GPU加速（CuPy/JAX）
@@ -72,6 +73,7 @@ AXOL：
   - [GPU后端](#gpu后端)
   - [模块系统](#模块系统)
   - [量子干涉（Phase 6）](#量子干涉phase-6)
+  - [非线性组合（Phase 9）](#非线性组合phase-9)
   - [客户端-服务器架构](#客户端-服务器架构)
 - [架构](#架构)
 - [快速开始](#快速开始)
@@ -575,6 +577,43 @@ s state=[0.5 0.5 0.5 0.5]
 ? found state[3]>=0.9
 ```
 
+### 非线性组合（Phase 9）
+
+三种非线性管道组合方法，在精度和速度之间取得平衡：
+
+| 方法 | 原理 | 维度 | 精度 | 速度 |
+|------|------|:----:|:----:|:----:|
+| **纯酉矩阵** | SVD极分解：`A = U @ S @ Vh → U @ Vh` | dim x dim | 仅方向 | 最快 |
+| **混合** | SVD完整：旋转 + 奇异值 | dim x dim | 方向 + 幅度 | 快 |
+| **Koopman** | 通过EDMD提升到多项式空间 | lifted_dim x lifted_dim | 完全非线性 | 最慢 |
+
+```python
+from axol.quantum import (
+    estimate_unitary_step, compose_unitary_chain,       # 纯酉矩阵
+    estimate_hybrid_step, compose_hybrid_chain,          # 混合
+    estimate_koopman_matrix, compose_koopman_chain,      # Koopman
+    lift, unlift, lifted_dim,                            # Koopman工具
+)
+
+# 纯酉矩阵：仅方向组合
+U1 = estimate_unitary_step(step_fn, dim=4)
+U2 = estimate_unitary_step(step_fn2, dim=4)
+U_chain = compose_unitary_chain([U1, U2])  # 重新正交化
+
+# 混合：方向 + 幅度（开放量子系统）
+A1 = estimate_hybrid_step(step_fn, dim=4)
+A2 = estimate_hybrid_step(step_fn2, dim=4)
+composed, rotation, scales = compose_hybrid_chain([A1, A2])
+# rotation = 量子门（酉矩阵），scales = 退相干权重
+
+# Koopman：通过EDMD实现完全非线性
+K = estimate_koopman_matrix(step_fn, dim=4, degree=2)  # lifted_dim=15
+K_chain = compose_koopman_chain([K1, K2])
+y = unlift(lift(x) @ K_chain.data, dim=4)
+```
+
+混合方法自然映射到开放量子系统：酉矩阵部分 = 孤立量子演化，尺度部分 = 环境相互作用（退相干）。
+
 ### 客户端-服务器架构
 
 在客户端加密，在不受信任的服务器上计算：
@@ -603,6 +642,8 @@ Client (key)              Server (no key)
    observe,        │  types.py   cost.py    lyapunov.py          │
    reobserve)      │               │        fractal.py           │
                     │           compose.py                        │
+                    │           koopman.py  (EDMD提升)            │
+                    │           unitary.py  (SVD组合)             │
                     │               │                             │
                     │           observatory.py ──► Observation    │
                     └──────────────┬──────────────────────────────┘
@@ -635,6 +676,8 @@ Client (key)              Server (no key)
 | Born规则概率 | `operations.measure()` |
 | Weave变换构建 | `TransformOp`、`MergeOp` |
 | 吸引子探索扩散 | `hadamard_matrix()`、`diffusion_matrix()` |
+| Koopman提升 / EDMD | `TransMatrix`、`np.linalg.lstsq` |
+| 酉矩阵 / 混合SVD | `TransMatrix`、`np.linalg.svd` |
 
 ---
 
@@ -748,6 +791,21 @@ can_reuse_after_observe(lyapunov) -> bool
 
 # 成本
 estimate_cost(declaration) -> CostEstimate
+
+# Koopman
+lifted_dim(dim, degree?, basis?) -> int
+lift(x, degree?, basis?) -> ndarray
+unlift(y_lifted, dim, degree?, basis?) -> ndarray
+estimate_koopman_matrix(step_fn, dim, degree?, n_samples?, seed?, basis?) -> TransMatrix
+compose_koopman_chain(matrices) -> TransMatrix
+
+# 酉矩阵 / 混合
+nearest_unitary(A) -> ndarray
+reorthogonalize(U) -> ndarray
+estimate_unitary_step(step_fn, dim, n_samples?, seed?) -> TransMatrix
+compose_unitary_chain(matrices) -> TransMatrix
+estimate_hybrid_step(step_fn, dim, n_samples?, seed?) -> TransMatrix
+compose_hybrid_chain(matrices) -> tuple[TransMatrix, TransMatrix, ndarray]
 ```
 
 ### 核心类型
@@ -858,11 +916,14 @@ decrypted = decrypt_state(result.final_state, key)
 ## 测试套件
 
 ```bash
-# 完整测试套件（545项测试）
+# 完整测试套件（767项测试）
 pytest tests/ -v
 
 # 量子模块测试（101项）
 pytest tests/test_quantum_*.py tests/test_lyapunov.py tests/test_fractal.py tests/test_compose.py -v
+
+# Koopman / 酉矩阵 / 混合测试
+pytest tests/test_koopman.py tests/test_unitary.py tests/test_hybrid.py tests/test_distill.py -v
 
 # 性能基准测试（生成报告）
 pytest tests/test_quantum_performance.py -v -s
@@ -884,7 +945,7 @@ pytest tests/test_api.py tests/test_server.py -v
 python -m axol.server   # http://localhost:8080
 ```
 
-当前：**545项测试通过**，0项失败，4项跳过（cupy/jax未安装）。
+当前：**767项测试通过**，0项失败，4项跳过（cupy/jax未安装）。
 
 ---
 
@@ -903,9 +964,12 @@ python -m axol.server   # http://localhost:8080
 - [x] Phase 8：分形维度估计（盒计数/相关维度）+ Phi = 1/(1+D/D_max)
 - [x] Phase 8：织造器、观测所、组合规则、成本估算、DSL解析器
 - [x] Phase 8：101项新测试（总计545项，0项失败）
-- [ ] Phase 9：复数振幅（a+bi）支持Shor、QPE、QFT — 完整相位干涉
-- [ ] Phase 10：跨多节点的分布式Tapestry织造
-- [ ] Phase 11：自适应质量 — 观测期间动态Omega/Phi调整
+- [x] Phase 9：非线性组合 — 纯酉矩阵（SVD极分解）、混合（方向 + 幅度）、Koopman（EDMD提升）
+- [x] Phase 9：支持多项式 & 增强基的Koopman算子（PWA捕获）
+- [x] Phase 9：222项新测试（总计767项，0项失败）
+- [ ] Phase 10：复数振幅（a+bi）支持Shor、QPE、QFT — 完整相位干涉
+- [ ] Phase 11：跨多节点的分布式Tapestry织造
+- [ ] Phase 12：自适应质量 — 观测期间动态Omega/Phi调整
 
 ---
 

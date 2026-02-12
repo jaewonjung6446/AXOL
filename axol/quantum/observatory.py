@@ -8,9 +8,10 @@ from __future__ import annotations
 
 import numpy as np
 
-from axol.core.types import FloatVec, StateBundle
+from axol.core.types import FloatVec, StateBundle, ComplexVec, DensityMatrix
 from axol.core.program import run_program
 from axol.core import operations as ops
+from axol.core.operations import transform_complex, measure_complex, interfere
 
 from axol.quantum.errors import ObservatoryError
 from axol.quantum.types import Tapestry, Observation
@@ -45,6 +46,12 @@ def observe(
 
     output_name = tapestry.output_names[0] if tapestry.output_names else list(tapestry.nodes.keys())[-1]
 
+    # === QUANTUM PATH: complex amplitudes with interference ===
+    if tapestry._quantum:
+        q_obs = _observe_quantum(tapestry, inputs, output_name, omega, phi)
+        if q_obs is not None:
+            return q_obs
+
     # === FAST PATH: composed matrix available ===
     if tapestry._composed_matrix is not None:
         info = tapestry._composed_chain_info
@@ -68,20 +75,94 @@ def observe(
             observation_count=1,
         )
 
+    # === DISTILLED FAST PATH: end-to-end lstsq fitted matrix ===
+    if tapestry._distilled_matrix is not None:
+        info = tapestry._distilled_chain_info
+        input_vec = inputs[info["input_key"]]
+        value = ops.transform(input_vec, tapestry._distilled_matrix)
+        # Safety: clamp extreme values to prevent overflow in measure()
+        safe_data = np.nan_to_num(value.data, nan=0.0, posinf=1e6, neginf=-1e6)
+        safe_data = np.clip(safe_data, -1e6, 1e6)
+        value = FloatVec(data=safe_data.astype(np.float32))
+        probs = ops.measure(value)
+
+        value_index = int(np.argmax(probs.data))
+        label = None
+        if output_name in tapestry.nodes:
+            label = tapestry.nodes[output_name].state.labels.get(value_index)
+
+        return Observation(
+            value=value,
+            value_index=value_index,
+            value_label=label,
+            omega=omega,
+            phi=phi,
+            probabilities=probs,
+            tapestry_name=tapestry.name,
+            observation_count=1,
+        )
+
+    # === HYBRID FAST PATH: composed raw matrix (direction + magnitude) ===
+    if tapestry._hybrid_matrix is not None:
+        info = tapestry._hybrid_chain_info
+        input_vec = inputs[info["input_key"]]
+        value = ops.transform(input_vec, tapestry._hybrid_matrix)
+        probs = ops.measure(value)
+
+        value_index = int(np.argmax(probs.data))
+        label = None
+        if output_name in tapestry.nodes:
+            label = tapestry.nodes[output_name].state.labels.get(value_index)
+
+        return Observation(
+            value=value,
+            value_index=value_index,
+            value_label=label,
+            omega=omega,
+            phi=phi,
+            probabilities=probs,
+            tapestry_name=tapestry.name,
+            observation_count=1,
+        )
+
+    # === UNITARY FAST PATH: nonlinear composed via unitary projection ===
+    if tapestry._unitary_matrix is not None:
+        info = tapestry._unitary_chain_info
+        input_vec = inputs[info["input_key"]]
+        value = ops.transform(input_vec, tapestry._unitary_matrix)
+        probs = ops.measure(value)
+
+        value_index = int(np.argmax(probs.data))
+        label = None
+        if output_name in tapestry.nodes:
+            label = tapestry.nodes[output_name].state.labels.get(value_index)
+
+        return Observation(
+            value=value,
+            value_index=value_index,
+            value_label=label,
+            omega=omega,
+            phi=phi,
+            probabilities=probs,
+            tapestry_name=tapestry.name,
+            observation_count=1,
+        )
+
     # === KOOPMAN FAST PATH: nonlinear composed via Koopman operator ===
     if tapestry._koopman_matrix is not None:
         info = tapestry._koopman_chain_info
         input_vec = inputs[info["input_key"]]
+        kbasis = info.get("basis", "poly")
 
-        # 1. Lift input to polynomial observable space
-        lifted = lift(input_vec.data.astype(np.float64), degree=info["degree"])
+        # 1. Lift input to observable space
+        lifted = lift(input_vec.data.astype(np.float64), degree=info["degree"], basis=kbasis)
         lifted_fv = FloatVec(data=lifted.astype(np.float32))
 
         # 2. Single matrix multiply in lifted space
         result_lifted = ops.transform(lifted_fv, tapestry._koopman_matrix)
 
         # 3. Unlift back to original dimension
-        value_data = unlift(result_lifted.data.astype(np.float64), info["original_dim"], degree=info["degree"])
+        value_data = unlift(result_lifted.data.astype(np.float64), info["original_dim"], degree=info["degree"], basis=kbasis)
         value = FloatVec(data=value_data.astype(np.float32))
 
         # 4. Born rule
@@ -234,4 +315,96 @@ def reobserve(
         probabilities=avg_probs,
         tapestry_name=tapestry.name,
         observation_count=count,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Quantum observation (complex amplitudes + density matrix)
+# ---------------------------------------------------------------------------
+
+def _observe_quantum(
+    tapestry: Tapestry,
+    inputs: dict[str, FloatVec],
+    output_name: str,
+    omega: float,
+    phi: float,
+) -> Observation | None:
+    """Quantum observation path using complex amplitudes.
+
+    Priority: composed > distilled > hybrid > fallback-to-classical.
+    Uses complex amplitudes for interference-aware observation,
+    then derives density matrix and quantum quality metrics.
+    """
+    from axol.quantum.density import phi_from_purity, omega_from_coherence
+
+    # Find the input ComplexVec
+    input_name = tapestry.input_names[0] if tapestry.input_names else None
+    if input_name is None:
+        return None
+
+    input_fv = inputs.get(input_name)
+    if input_fv is None:
+        return None
+
+    # Promote real input to complex
+    input_cv = ComplexVec.from_real(input_fv)
+
+    # Try each fast path with complex transform
+    matrix = None
+    if tapestry._composed_matrix is not None:
+        matrix = tapestry._composed_matrix
+    elif tapestry._distilled_matrix is not None:
+        matrix = tapestry._distilled_matrix
+    elif tapestry._hybrid_matrix is not None:
+        matrix = tapestry._hybrid_matrix
+    elif tapestry._unitary_matrix is not None:
+        matrix = tapestry._unitary_matrix
+
+    if matrix is None:
+        return None  # fall through to classical paths
+
+    # Complex transform
+    result_cv = transform_complex(input_cv, matrix)
+
+    # Safety clamp for distilled path
+    safe_data = np.nan_to_num(result_cv.data)
+    safe_data = np.clip(safe_data.real, -1e6, 1e6) + 1j * np.clip(safe_data.imag, -1e6, 1e6)
+    result_cv = ComplexVec(data=safe_data.astype(np.complex128))
+
+    # Born rule on complex amplitudes
+    probs = measure_complex(result_cv)
+    value = FloatVec(data=np.abs(result_cv.data).astype(np.float32))
+
+    value_index = int(np.argmax(probs.data))
+    label = None
+    if output_name in tapestry.nodes:
+        label = tapestry.nodes[output_name].state.labels.get(value_index)
+
+    # Build post-observation density matrix (collapsed state)
+    post_density = DensityMatrix.from_pure_state(result_cv)
+
+    # Apply Kraus channel if available (decoherence)
+    if tapestry._kraus_operators is not None:
+        from axol.quantum.density import apply_channel
+        try:
+            post_density = apply_channel(post_density, tapestry._kraus_operators)
+        except Exception:
+            pass
+
+    # Quantum quality metrics
+    q_phi = phi_from_purity(post_density)
+    q_omega = omega_from_coherence(post_density)
+
+    return Observation(
+        value=value,
+        value_index=value_index,
+        value_label=label,
+        omega=omega,
+        phi=phi,
+        probabilities=probs,
+        tapestry_name=tapestry.name,
+        observation_count=1,
+        density_matrix=post_density,
+        quantum_phi=q_phi,
+        quantum_omega=q_omega,
     )

@@ -10,6 +10,8 @@ from axol.core.types import (
     GateVec,
     TransMatrix,
     StateBundle,
+    ComplexVec,
+    DensityMatrix,
 )
 
 
@@ -229,6 +231,83 @@ def diffusion_matrix(n: int) -> TransMatrix:
     s = np.ones((n, 1), dtype=np.float32) / np.sqrt(n)
     D = 2.0 * (s @ s.T) - np.eye(n, dtype=np.float32)
     return TransMatrix(data=D.astype(np.float32))
+
+
+# ---------------------------------------------------------------------------
+# Complex quantum operations
+# ---------------------------------------------------------------------------
+
+def transform_complex(vec: ComplexVec, matrix: TransMatrix) -> ComplexVec:
+    """Complex linear transformation: vec @ matrix -> ComplexVec."""
+    v = vec.data.astype(np.complex128)
+    m = matrix.data.astype(np.complex128)
+    if v.shape[0] != m.shape[0]:
+        raise ValueError(
+            f"Dimension mismatch: vec({v.shape[0]}) vs matrix({m.shape[0]}x{m.shape[1]})"
+        )
+    return ComplexVec(data=v @ m)
+
+
+def measure_complex(vec: ComplexVec) -> FloatVec:
+    """Born rule on complex amplitudes: |alpha_i|^2 normalized."""
+    probs = np.abs(vec.data) ** 2
+    total = np.sum(probs)
+    if total > 0:
+        probs = probs / total
+    return FloatVec(data=probs.astype(np.float32))
+
+
+def interfere(
+    vec1: ComplexVec,
+    vec2: ComplexVec,
+    phase: float = 0.0,
+) -> ComplexVec:
+    """Quantum interference: (vec1 + exp(i*phase) * vec2), normalized.
+
+    phase=0:   constructive interference
+    phase=pi:  destructive interference
+    """
+    result = vec1.data.astype(np.complex128) + np.exp(1j * phase) * vec2.data.astype(np.complex128)
+    norm = np.linalg.norm(result)
+    if norm > 0:
+        result = result / norm
+    return ComplexVec(data=result)
+
+
+def evolve_density(rho: DensityMatrix, U: TransMatrix) -> DensityMatrix:
+    """Unitary evolution of density matrix: rho' = U rho U_dagger."""
+    u = U.data.astype(np.complex128)
+    new_rho = u @ rho.data @ u.conj().T
+    # Ensure Hermitian
+    new_rho = (new_rho + new_rho.conj().T) / 2
+    return DensityMatrix(data=new_rho)
+
+
+def partial_trace(
+    rho: DensityMatrix,
+    dim_a: int,
+    dim_b: int,
+    trace_out: str = "B",
+) -> DensityMatrix:
+    """Partial trace of bipartite system AB.
+
+    Args:
+        rho: density matrix of composite system (dim_a*dim_b x dim_a*dim_b)
+        dim_a: dimension of subsystem A
+        dim_b: dimension of subsystem B
+        trace_out: "A" or "B" -- which subsystem to trace out
+
+    Returns:
+        Reduced density matrix of the remaining subsystem.
+    """
+    rho_tensor = rho.data.reshape(dim_a, dim_b, dim_a, dim_b)
+
+    if trace_out == "B":
+        result = np.trace(rho_tensor, axis1=1, axis2=3)
+    else:
+        result = np.trace(rho_tensor, axis1=0, axis2=2)
+
+    return DensityMatrix(data=result.astype(np.complex128))
 
 
 # ---------------------------------------------------------------------------

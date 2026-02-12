@@ -9,6 +9,12 @@ Core mapping:
   - unlift(y) : Ψ(y) -> y  (extract linear terms)
   - EDMD      : estimate Koopman matrix K such that Ψ(f(x)) ≈ Ψ(x) @ K
   - compose   : K_chain = K₁ @ K₂ @ ... @ Kₙ
+
+Basis options:
+  - "poly"      : polynomial observables only (default)
+  - "augmented" : polynomial + indicator functions 1_{x_i>0} + ReLU cross
+                  terms x_i*1_{x_i>0}.  Exactly captures PWA functions
+                  (ReLU, abs, step) per Mauroy & Goncalves (2020).
 """
 
 from __future__ import annotations
@@ -26,28 +32,34 @@ from axol.core.types import TransMatrix
 # Lifted dimension
 # ---------------------------------------------------------------------------
 
-def lifted_dim(dim: int, degree: int = 2) -> int:
-    """Dimension of the polynomial observable space.
+def lifted_dim(dim: int, degree: int = 2, basis: str = "poly") -> int:
+    """Dimension of the observable space.
 
     Sum of C(dim+k-1, k) for k = 0 .. degree.
     degree=2, dim=4 → 15;  degree=3, dim=4 → 35.
+
+    With basis="augmented", adds 2*dim indicator/cross terms:
+      dim indicators 1_{x_i>0} + dim ReLU cross terms x_i*1_{x_i>0}.
     """
-    total = 0
+    poly = 0
     for k in range(degree + 1):
-        total += comb(dim + k - 1, k)
-    return total
+        poly += comb(dim + k - 1, k)
+    if basis == "augmented":
+        return poly + 2 * dim
+    return poly
 
 
 # ---------------------------------------------------------------------------
 # Lift / Unlift
 # ---------------------------------------------------------------------------
 
-def lift(x: np.ndarray, degree: int = 2) -> np.ndarray:
-    """Lift vector(s) into polynomial observable space.
+def lift(x: np.ndarray, degree: int = 2, basis: str = "poly") -> np.ndarray:
+    """Lift vector(s) into observable space.
 
     Args:
         x: shape (dim,) or (n, dim)
-        degree: polynomial degree (≥1)
+        degree: polynomial degree (>=1)
+        basis: "poly" for polynomial only, "augmented" to add indicator/cross terms
 
     Returns:
         Lifted array of shape (lifted_dim,) or (n, lifted_dim).
@@ -58,8 +70,11 @@ def lift(x: np.ndarray, degree: int = 2) -> np.ndarray:
 
     x = x.astype(np.float64)
     n, dim = x.shape
-    ld = lifted_dim(dim, degree)
+    ld = lifted_dim(dim, degree, basis)
     out = np.empty((n, ld), dtype=np.float64)
+
+    # --- polynomial terms ---
+    poly_ld = lifted_dim(dim, degree, "poly")
 
     if degree == 2:
         # Optimised fast path for the common case
@@ -84,20 +99,30 @@ def lift(x: np.ndarray, degree: int = 2) -> np.ndarray:
                     out[:, idx] = col
                 idx += 1
 
+    # --- augmented indicator / cross terms ---
+    if basis == "augmented":
+        indicators = (x > 0).astype(np.float64)          # 1_{x_i > 0}
+        relu_cross = x * indicators                       # x_i * 1_{x_i > 0}
+        out[:, poly_ld:poly_ld + dim] = indicators
+        out[:, poly_ld + dim:poly_ld + 2 * dim] = relu_cross
+
     if single:
         return out[0]
     return out
 
 
-def unlift(y_lifted: np.ndarray, dim: int, degree: int = 2) -> np.ndarray:
+def unlift(y_lifted: np.ndarray, dim: int, degree: int = 2, basis: str = "poly") -> np.ndarray:
     """Extract original-space vector from lifted representation.
 
     Takes the linear terms (indices 1:dim+1) from the lifted vector.
+    The basis parameter is accepted for API symmetry but does not change
+    the extraction (linear terms are always at the same position).
 
     Args:
         y_lifted: shape (lifted_dim,) or (n, lifted_dim)
         dim: original space dimension
         degree: polynomial degree
+        basis: "poly" or "augmented" (accepted for symmetry)
 
     Returns:
         Array of shape (dim,) or (n, dim).
@@ -123,13 +148,14 @@ def estimate_koopman_matrix(
     degree: int = 2,
     n_samples: int = 500,
     seed: int = 42,
+    basis: str = "poly",
 ) -> TransMatrix:
     """Estimate the Koopman matrix via Extended Dynamic Mode Decomposition.
 
     1. Generate n_samples random input vectors
     2. Apply step_fn to each
     3. Lift both inputs and outputs
-    4. Solve least-squares: Ψ_X @ K ≈ Ψ_Y
+    4. Solve least-squares: Psi_X @ K ~ Psi_Y
 
     Args:
         step_fn: function mapping (dim,) -> (dim,)
@@ -137,12 +163,13 @@ def estimate_koopman_matrix(
         degree: polynomial degree for lifting
         n_samples: number of samples for EDMD
         seed: random seed
+        basis: "poly" or "augmented"
 
     Returns:
         TransMatrix of shape (lifted_dim, lifted_dim).
     """
     rng = np.random.default_rng(seed)
-    ld = lifted_dim(dim, degree)
+    ld = lifted_dim(dim, degree, basis)
 
     # Ensure enough samples for the lifted dimension
     n_samples = max(n_samples, ld + 10)
@@ -159,10 +186,10 @@ def estimate_koopman_matrix(
         Y[i] = yi
 
     # Lift inputs and outputs
-    Psi_X = lift(X, degree)  # (n_samples, ld)
-    Psi_Y = lift(Y, degree)  # (n_samples, ld)
+    Psi_X = lift(X, degree, basis)  # (n_samples, ld)
+    Psi_Y = lift(Y, degree, basis)  # (n_samples, ld)
 
-    # Least-squares solve: Psi_X @ K ≈ Psi_Y
+    # Least-squares solve: Psi_X @ K ~ Psi_Y
     # K = pinv(Psi_X) @ Psi_Y
     K, _, _, _ = np.linalg.lstsq(Psi_X, Psi_Y, rcond=None)
 

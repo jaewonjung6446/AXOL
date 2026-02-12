@@ -1,0 +1,14 @@
+# AXOL Binary Classifier: classifier
+# dim=8 omega=0.9 phi=0.8
+
+declare "classifier" {
+    input x(8)
+    output result
+    relate result <- x via <~>
+    quality omega=0.9 phi=0.8
+}
+
+weave classifier quantum=1 seed=42
+
+# Observe with confidence voting
+confident classifier max=50 threshold=0.95 { x = [0.5, 0.7576870748950764, 0.8941798919953841, 0.8452837466595495, 0.6339952600623621, 0.35968670892415205, 0.15136969103456488, 0.10701895495026692] }

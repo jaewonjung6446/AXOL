@@ -1,0 +1,25 @@
+# AXOL Hello World — mood classifier
+# Declare -> Weave -> Observe pipeline
+
+declare "mood" {
+    input text(8)
+    input context(8)
+    relate sentiment <- text, context via <~>
+    output sentiment
+    quality omega=0.85 phi=0.8
+}
+
+# Weave with quantum structures enabled
+weave mood quantum=true seed=42
+
+# Observe with input vectors
+observe mood {
+    text = [0.8, 0.2, 0.1, 0.5, 0.3, 0.1, 0.9, 0.4]
+    context = [0.1, 0.3, 0.7, 0.2, 0.5, 0.8, 0.1, 0.6]
+}
+
+# Reobserve for improved quality
+reobserve mood count=5 {
+    text = [0.8, 0.2, 0.1, 0.5, 0.3, 0.1, 0.9, 0.4]
+    context = [0.1, 0.3, 0.7, 0.2, 0.5, 0.8, 0.1, 0.6]
+}

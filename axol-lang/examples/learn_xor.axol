@@ -1,0 +1,15 @@
+# Learn XOR gate from training data
+# This demonstrates AXOL's learning mechanism:
+#   - Searches over chaos dynamics parameters (r, epsilon, weights)
+#   - Uses quantum basin proximity for non-linear separation
+#   - Born rule measures the collapsed outcome
+
+learn "xor" dim=4 quantum=1 seed=42 {
+    [0.9, 0.1, 0.9, 0.1] = 0
+    [0.9, 0.1, 0.1, 0.9] = 1
+    [0.1, 0.9, 0.9, 0.1] = 1
+    [0.1, 0.9, 0.1, 0.9] = 0
+}
+
+# After learning, the tapestry "xor" is available for observation
+observe xor { x = [0.1, 0.9, 0.9, 0.1] }

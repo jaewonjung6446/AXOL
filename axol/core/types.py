@@ -209,6 +209,116 @@ class TransMatrix(_VecBase):
 
 
 # ---------------------------------------------------------------------------
+# ComplexVec — complex128 state vector with phase information
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True, eq=False)
+class ComplexVec(_VecBase):
+    """Complex-valued state vector with amplitude and phase."""
+
+    def __post_init__(self) -> None:
+        if not np.issubdtype(self.data.dtype, np.complexfloating):
+            object.__setattr__(self, "data", self.data.astype(np.complex128))
+
+    @classmethod
+    def from_real(cls, vec: FloatVec) -> ComplexVec:
+        """Promote a real vector to complex (zero phases)."""
+        return cls(data=vec.data.astype(np.complex128))
+
+    @classmethod
+    def from_polar(cls, magnitudes: np.ndarray, phases: np.ndarray) -> ComplexVec:
+        """Create from polar form: magnitude * exp(i*phase)."""
+        data = magnitudes.astype(np.float64) * np.exp(1j * phases.astype(np.float64))
+        return cls(data=data.astype(np.complex128))
+
+    @classmethod
+    def from_list(cls, values: list[complex]) -> Self:
+        return cls(data=np.array(values, dtype=np.complex128))
+
+    @classmethod
+    def zeros(cls, n: int) -> Self:
+        return cls(data=np.zeros(n, dtype=np.complex128))
+
+    @property
+    def amplitudes(self) -> np.ndarray:
+        """Magnitudes |alpha_i|."""
+        return np.abs(self.data)
+
+    @property
+    def phases(self) -> np.ndarray:
+        """Phases arg(alpha_i)."""
+        return np.angle(self.data)
+
+    def to_real(self) -> FloatVec:
+        """Extract magnitudes as FloatVec."""
+        return FloatVec(data=np.abs(self.data).astype(np.float32))
+
+    def __repr__(self) -> str:
+        return f"ComplexVec[{self.size}]"
+
+
+# ---------------------------------------------------------------------------
+# DensityMatrix — dim x dim complex density matrix
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True, eq=False)
+class DensityMatrix(_VecBase):
+    """Density matrix rho for quantum states (dim x dim complex).
+
+    Pure state:  rho = |psi><psi|,  purity = 1.0
+    Mixed state: rho = sum p_i |psi_i><psi_i|,  purity < 1.0
+    """
+
+    def __post_init__(self) -> None:
+        if self.data.ndim != 2:
+            raise ValueError("DensityMatrix must be 2-dimensional")
+        if self.data.shape[0] != self.data.shape[1]:
+            raise ValueError("DensityMatrix must be square")
+        if not np.issubdtype(self.data.dtype, np.complexfloating):
+            object.__setattr__(self, "data", self.data.astype(np.complex128))
+
+    @property
+    def dim(self) -> int:
+        return self.data.shape[0]
+
+    @property
+    def size(self) -> int:  # type: ignore[override]
+        return self.data.shape[0]
+
+    @property
+    def purity(self) -> float:
+        """tr(rho^2) -- 1.0 for pure states, 1/dim for maximally mixed."""
+        return float(np.real(np.trace(self.data @ self.data)))
+
+    @property
+    def is_pure(self) -> bool:
+        return self.purity > 0.999
+
+    @classmethod
+    def from_pure_state(cls, vec: ComplexVec) -> DensityMatrix:
+        """Create |psi><psi| from state vector."""
+        psi = vec.data.reshape(-1, 1).astype(np.complex128)
+        rho = psi @ psi.conj().T
+        tr = np.trace(rho)
+        if np.abs(tr) > 0:
+            rho = rho / tr
+        return cls(data=rho)
+
+    @classmethod
+    def maximally_mixed(cls, dim: int) -> DensityMatrix:
+        """Maximally mixed state: rho = I/dim."""
+        return cls(data=np.eye(dim, dtype=np.complex128) / dim)
+
+    @classmethod
+    def from_probabilities(cls, probs: np.ndarray) -> DensityMatrix:
+        """Create diagonal density matrix from classical probabilities."""
+        return cls(data=np.diag(probs.astype(np.complex128)))
+
+    def __repr__(self) -> str:
+        return f"DensityMatrix[{self.dim}](purity={self.purity:.4f})"
+
+
+# ---------------------------------------------------------------------------
 # StateBundle — named collection of vectors
 # ---------------------------------------------------------------------------
 

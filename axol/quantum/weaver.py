@@ -40,6 +40,11 @@ from axol.quantum.compose import compose_serial
 from axol.quantum.koopman import (
     lifted_dim, estimate_koopman_matrix, compose_koopman_chain,
 )
+from axol.quantum.unitary import (
+    estimate_unitary_step, compose_unitary_chain,
+    estimate_hybrid_step, compose_hybrid_chain,
+)
+from axol.core.types import ComplexVec, DensityMatrix
 
 
 def _build_trajectory_matrix(
@@ -303,6 +308,7 @@ def _compose_koopman_chain_from_transitions(
     degree: int = 2,
     n_samples: int = 500,
     seed: int = 42,
+    basis: str = "poly",
 ) -> tuple[TransMatrix, dict]:
     """Estimate and compose Koopman matrices for a chain of transitions.
 
@@ -325,6 +331,7 @@ def _compose_koopman_chain_from_transitions(
         step_fn = _build_step_fn(op.matrix, tfn)
         K = estimate_koopman_matrix(
             step_fn, dim, degree=degree, n_samples=n_samples, seed=seed + i,
+            basis=basis,
         )
         koopman_matrices.append(K)
 
@@ -332,7 +339,7 @@ def _compose_koopman_chain_from_transitions(
 
     input_key = transform_transitions[0].operation.key
     output_key = transform_transitions[-1].operation.out_key or transform_transitions[-1].operation.key
-    ld = lifted_dim(dim, degree)
+    ld = lifted_dim(dim, degree, basis)
 
     chain_info = {
         "input_key": input_key,
@@ -341,8 +348,145 @@ def _compose_koopman_chain_from_transitions(
         "original_dim": dim,
         "lifted_dim": ld,
         "degree": degree,
+        "basis": basis,
     }
     return composed, chain_info
+
+
+def _compose_unitary_chain_from_transitions(
+    transitions: list[Transition],
+    relation_map: dict[str, DeclaredRelation],
+    n_samples: int = 500,
+    seed: int = 42,
+) -> tuple[TransMatrix, dict]:
+    """Estimate and compose unitary matrices for a chain of transitions.
+
+    For each TransformOp, builds a step function (linear transform + optional
+    nonlinear transform_fn), estimates its nearest unitary matrix, then
+    composes all unitary matrices into a single unitary matrix.
+    """
+    transform_transitions = [t for t in transitions if isinstance(t.operation, TransformOp)]
+
+    unitary_matrices = []
+    dim = transform_transitions[0].operation.matrix.shape[0]
+
+    for i, t in enumerate(transform_transitions):
+        op = t.operation
+        target_name = op.out_key or op.key
+        relation = relation_map.get(target_name)
+        tfn = relation.transform_fn if relation is not None else None
+
+        step_fn = _build_step_fn(op.matrix, tfn)
+        U = estimate_unitary_step(step_fn, dim, n_samples=n_samples, seed=seed + i)
+        unitary_matrices.append(U)
+
+    composed = compose_unitary_chain(unitary_matrices)
+
+    input_key = transform_transitions[0].operation.key
+    output_key = transform_transitions[-1].operation.out_key or transform_transitions[-1].operation.key
+
+    chain_info = {
+        "input_key": input_key,
+        "output_key": output_key,
+        "num_composed": len(transform_transitions),
+        "dim": dim,
+    }
+    return composed, chain_info
+
+
+def _compose_hybrid_chain_from_transitions(
+    transitions: list[Transition],
+    relation_map: dict[str, DeclaredRelation],
+    n_samples: int = 500,
+    seed: int = 42,
+) -> tuple[TransMatrix, np.ndarray, dict]:
+    """Estimate raw A matrices, compose, SVD-decompose to (rotation, scales).
+
+    Hybrid = unitary rotation (direction) + singular values (magnitude).
+    Maps to open quantum system: unitary gate + decoherence.
+    """
+    transform_transitions = [t for t in transitions if isinstance(t.operation, TransformOp)]
+
+    raw_matrices = []
+    dim = transform_transitions[0].operation.matrix.shape[0]
+
+    for i, t in enumerate(transform_transitions):
+        op = t.operation
+        target_name = op.out_key or op.key
+        relation = relation_map.get(target_name)
+        tfn = relation.transform_fn if relation is not None else None
+
+        step_fn = _build_step_fn(op.matrix, tfn)
+        A = estimate_hybrid_step(step_fn, dim, n_samples=n_samples, seed=seed + i)
+        raw_matrices.append(A)
+
+    composed_matrix, rotation, scales = compose_hybrid_chain(raw_matrices)
+
+    input_key = transform_transitions[0].operation.key
+    output_key = transform_transitions[-1].operation.out_key or transform_transitions[-1].operation.key
+
+    chain_info = {
+        "input_key": input_key,
+        "output_key": output_key,
+        "num_composed": len(transform_transitions),
+        "dim": dim,
+    }
+    return composed_matrix, rotation, scales, chain_info
+
+
+def _distill_end_to_end(
+    program: Program,
+    input_key: str,
+    output_key: str,
+    dim: int,
+    n_samples: int = 200,
+    seed: int = 42,
+) -> tuple[TransMatrix, dict]:
+    """Distill an entire program into a single dim x dim matrix via lstsq.
+
+    Runs the full fallback program n_samples times with random inputs,
+    collects (input, output) pairs, and fits a single linear map Y = X @ M.
+    """
+    from axol.core.program import run_program as _run_program
+
+    rng = np.random.default_rng(seed)
+    X = np.empty((n_samples, dim), dtype=np.float64)
+    Y = np.empty((n_samples, dim), dtype=np.float64)
+
+    for i in range(n_samples):
+        x_data = rng.standard_normal(dim).astype(np.float32) * 0.3
+        x_vec = FloatVec(data=x_data)
+
+        # Inject input into the program
+        state = program.initial_state.copy()
+        state[input_key] = x_vec
+
+        injected = Program(
+            name=program.name,
+            initial_state=state,
+            transitions=program.transitions,
+        )
+        result = _run_program(injected)
+        final = result.final_state
+
+        if output_key in final:
+            y_data = final[output_key].data.astype(np.float64)
+        else:
+            y_data = x_data.astype(np.float64)
+
+        X[i] = x_data.astype(np.float64)
+        Y[i] = y_data
+
+    # lstsq: find M such that X @ M ≈ Y
+    M, _, _, _ = np.linalg.lstsq(X, Y, rcond=None)
+    M = np.nan_to_num(M, nan=0.0, posinf=10.0, neginf=-10.0)
+
+    chain_info = {
+        "input_key": input_key,
+        "output_key": output_key,
+        "dim": dim,
+    }
+    return TransMatrix(data=M.astype(np.float32)), chain_info
 
 
 def weave(
@@ -350,8 +494,13 @@ def weave(
     encrypt: bool = False,
     seed: int = 42,
     optimize: bool = True,
+    nonlinear_method: str = "distill",  # "distill" | "hybrid" | "unitary" | "koopman"
+    distill_samples: int = 200,
+    unitary_samples: int = 500,
     koopman_degree: int = 2,
     koopman_samples: int = 500,
+    koopman_basis: str = "poly",
+    quantum: bool = False,  # Enable complex amplitudes + density matrix
 ) -> Tapestry:
     """Weave a declaration into a Tapestry.
 
@@ -404,13 +553,22 @@ def weave(
             # Input nodes: trivial attractor (fixed point, lambda < 0)
             dim = input_dims[node_name]
             amplitudes = FloatVec(data=np.ones(dim, dtype=np.float32) / np.sqrt(dim))
+            # Complex amplitudes: uniform magnitude, random phases
+            complex_amps = None
+            if quantum:
+                rng_q = np.random.default_rng(node_seed + 10000)
+                phases = rng_q.uniform(0, 2 * np.pi, dim)
+                magnitudes = np.ones(dim, dtype=np.float64) / np.sqrt(dim)
+                complex_amps = ComplexVec.from_polar(magnitudes, phases)
+            node_labels = next(
+                (inp.labels for inp in declaration.inputs if inp.name == node_name),
+                {},
+            )
             state = SuperposedState(
                 name=node_name,
                 amplitudes=amplitudes,
-                labels=next(
-                    (inp.labels for inp in declaration.inputs if inp.name == node_name),
-                    {},
-                ),
+                labels=node_labels,
+                complex_amplitudes=complex_amps,
             )
             traj = TransMatrix(data=np.eye(dim, dtype=np.float32) * 0.5)
             attractor = Attractor(
@@ -433,7 +591,13 @@ def weave(
         if relation is None:
             # Isolated node — treat as identity
             amplitudes = FloatVec(data=np.ones(work_dim, dtype=np.float32) / np.sqrt(work_dim))
-            state = SuperposedState(name=node_name, amplitudes=amplitudes)
+            complex_amps = None
+            if quantum:
+                rng_q = np.random.default_rng(node_seed + 10000)
+                phases = rng_q.uniform(0, 2 * np.pi, work_dim)
+                magnitudes = np.ones(work_dim, dtype=np.float64) / np.sqrt(work_dim)
+                complex_amps = ComplexVec.from_polar(magnitudes, phases)
+            state = SuperposedState(name=node_name, amplitudes=amplitudes, complex_amplitudes=complex_amps)
             traj = TransMatrix(data=np.eye(work_dim, dtype=np.float32) * 0.5)
             attractor = Attractor(
                 phase_space_dim=work_dim,
@@ -498,7 +662,13 @@ def weave(
 
         # Build superposed state (initial amplitudes)
         amplitudes = FloatVec(data=np.ones(node_dim, dtype=np.float32) / np.sqrt(node_dim))
-        state = SuperposedState(name=node_name, amplitudes=amplitudes)
+        complex_amps = None
+        if quantum:
+            rng_q = np.random.default_rng(node_seed + 10000)
+            phases = rng_q.uniform(0, 2 * np.pi, node_dim)
+            magnitudes = np.ones(node_dim, dtype=np.float64) / np.sqrt(node_dim)
+            complex_amps = ComplexVec.from_polar(magnitudes, phases)
+        state = SuperposedState(name=node_name, amplitudes=amplitudes, complex_amplitudes=complex_amps)
 
         # Depth = max source depth + 1
         depth = 0
@@ -634,22 +804,85 @@ def weave(
     composed_chain_info = None
     koopman_matrix = None
     koopman_chain_info = None
+    unitary_matrix = None
+    unitary_chain_info = None
+    hybrid_matrix = None
+    hybrid_rotation = None
+    hybrid_scales = None
+    hybrid_chain_info = None
+    distilled_matrix = None
+    distilled_chain_info = None
     has_nonlinear = _has_nonlinear_step(declaration)
 
     if optimize:
         if _is_composable_chain(transitions) and not has_nonlinear:
-            # Pure linear chain → existing fast path
+            # Pure linear chain -> existing fast path
             composed_matrix, composed_chain_info = _compose_chain(transitions)
         elif _is_koopman_composable_chain(transitions, relation_map, has_nonlinear):
-            # Nonlinear chain → Koopman composition
-            koopman_matrix, koopman_chain_info = _compose_koopman_chain_from_transitions(
-                transitions, relation_map,
-                degree=koopman_degree,
-                n_samples=koopman_samples,
-                seed=seed,
+            if nonlinear_method == "distill":
+                # End-to-end distillation via lstsq
+                transform_ops = [t for t in transitions if isinstance(t.operation, TransformOp)]
+                input_key = transform_ops[0].operation.key
+                output_key = transform_ops[-1].operation.out_key or transform_ops[-1].operation.key
+                dim = transform_ops[0].operation.matrix.shape[0]
+                distilled_matrix, distilled_chain_info = _distill_end_to_end(
+                    program, input_key, output_key, dim,
+                    n_samples=distill_samples, seed=seed,
+                )
+            elif nonlinear_method == "hybrid":
+                # Nonlinear chain -> Hybrid (unitary rotation + singular-value scales)
+                hybrid_matrix, hybrid_rotation, hybrid_scales, hybrid_chain_info = (
+                    _compose_hybrid_chain_from_transitions(
+                        transitions, relation_map,
+                        n_samples=unitary_samples,
+                        seed=seed,
+                    )
+                )
+            elif nonlinear_method == "unitary":
+                # Nonlinear chain -> Pure unitary (direction only)
+                unitary_matrix, unitary_chain_info = _compose_unitary_chain_from_transitions(
+                    transitions, relation_map,
+                    n_samples=unitary_samples,
+                    seed=seed,
+                )
+            else:
+                # Nonlinear chain -> Koopman composition (legacy)
+                koopman_matrix, koopman_chain_info = _compose_koopman_chain_from_transitions(
+                    transitions, relation_map,
+                    degree=koopman_degree,
+                    n_samples=koopman_samples,
+                    seed=seed,
+                    basis=koopman_basis,
+                )
+
+    # Step 10: Quantum structure (density matrix + Kraus operators)
+    density_matrix = None
+    kraus_operators = None
+
+    if quantum:
+        # Build global density matrix from output node's complex state
+        last_output = declaration.outputs[-1] if declaration.outputs else topo_order[-1]
+        if last_output in nodes and nodes[last_output].state.complex_amplitudes is not None:
+            density_matrix = DensityMatrix.from_pure_state(
+                nodes[last_output].state.complex_amplitudes
             )
 
-    # Step 10: Return Tapestry
+        # Extract Kraus operators from Hybrid SVD if available
+        if hybrid_matrix is not None and hybrid_scales is not None:
+            from axol.quantum.density import svd_to_kraus
+            try:
+                U_h, s_h, Vh_h = np.linalg.svd(
+                    hybrid_matrix.data.astype(np.float64), full_matrices=False
+                )
+                kraus_operators = svd_to_kraus(U_h, s_h, Vh_h, work_dim)
+                # Evolve density matrix through the channel
+                if density_matrix is not None:
+                    from axol.quantum.density import apply_channel
+                    density_matrix = apply_channel(density_matrix, kraus_operators)
+            except Exception:
+                pass  # Kraus extraction failed — proceed without
+
+    # Step 11: Return Tapestry
     return Tapestry(
         name=declaration.name,
         nodes=nodes,
@@ -662,4 +895,15 @@ def weave(
         _composed_chain_info=composed_chain_info,
         _koopman_matrix=koopman_matrix,
         _koopman_chain_info=koopman_chain_info,
+        _unitary_matrix=unitary_matrix,
+        _unitary_chain_info=unitary_chain_info,
+        _hybrid_matrix=hybrid_matrix,
+        _hybrid_rotation=hybrid_rotation,
+        _hybrid_scales=hybrid_scales,
+        _hybrid_chain_info=hybrid_chain_info,
+        _distilled_matrix=distilled_matrix,
+        _distilled_chain_info=distilled_chain_info,
+        _quantum=quantum,
+        _density_matrix=density_matrix,
+        _kraus_operators=kraus_operators,
     )
