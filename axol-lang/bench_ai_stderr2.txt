@@ -1,0 +1,63 @@
+warning: unused import: `crate::errors::Result`
+ --> src\density.rs:5:5
+  |
+5 | use crate::errors::Result;
+  |     ^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `crate::observatory`
+  --> src\axol_ai.rs:18:5
+   |
+18 | use crate::observatory;
+   |     ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `AxolError`
+  --> src\axol_ai.rs:22:21
+   |
+22 | use crate::errors::{AxolError, Result};
+   |                     ^^^^^^^^^
+
+warning: unused variable: `n_basins`
+   --> src\weaver.rs:280:9
+    |
+280 |     let n_basins = basins.len();
+    |         ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_n_basins`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `dim`
+   --> src\axol_ai.rs:354:9
+    |
+354 |         dim: usize,
+    |         ^^^ help: if this is intentional, prefix it with an underscore: `_dim`
+
+warning: unused variable: `omega`
+   --> src\axol_ai.rs:355:9
+    |
+355 |         omega: f64,
+    |         ^^^^^ help: if this is intentional, prefix it with an underscore: `_omega`
+
+warning: unused variable: `phi`
+   --> src\axol_ai.rs:356:9
+    |
+356 |         phi: f64,
+    |         ^^^ help: if this is intentional, prefix it with an underscore: `_phi`
+
+warning: unused variable: `total_obs`
+   --> src\axol_ai.rs:569:9
+    |
+569 |         total_obs: &mut usize,
+    |         ^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_total_obs`
+
+warning: unused variable: `start`
+   --> src\dsl\lexer.rs:141:13
+    |
+141 |         let start = self.pos;
+    |             ^^^^^ help: if this is intentional, prefix it with an underscore: `_start`
+
+warning: `axol-lang` (lib) generated 9 warnings (run `cargo fix --lib -p axol-lang` to apply 9 suggestions)
+    Finished `release` profile [optimized] target(s) in 0.16s
+     Running `target\release\examples\bench_ai.exe`
+
+[bench_ai] Done.

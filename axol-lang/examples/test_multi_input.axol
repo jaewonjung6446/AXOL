@@ -1,0 +1,60 @@
+# Minimal test: 2-input model with define_basins
+define_basins "test_basins" {
+    dim 8
+    basin [0.9, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7] volume=0.35
+    basin [0.1, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2] volume=0.30
+    basin [0.5, 0.5, 0.9, 0.1, 0.8, 0.2, 0.7, 0.3] volume=0.20
+    basin [0.3, 0.3, 0.3, 0.9, 0.1, 0.9, 0.1, 0.9] volume=0.15
+    fractal_dim 1.6
+}
+
+declare "model2" {
+    input x(8)
+    input ctx(8)
+    relate y <- x, ctx via <~>
+    output y
+    quality omega=0.9 phi=0.85
+}
+
+weave model2 quantum=true seed=42 from_basins="test_basins"
+
+# Step 1: plain observe (should be non-uniform now)
+observe model2 {
+    x = [0.9, 0.1, 0.3, 0.7, 0.2, 0.8, 0.4, 0.6]
+    ctx = [0.2, 0.8, 0.6, 0.4, 0.7, 0.3, 0.9, 0.1]
+}
+
+# Step 2: iterate with same inputs
+iterate model2 max=5 converge=prob_delta value=0.01 {
+    x = [0.9, 0.1, 0.3, 0.7, 0.2, 0.8, 0.4, 0.6]
+    ctx = [0.2, 0.8, 0.6, 0.4, 0.7, 0.3, 0.9, 0.1]
+}
+
+# Step 3: observe again
+observe model2 {
+    x = [0.9, 0.1, 0.3, 0.7, 0.2, 0.8, 0.4, 0.6]
+    ctx = [0.2, 0.8, 0.6, 0.4, 0.7, 0.3, 0.9, 0.1]
+}
+
+# Step 4: observe with different inputs
+observe model2 {
+    x = [0.1, 0.9, 0.7, 0.3, 0.8, 0.2, 0.6, 0.4]
+    ctx = [0.8, 0.2, 0.4, 0.6, 0.3, 0.7, 0.1, 0.9]
+}
+
+# For comparison: single-input model
+declare "model1" {
+    input x(8)
+    relate y <- x via <~>
+    output y
+    quality omega=0.9 phi=0.85
+}
+weave model1 quantum=true seed=42 from_basins="test_basins"
+
+observe model1 {
+    x = [0.9, 0.1, 0.3, 0.7, 0.2, 0.8, 0.4, 0.6]
+}
+
+iterate model1 max=5 converge=prob_delta value=0.01 {
+    x = [0.9, 0.1, 0.3, 0.7, 0.2, 0.8, 0.4, 0.6]
+}

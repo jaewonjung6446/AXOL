@@ -15,6 +15,7 @@ use std::collections::HashMap;
 use crate::types::*;
 use crate::ops;
 use crate::declare::*;
+use crate::wave::{InterferencePattern, InterferenceRule};
 use crate::dynamics::{ChaosEngine, Basin};
 use crate::errors::{AxolError, Result};
 
@@ -32,8 +33,14 @@ pub struct Attractor {
 }
 
 impl Attractor {
-    pub fn omega(&self) -> f64 {
+    /// Lyapunov-based omega (kept for backward compatibility / reporting).
+    pub fn omega_lyapunov(&self) -> f64 {
         1.0 / (1.0 + self.max_lyapunov.max(0.0))
+    }
+
+    /// Legacy alias — delegates to Lyapunov-based omega.
+    pub fn omega(&self) -> f64 {
+        self.omega_lyapunov()
     }
 
     pub fn phi(&self) -> f64 {
@@ -72,6 +79,8 @@ pub struct WeaverReport {
     pub fractal_dim: f64,
     pub feasible: bool,
     pub warnings: Vec<String>,
+    pub shannon_entropy: f64,
+    pub n_basins: usize,
 }
 
 // ---------------------------------------------------------------------------
@@ -90,9 +99,15 @@ pub struct Tapestry {
     pub quantum: bool,
     pub density_matrix: Option<DensityMatrix>,
     pub kraus_operators: Option<Vec<Vec<Complex64>>>,
-    // New: real dynamics
+    // Dynamics (implementation layer — optional for debug/analysis)
     pub chaos_engine: Option<ChaosEngine>,
     pub basins: Option<Vec<Basin>>,
+    // Theory layer — time-independent basin structure
+    pub basin_structure: BasinStructure,
+    // Wave system — interference rules from declarations
+    pub interference_rules: Vec<InterferenceRule>,
+    // If true, observe_evolve will NOT overwrite basin_structure (set by define_basins/from_basins)
+    pub preserve_basins: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -211,26 +226,22 @@ pub fn weave(decl: &EntangleDeclaration, quantum: bool, seed: u64) -> Result<Tap
     }
 
     // ===================================================================
-    // STEP 3: Basin detection (for quantum branching)
+    // STEP 3: Basin detection (always — for BasinStructure)
     // ===================================================================
-    let basins = if quantum {
-        Some(chaos.find_basins(200, 300, seed))
-    } else {
-        None
-    };
+    let basins = chaos.find_basins(200, 300, seed);
+
+    // ===================================================================
+    // STEP 3.5: Build BasinStructure (time-independent theory object)
+    // ===================================================================
+    let basin_structure = build_basin_structure(&basins, dim, attractor_result.fractal_dim, Some(composed_matrix.clone()));
 
     // ===================================================================
     // STEP 4: Quantum structures
     // ===================================================================
     let density_matrix = if quantum {
-        // Create superposition from basins
-        if let Some(ref basins) = basins {
-            if !basins.is_empty() {
-                let cv = basin_superposition(basins, dim);
-                Some(DensityMatrix::from_pure_state(&cv))
-            } else {
-                fallback_density(&nodes, &output_names)
-            }
+        if !basins.is_empty() {
+            let cv = basin_superposition(&basins, dim);
+            Some(DensityMatrix::from_pure_state(&cv))
         } else {
             fallback_density(&nodes, &output_names)
         }
@@ -239,19 +250,35 @@ pub fn weave(decl: &EntangleDeclaration, quantum: bool, seed: u64) -> Result<Tap
     };
 
     // ===================================================================
-    // STEP 5: Weaver report with REAL metrics
+    // STEP 5: Weaver report — omega from BasinStructure (time-independent)
     // ===================================================================
+    let estimated_omega = basin_structure.omega();
+    let estimated_phi = basin_structure.phi();
+
     let report = WeaverReport {
         target_omega: decl.quality.omega,
         target_phi: decl.quality.phi,
-        estimated_omega: global_attractor.omega(),
-        estimated_phi: global_attractor.phi(),
+        estimated_omega,
+        estimated_phi,
         max_lyapunov: attractor_result.max_lyapunov,
         fractal_dim: attractor_result.fractal_dim,
-        feasible: global_attractor.omega() >= decl.quality.omega * 0.5
-            && global_attractor.phi() >= decl.quality.phi * 0.5,
+        feasible: estimated_omega >= decl.quality.omega * 0.5
+            && estimated_phi >= decl.quality.phi * 0.5,
         warnings: Vec::new(),
+        shannon_entropy: basin_structure.shannon_entropy(),
+        n_basins: basin_structure.n_basins,
     };
+
+    // ===================================================================
+    // STEP 6: Build interference rules from declarations (Wave system)
+    // ===================================================================
+    let interference_rules: Vec<InterferenceRule> = decl.relations.iter()
+        .map(|rel| InterferenceRule {
+            output: rel.target.clone(),
+            sources: rel.sources.clone(),
+            pattern: InterferencePattern::from_relation(&rel.kind),
+        })
+        .collect();
 
     Ok(Tapestry {
         name: decl.name.clone(),
@@ -265,7 +292,10 @@ pub fn weave(decl: &EntangleDeclaration, quantum: bool, seed: u64) -> Result<Tap
         density_matrix,
         kraus_operators: None,
         chaos_engine: Some(chaos),
-        basins,
+        basins: Some(basins),
+        basin_structure,
+        interference_rules,
+        preserve_basins: false,
     })
 }
 
@@ -277,7 +307,6 @@ pub fn weave(decl: &EntangleDeclaration, quantum: bool, seed: u64) -> Result<Tap
 /// Each basin contributes a component with amplitude ∝ sqrt(basin size)
 /// and phase from basin geometry.
 fn basin_superposition(basins: &[Basin], dim: usize) -> ComplexVec {
-    let n_basins = basins.len();
     let mut data = vec![Complex64::new(0.0, 0.0); dim];
 
     for (idx, basin) in basins.iter().enumerate() {
@@ -320,4 +349,33 @@ fn fallback_density(
         }
     }
     None
+}
+
+/// Build a BasinStructure from dynamics-detected basins.
+pub fn build_basin_structure(
+    basins: &[Basin],
+    dim: usize,
+    fractal_dim: f64,
+    transform: Option<TransMatrix>,
+) -> BasinStructure {
+    if basins.is_empty() {
+        // Single-basin fallback: everything is one basin centered at 0.5
+        return BasinStructure::from_dynamics(
+            dim,
+            vec![vec![0.5; dim]],
+            vec![1.0],
+            fractal_dim,
+            transform,
+            vec![0.0],
+            vec![1.0],
+        );
+    }
+    let centroids: Vec<Vec<f64>> = basins.iter().map(|b| b.center.clone()).collect();
+    let volumes: Vec<f64> = basins.iter().map(|b| b.size).collect();
+    let phases: Vec<f64> = basins.iter().map(|b| b.phase).collect();
+    // Estimate radii from volumes: r ∝ V^(1/dim)
+    let radii: Vec<f64> = volumes.iter()
+        .map(|&v| v.max(1e-15).powf(1.0 / dim.max(1) as f64))
+        .collect();
+    BasinStructure::from_dynamics(dim, centroids, volumes, fractal_dim, transform, phases, radii)
 }

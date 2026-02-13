@@ -1,0 +1,11 @@
+D:\Unity\Izakoza\AXOL\axol-lang\target\release\deps\pest_generator-2dd3b1791083cf4d.d: C:\Users\jaewo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\pest_generator-2.8.6\src\lib.rs C:\Users\jaewo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\pest_generator-2.8.6\src\macros.rs C:\Users\jaewo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\pest_generator-2.8.6\src\docs.rs C:\Users\jaewo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\pest_generator-2.8.6\src\generator.rs C:\Users\jaewo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\pest_generator-2.8.6\src\parse_derive.rs
+
+D:\Unity\Izakoza\AXOL\axol-lang\target\release\deps\libpest_generator-2dd3b1791083cf4d.rlib: C:\Users\jaewo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\pest_generator-2.8.6\src\lib.rs C:\Users\jaewo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\pest_generator-2.8.6\src\macros.rs C:\Users\jaewo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\pest_generator-2.8.6\src\docs.rs C:\Users\jaewo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\pest_generator-2.8.6\src\generator.rs C:\Users\jaewo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\pest_generator-2.8.6\src\parse_derive.rs
+
+D:\Unity\Izakoza\AXOL\axol-lang\target\release\deps\libpest_generator-2dd3b1791083cf4d.rmeta: C:\Users\jaewo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\pest_generator-2.8.6\src\lib.rs C:\Users\jaewo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\pest_generator-2.8.6\src\macros.rs C:\Users\jaewo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\pest_generator-2.8.6\src\docs.rs C:\Users\jaewo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\pest_generator-2.8.6\src\generator.rs C:\Users\jaewo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\pest_generator-2.8.6\src\parse_derive.rs
+
+C:\Users\jaewo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\pest_generator-2.8.6\src\lib.rs:
+C:\Users\jaewo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\pest_generator-2.8.6\src\macros.rs:
+C:\Users\jaewo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\pest_generator-2.8.6\src\docs.rs:
+C:\Users\jaewo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\pest_generator-2.8.6\src\generator.rs:
+C:\Users\jaewo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\pest_generator-2.8.6\src\parse_derive.rs:

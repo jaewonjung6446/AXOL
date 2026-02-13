@@ -1,22 +1,26 @@
-//! Observatory — observe a tapestry to collapse to a single result.
+//! Observatory — compute Waves from tapestries, then observe.
 //!
-//! Quantum path now uses basin-based superposition:
-//!   1. Run short dynamics from input → determine basin proximity
-//!   2. Create quantum superposition across basins
-//!   3. Interference between basins (phase-dependent)
-//!   4. Born rule measurement → collapse to one outcome
-//!   5. Feedback: observation result adjusts dynamics parameters
+//! The core function is `compute_wave()`: given a tapestry and inputs,
+//! produce a Wave (uncollapsed quantum state). Everything else is a
+//! wrapper that applies different collapse levels:
+//!
+//!   compute_wave()  → Wave (t=0.0, pure superposition)
+//!   gaze()          → Wave (t=0.0, read probabilities, C=0)
+//!   glimpse(gamma)  → Wave (t=gamma, partial collapse, C=gamma)
+//!   observe()       → Observation (t=1.0, full collapse, C=1)
 
 use num_complex::Complex64;
 use crate::types::*;
 use crate::ops;
 use crate::density;
-use crate::dynamics::{ChaosEngine, Basin};
+use std::collections::HashMap;
+use crate::wave::{Wave, InterferencePattern, InterferenceRule};
+use crate::collapse::{self, CollapseMetrics};
 use crate::weaver::Tapestry;
 use crate::errors::{AxolError, Result};
 
 // ---------------------------------------------------------------------------
-// Observation result
+// Observation result (backward-compatible collapsed output)
 // ---------------------------------------------------------------------------
 
 #[derive(Clone, Debug)]
@@ -36,13 +40,24 @@ pub struct Observation {
     // Basin info
     pub n_basins: Option<usize>,
     pub chosen_basin: Option<usize>,
+    pub basin_weights: Option<Vec<f64>>,
+    // Collapse metrics
+    pub collapse_metrics: Option<CollapseMetrics>,
+    // Wave (the uncollapsed state that produced this observation)
+    pub wave: Option<Wave>,
 }
 
 // ---------------------------------------------------------------------------
-// observe()
+// compute_wave() — the core: tapestry + inputs → Wave (no collapse)
 // ---------------------------------------------------------------------------
 
-pub fn observe(tapestry: &Tapestry, inputs: &[(&str, &FloatVec)]) -> Result<Observation> {
+/// Compute a Wave from a tapestry and inputs WITHOUT collapsing.
+///
+/// This is the fundamental operation. The Wave carries the full quantum
+/// state (complex amplitudes, phases, interference capability) at t=0.0.
+///
+/// Collapse cost: C = 0
+pub fn compute_wave(tapestry: &Tapestry, inputs: &[(&str, &FloatVec)]) -> Result<Wave> {
     // Validate inputs
     for name in &tapestry.input_names {
         if !inputs.iter().any(|(n, _)| *n == name.as_str()) {
@@ -50,240 +65,224 @@ pub fn observe(tapestry: &Tapestry, inputs: &[(&str, &FloatVec)]) -> Result<Obse
         }
     }
 
-    let omega = tapestry.global_attractor.omega();
-    let phi = tapestry.global_attractor.phi();
+    // === QUANTUM BASIN PATH ===
+    if tapestry.quantum && tapestry.basin_structure.n_basins > 0 {
+        let input_waves: HashMap<String, Wave> = inputs.iter()
+            .map(|(name, fv)| (name.to_string(), Wave::from_basins(&tapestry.basin_structure, fv)))
+            .collect();
+        let mut wave = compose_from_rules(&input_waves, &tapestry.interference_rules)?;
+
+        // Apply composed matrix transform (preserves t=0.0)
+        if let Some(ref matrix) = tapestry.composed_matrix {
+            wave = wave.transform(matrix)?;
+        }
+
+        // Apply Kraus operators if present
+        if let Some(ref kraus) = tapestry.kraus_operators {
+            let rho = wave.to_density();
+            let evolved = density::apply_channel(&rho, kraus);
+            wave = Wave::from_density(evolved);
+        }
+
+        return Ok(wave);
+    }
+
+    // === QUANTUM MATRIX PATH (fallback) ===
+    if tapestry.quantum {
+        if let Some(ref matrix) = tapestry.composed_matrix {
+            let input_waves: HashMap<String, Wave> = inputs.iter()
+                .map(|(name, fv)| (name.to_string(), Wave::from_classical(fv)))
+                .collect();
+            let mut wave = compose_from_rules(&input_waves, &tapestry.interference_rules)?;
+            wave = wave.transform(matrix)?;
+
+            if let Some(ref kraus) = tapestry.kraus_operators {
+                let rho = wave.to_density();
+                let evolved = density::apply_channel(&rho, kraus);
+                wave = Wave::from_density(evolved);
+            }
+
+            return Ok(wave);
+        }
+    }
+
+    // === CLASSICAL PATH (produces Wave with real amplitudes) ===
+    if let Some(ref matrix) = tapestry.composed_matrix {
+        let input_waves: HashMap<String, Wave> = inputs.iter()
+            .map(|(name, fv)| (name.to_string(), Wave::from_classical(fv)))
+            .collect();
+        let composed = compose_from_rules(&input_waves, &tapestry.interference_rules)?;
+        let result = ops::transform(&composed.to_float_vec(), matrix)?;
+        return Ok(Wave::from_classical(&result));
+    }
+
+    // === FALLBACK: use output node amplitudes ===
+    let output_name = tapestry.output_names.first()
+        .cloned()
+        .unwrap_or_else(|| tapestry.nodes.keys().last().cloned().unwrap_or_default());
+
+    let output_node = tapestry.nodes.get(&output_name)
+        .ok_or_else(|| AxolError::Observatory(format!("Output '{}' not found", output_name)))?;
+
+    Ok(Wave::from_classical(&output_node.amplitudes))
+}
+
+// ---------------------------------------------------------------------------
+// compose_from_rules() — compose input waves according to interference rules
+// ---------------------------------------------------------------------------
+
+/// Compose input waves according to the tapestry's interference rules (DAG evaluation).
+///
+/// For multi-input models (e.g., `relate y <- x, ctx via <~>`), this composes
+/// all input waves using the declared interference pattern, rather than ignoring
+/// all but the first input.
+fn compose_from_rules(
+    input_waves: &HashMap<String, Wave>,
+    rules: &[InterferenceRule],
+) -> Result<Wave> {
+    // Single input: return directly
+    if input_waves.len() == 1 {
+        return Ok(input_waves.values().next().unwrap().clone());
+    }
+
+    // No rules: compose all inputs with Constructive (sorted keys for determinism)
+    if rules.is_empty() {
+        let mut keys: Vec<&String> = input_waves.keys().collect();
+        keys.sort();
+        let all: Vec<&Wave> = keys.iter().filter_map(|k| input_waves.get(*k)).collect();
+        let pat = InterferencePattern::Constructive;
+        let pats: Vec<&InterferencePattern> = vec![&pat; all.len() - 1];
+        return Wave::compose_many(&all, &pats);
+    }
+
+    // Process rules in DAG order, building intermediate waves
+    let mut intermediates: HashMap<String, Wave> = HashMap::new();
+    let mut last_output = String::new();
+
+    for rule in rules {
+        let sources: Vec<Wave> = rule.sources.iter()
+            .filter_map(|name| {
+                intermediates.get(name)
+                    .or_else(|| input_waves.get(name))
+                    .cloned()
+            })
+            .collect();
+
+        if sources.is_empty() { continue; }
+
+        let result = if sources.len() == 1 {
+            sources.into_iter().next().unwrap()
+        } else {
+            let refs: Vec<&Wave> = sources.iter().collect();
+            let pats: Vec<&InterferencePattern> = vec![&rule.pattern; refs.len() - 1];
+            Wave::compose_many(&refs, &pats)?
+        };
+
+        last_output = rule.output.clone();
+        intermediates.insert(rule.output.clone(), result);
+    }
+
+    intermediates.remove(&last_output)
+        .ok_or_else(|| AxolError::Observatory("No output wave produced from rules".into()))
+}
+
+// ---------------------------------------------------------------------------
+// gaze() — zero-collapse observation (returns Wave)
+// ---------------------------------------------------------------------------
+
+/// Read the Wave without any collapse. C = 0.
+///
+/// The Wave's probability distribution IS the answer.
+/// No information is destroyed.
+pub fn gaze(tapestry: &Tapestry, inputs: &[(&str, &FloatVec)]) -> Result<Wave> {
+    let mut wave = compute_wave(tapestry, inputs)?;
+
+    // Compute metrics from density matrix
+    let rho = wave.to_density();
+    wave.metrics.update_from_density(&rho);
+    if wave.density.is_none() {
+        wave.density = Some(rho);
+    }
+
+    Ok(wave)
+}
+
+// ---------------------------------------------------------------------------
+// glimpse() — partial collapse (returns focused Wave)
+// ---------------------------------------------------------------------------
+
+/// Partially collapse a Wave. C = gamma.
+///
+/// gamma in [0, 1]:
+///   0.0 = no change (equivalent to gaze)
+///   0.5 = moderate focusing
+///   1.0 = full collapse
+pub fn glimpse(
+    tapestry: &Tapestry,
+    inputs: &[(&str, &FloatVec)],
+    gamma: f64,
+) -> Result<Wave> {
+    let wave = compute_wave(tapestry, inputs)?;
+    Ok(wave.focus(gamma))
+}
+
+// ---------------------------------------------------------------------------
+// observe() — full collapse (returns Observation, backward-compatible)
+// ---------------------------------------------------------------------------
+
+/// Fully collapse a Wave to a classical result. C = 1.
+///
+/// This is the boundary between the Wave world and the classical world.
+/// The Wave is computed, then collapsed via argmax to produce a definite
+/// value_index. All phase and coherence information is destroyed.
+pub fn observe(tapestry: &Tapestry, inputs: &[(&str, &FloatVec)]) -> Result<Observation> {
+    let wave = compute_wave(tapestry, inputs)?;
+    observation_from_wave(tapestry, &wave)
+}
+
+/// Convert a Wave to an Observation (full collapse).
+pub fn observation_from_wave(tapestry: &Tapestry, wave: &Wave) -> Result<Observation> {
+    let omega = tapestry.basin_structure.omega();
+    let phi = tapestry.basin_structure.phi();
 
     let output_name = tapestry.output_names.first()
         .cloned()
         .unwrap_or_else(|| tapestry.nodes.keys().last().cloned().unwrap_or_default());
 
-    // === QUANTUM BASIN PATH ===
-    if tapestry.quantum {
-        if let (Some(ref chaos), Some(ref basins)) = (&tapestry.chaos_engine, &tapestry.basins) {
-            if let Some((_, input_fv)) = inputs.first() {
-                if !basins.is_empty() {
-                    return observe_quantum_basins(
-                        tapestry, chaos, basins, input_fv, &output_name, omega, phi,
-                    );
-                }
-            }
-        }
+    let probs = wave.probabilities();
+    let probs_f32 = FloatVec::new(probs.iter().map(|&p| p as f32).collect());
+    let (value_index, collapsed_wave) = wave.observe();
 
-        // Fallback to composed matrix quantum path
-        if let Some(ref matrix) = tapestry.composed_matrix {
-            if let Some((_, input_fv)) = inputs.first() {
-                let input_cv = ComplexVec::from_real(input_fv);
-                let result_cv = ops::transform_complex(&input_cv, matrix)?;
-                let result_cv = clamp_complex(&result_cv);
-
-                let probs = ops::measure_complex(&result_cv);
-                let value = result_cv.to_real();
-                let value_index = ops::argmax(&probs);
-
-                let label = tapestry.nodes.get(&output_name)
-                    .and_then(|n| n.labels.get(&value_index).cloned());
-
-                let post_density = DensityMatrix::from_pure_state(&result_cv);
-                let q_phi = density::phi_from_purity(&post_density);
-                let q_omega = density::omega_from_coherence(&post_density);
-
-                let final_density = if let Some(ref kraus) = tapestry.kraus_operators {
-                    density::apply_channel(&post_density, kraus)
-                } else {
-                    post_density
-                };
-
-                return Ok(Observation {
-                    value,
-                    value_index,
-                    value_label: label,
-                    omega,
-                    phi,
-                    probabilities: probs,
-                    tapestry_name: tapestry.name.clone(),
-                    observation_count: 1,
-                    density_matrix: Some(final_density),
-                    quantum_phi: Some(q_phi),
-                    quantum_omega: Some(q_omega),
-                    n_basins: None,
-                    chosen_basin: None,
-                });
-            }
-        }
-    }
-
-    // === CLASSICAL FAST PATH ===
-    if let Some(ref matrix) = tapestry.composed_matrix {
-        if let Some((_, input_fv)) = inputs.first() {
-            let value = ops::transform(input_fv, matrix)?;
-            let probs = ops::measure(&value);
-            let value_index = ops::argmax(&probs);
-
-            let label = tapestry.nodes.get(&output_name)
-                .and_then(|n| n.labels.get(&value_index).cloned());
-
-            return Ok(Observation {
-                value,
-                value_index,
-                value_label: label,
-                omega,
-                phi,
-                probabilities: probs,
-                tapestry_name: tapestry.name.clone(),
-                observation_count: 1,
-                density_matrix: None,
-                quantum_phi: None,
-                quantum_omega: None,
-                n_basins: None,
-                chosen_basin: None,
-            });
-        }
-    }
-
-    // === FALLBACK ===
-    let output_node = tapestry.nodes.get(&output_name)
-        .ok_or_else(|| AxolError::Observatory(format!("Output '{}' not found", output_name)))?;
-
-    let probs = ops::measure(&output_node.amplitudes);
-    let value_index = ops::argmax(&probs);
-    let label = output_node.labels.get(&value_index).cloned();
-
-    Ok(Observation {
-        value: output_node.amplitudes.clone(),
-        value_index,
-        value_label: label,
-        omega,
-        phi,
-        probabilities: probs,
-        tapestry_name: tapestry.name.clone(),
-        observation_count: 1,
-        density_matrix: None,
-        quantum_phi: None,
-        quantum_omega: None,
-        n_basins: None,
-        chosen_basin: None,
-    })
-}
-
-// ---------------------------------------------------------------------------
-// Quantum basin observation
-// ---------------------------------------------------------------------------
-
-/// Observe using basin-based quantum superposition.
-///
-/// 1. Run short dynamics from input → find where it goes
-/// 2. Compute proximity to each basin
-/// 3. Create superposition: amplitude ∝ 1/(1+dist), phase from basin
-/// 4. Apply interference between basin components
-/// 5. Born rule → collapse
-fn observe_quantum_basins(
-    tapestry: &Tapestry,
-    chaos: &ChaosEngine,
-    basins: &[Basin],
-    input: &FloatVec,
-    output_name: &str,
-    omega: f64,
-    phi: f64,
-) -> Result<Observation> {
-    let dim = input.dim();
-
-    // 1. Map input to dynamics range [0,1] and run short dynamics
-    let input_normalized: Vec<f64> = input.data.iter()
-        .map(|&v| {
-            let v64 = v as f64;
-            // Sigmoid-like mapping to (0,1)
-            1.0 / (1.0 + (-v64).exp())
-        })
-        .collect();
-
-    let endpoint = chaos.short_run(&input_normalized, 30);
-
-    // 2. Compute distance to each basin
-    let mut basin_distances: Vec<(usize, f64)> = basins.iter().enumerate()
-        .map(|(i, b)| {
-            let dist: f64 = b.center.iter().zip(endpoint.iter())
-                .map(|(a, e)| (a - e).powi(2))
-                .sum::<f64>()
-                .sqrt();
-            (i, dist)
-        })
-        .collect();
-    basin_distances.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-
-    // 3. Create quantum superposition across basins
-    let mut cv_data = vec![Complex64::new(0.0, 0.0); dim];
-
-    for (basin_idx, dist) in &basin_distances {
-        let basin = &basins[*basin_idx];
-        // Amplitude: closer basin → higher amplitude
-        let amplitude = 1.0 / (1.0 + dist * 5.0);
-        let phase = basin.phase;
-
-        let component = Complex64::from_polar(amplitude, phase);
-
-        // Each basin contributes to the state vector based on its center
-        for d in 0..dim.min(basin.center.len()) {
-            cv_data[d] += component * Complex64::new(basin.center[d], 0.0);
-        }
-    }
-
-    // Normalize
-    let norm: f64 = cv_data.iter().map(|c| c.norm_sqr()).sum::<f64>().sqrt();
-    if norm > 1e-15 {
-        for c in cv_data.iter_mut() {
-            *c /= norm;
-        }
-    }
-    let cv = ComplexVec::new(cv_data);
-
-    // 4. Apply composed matrix transform (dynamics-derived)
-    let result_cv = if let Some(ref matrix) = tapestry.composed_matrix {
-        let transformed = ops::transform_complex(&cv, matrix)?;
-        clamp_complex(&transformed)
-    } else {
-        cv.clone()
-    };
-
-    // 5. Born rule measurement
-    let probs = ops::measure_complex(&result_cv);
-    let value = result_cv.to_real();
-    let value_index = ops::argmax(&probs);
-
-    let label = tapestry.nodes.get(output_name)
+    let label = tapestry.nodes.get(&output_name)
         .and_then(|n| n.labels.get(&value_index).cloned());
 
-    // Density matrix and quantum metrics
-    let post_density = DensityMatrix::from_pure_state(&result_cv);
-    let q_phi = density::phi_from_purity(&post_density);
-    let q_omega = density::omega_from_coherence(&post_density);
-
-    let final_density = if let Some(ref kraus) = tapestry.kraus_operators {
-        density::apply_channel(&post_density, kraus)
-    } else {
-        post_density
-    };
-
-    let chosen = basin_distances.first().map(|(i, _)| *i);
+    // Quantum metrics from density matrix
+    let rho = wave.to_density();
+    let q_phi = density::phi_from_purity(&rho);
+    let q_omega = density::omega_from_coherence(&rho);
 
     Ok(Observation {
-        value,
+        value: wave.to_float_vec(),
         value_index,
         value_label: label,
         omega,
         phi,
-        probabilities: probs,
+        probabilities: probs_f32,
         tapestry_name: tapestry.name.clone(),
         observation_count: 1,
-        density_matrix: Some(final_density),
+        density_matrix: Some(rho),
         quantum_phi: Some(q_phi),
         quantum_omega: Some(q_omega),
-        n_basins: Some(basins.len()),
-        chosen_basin: chosen,
+        n_basins: Some(tapestry.basin_structure.n_basins),
+        chosen_basin: None,
+        basin_weights: None,
+        collapse_metrics: Some(collapsed_wave.metrics),
+        wave: Some(wave.clone()),
     })
 }
 
 // ---------------------------------------------------------------------------
-// reobserve()
+// reobserve() — backward-compatible multi-observation
 // ---------------------------------------------------------------------------
 
 pub fn reobserve(tapestry: &Tapestry, inputs: &[(&str, &FloatVec)], count: usize) -> Result<Observation> {
@@ -339,6 +338,9 @@ pub fn reobserve(tapestry: &Tapestry, inputs: &[(&str, &FloatVec)], count: usize
         quantum_omega: last.quantum_omega,
         n_basins: last.n_basins,
         chosen_basin: last.chosen_basin,
+        basin_weights: last.basin_weights,
+        collapse_metrics: None,
+        wave: last.wave,
     })
 }
 
@@ -346,44 +348,46 @@ pub fn reobserve(tapestry: &Tapestry, inputs: &[(&str, &FloatVec)], count: usize
 // observe_evolve() — measurement feedback loop
 // ---------------------------------------------------------------------------
 
-/// Observe then feed the result back into the dynamics.
-/// Each iteration adjusts the chaos parameter based on observed quality.
-/// This implements: measure → adjust → re-observe → converge.
 pub fn observe_evolve(
     tapestry: &mut Tapestry,
     inputs: &[(&str, &FloatVec)],
     iterations: usize,
 ) -> Result<Observation> {
+    use crate::weaver::build_basin_structure;
+
     let mut last_obs = observe(tapestry, inputs)?;
 
     for _ in 1..iterations {
-        // Feedback: adjust chaos engine based on observation quality
-        if let Some(ref mut chaos) = tapestry.chaos_engine {
-            let observed_omega = tapestry.global_attractor.omega();
-            let target_omega = tapestry.report.target_omega;
+        // When basin structure is user-defined (define_basins/from_basins),
+        // skip chaos feedback entirely — the structure is fixed by design.
+        if !tapestry.preserve_basins {
+            if let Some(ref mut chaos) = tapestry.chaos_engine {
+                let observed_omega = tapestry.basin_structure.omega();
+                let target_omega = tapestry.report.target_omega;
 
-            // If observed omega is below target → reduce chaos (lower r)
-            // If above target → increase chaos slightly (raise r)
-            if observed_omega < target_omega * 0.8 {
-                chaos.r = (chaos.r - 0.02).clamp(3.0, 4.0);
-            } else if observed_omega > target_omega * 1.2 {
-                chaos.r = (chaos.r + 0.01).clamp(3.0, 4.0);
-            }
+                if observed_omega < target_omega * 0.8 {
+                    chaos.r = (chaos.r - 0.02).clamp(3.0, 4.0);
+                } else if observed_omega > target_omega * 1.2 {
+                    chaos.r = (chaos.r + 0.01).clamp(3.0, 4.0);
+                }
 
-            // Re-run dynamics with adjusted parameters
-            let new_result = chaos.find_attractor(42, 200, 300);
-            let new_matrix = chaos.extract_matrix(&new_result);
+                let new_result = chaos.find_attractor(42, 200, 300);
+                let new_matrix = chaos.extract_matrix(&new_result);
 
-            // Update tapestry
-            tapestry.composed_matrix = Some(new_matrix.clone());
-            tapestry.global_attractor.max_lyapunov = new_result.max_lyapunov;
-            tapestry.global_attractor.fractal_dim = new_result.fractal_dim;
-            tapestry.global_attractor.lyapunov_spectrum = new_result.lyapunov_spectrum.clone();
-            tapestry.global_attractor.trajectory_matrix = new_matrix;
+                tapestry.composed_matrix = Some(new_matrix.clone());
+                tapestry.global_attractor.max_lyapunov = new_result.max_lyapunov;
+                tapestry.global_attractor.fractal_dim = new_result.fractal_dim;
+                tapestry.global_attractor.lyapunov_spectrum = new_result.lyapunov_spectrum.clone();
+                tapestry.global_attractor.trajectory_matrix = new_matrix.clone();
 
-            // Re-detect basins
-            if tapestry.quantum {
-                tapestry.basins = Some(chaos.find_basins(100, 200, 42));
+                let new_basins = chaos.find_basins(100, 200, 42);
+                tapestry.basin_structure = build_basin_structure(
+                    &new_basins,
+                    tapestry.basin_structure.dim,
+                    new_result.fractal_dim,
+                    Some(new_matrix),
+                );
+                tapestry.basins = Some(new_basins);
             }
         }
 
@@ -392,18 +396,4 @@ pub fn observe_evolve(
 
     last_obs.observation_count = iterations;
     Ok(last_obs)
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-fn clamp_complex(cv: &ComplexVec) -> ComplexVec {
-    ComplexVec::new(
-        cv.data.iter().map(|c| {
-            let re = if c.re.is_nan() { 0.0 } else { c.re.clamp(-1e6, 1e6) };
-            let im = if c.im.is_nan() { 0.0 } else { c.im.clamp(-1e6, 1e6) };
-            Complex64::new(re, im)
-        }).collect()
-    )
 }

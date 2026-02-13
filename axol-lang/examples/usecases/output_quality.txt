@@ -1,0 +1,58 @@
+[define_basins] 'encoder_basins': dim=8 basins=3 omega=0.0628 phi=0.8421 entropy=1.0297
+[define_basins] 'processor_basins': dim=8 basins=3 omega=0.0287 phi=0.8511 entropy=1.0671
+[define_basins] 'decoder_basins': dim=8 basins=3 omega=0.0165 phi=0.8602 entropy=1.0805
+[declare] 'encoder': 1 inputs, 1 relations, 1 outputs
+[declare] 'processor': 1 inputs, 1 relations, 1 outputs
+[declare] 'decoder': 1 inputs, 1 relations, 1 outputs
+[weave] 'encoder': quantum=true seed=42 omega=0.0628 phi=0.8421 basins=3 (11.095ms)
+  density: purity=1.0000 dim=8
+[weave] 'processor': quantum=true seed=43 omega=0.0287 phi=0.8511 basins=3 (10.606ms)
+  density: purity=1.0000 dim=8
+[weave] 'decoder': quantum=true seed=44 omega=0.0165 phi=0.8602 basins=3 (9.746ms)
+  density: purity=1.0000 dim=8
+[compose] 'quality_pipeline': 3 stages, matrix 8x8 (0.008ms)
+[observe] 'encoder': idx=1 label=None omega=0.0628 phi=0.8421 (30.8us)
+  probs: [1]=0.1603, [0]=0.1566, [7]=0.1566, [4]=0.1328, [2]=0.1255
+  quantum: phi=1.0000 omega=0.9798
+  density: purity=1.0000
+[observe] 'encoder': idx=1 label=None omega=0.0628 phi=0.8421 (4.6us)
+  probs: [1]=0.1483, [0]=0.1470, [7]=0.1470, [5]=0.1246, [4]=0.1174
+  quantum: phi=1.0000 omega=0.9937
+  density: purity=1.0000
+[observe] 'encoder': idx=5 label=None omega=0.0628 phi=0.8421 (3.6us)
+  probs: [5]=0.2204, [6]=0.1886, [0]=0.1203, [7]=0.1203, [1]=0.1166
+  quantum: phi=1.0000 omega=0.9583
+  density: purity=1.0000
+[wave] 'good_item' = gaze('encoder') -> Wave(dim=8, t=0.00, [0.157, 0.160, 0.125, 0.113, 0.133, 0.084, 0.071, 0.157]) (C=0, 858.5us)
+[wave] 'surface_defect' = gaze('encoder') -> Wave(dim=8, t=0.00, [0.143, 0.143, 0.105, 0.097, 0.111, 0.140, 0.118, 0.143]) (C=0, 28.1us)
+[wave] 'structural_defect' = gaze('encoder') -> Wave(dim=8, t=0.00, [0.142, 0.142, 0.105, 0.096, 0.109, 0.143, 0.121, 0.142]) (C=0, 16.8us)
+[wave] 'dual_defect' = gaze('encoder') -> Wave(dim=8, t=0.00, [0.121, 0.117, 0.080, 0.075, 0.081, 0.219, 0.187, 0.121]) (C=0, 20.2us)
+[gaze] 'good_item': t=0.000 probs: [1]=0.1603, [0]=0.1566, [7]=0.1566, [4]=0.1328, [2]=0.1255 (C=0)
+[gaze] 'surface_defect': t=0.000 probs: [1]=0.1433, [7]=0.1430, [0]=0.1430, [5]=0.1395, [6]=0.1185 (C=0)
+[gaze] 'structural_defect': t=0.000 probs: [5]=0.1426, [0]=0.1422, [7]=0.1422, [1]=0.1421, [6]=0.1212 (C=0)
+[gaze] 'dual_defect': t=0.000 probs: [5]=0.2191, [6]=0.1874, [0]=0.1207, [7]=0.1207, [1]=0.1171 (C=0)
+[rel] 'co_occurrence' = surface_defect <-> structural_defect negativity=0.0000 (132.1us)
+  probs: [0]=0.1593, [1]=0.1596, [2]=0.0864, [3]=0.0726, [4]=0.0946
+[observe] rel 'co_occurrence': idx=1 negativity=0.0000
+  probs: [0]=0.1593, [1]=0.1596, [2]=0.0864, [3]=0.0726, [4]=0.0946
+[rel] 'surface_vs_good' = surface_defect >< good_item negativity=0.0083 (66.9us)
+  probs: [0]=0.0308, [1]=0.0417, [2]=0.0548, [3]=0.0421, [4]=0.0728
+[rel] 'structural_vs_good' = structural_defect >< good_item negativity=0.0092 (60.2us)
+  probs: [0]=0.0212, [1]=0.0317, [2]=0.0493, [3]=0.0366, [4]=0.0649
+[observe] rel 'surface_vs_good': idx=5 negativity=0.0083
+  probs: [0]=0.0308, [1]=0.0417, [2]=0.0548, [3]=0.0421, [4]=0.0728
+[observe] rel 'structural_vs_good': idx=5 negativity=0.0092
+  probs: [0]=0.0212, [1]=0.0317, [2]=0.0493, [3]=0.0366, [4]=0.0649
+[wave] 'encoder_pass' = gaze('processor') -> Wave(dim=8, t=0.00, [0.178, 0.147, 0.137, 0.128, 0.133, 0.051, 0.047, 0.178]) (C=0, 20.6us)
+[wave] 'processor_reject' = gaze('processor') -> Wave(dim=8, t=0.00, [0.152, 0.120, 0.102, 0.098, 0.096, 0.146, 0.132, 0.152]) (C=0, 15.2us)
+[resolve] encoder_pass, processor_reject interfere with interfere: t=0.000 (2.9us)
+  probs: [0]=0.1675, [1]=0.1352, [2]=0.1207, [3]=0.1143, [4]=0.1155
+[resolve] encoder_pass, processor_reject superpose with superpose: t=0.032 (16.8us)
+  probs: [0]=0.1653, [1]=0.1337, [2]=0.1196, [3]=0.1131, [4]=0.1148
+[iterate] 'encoder': iters=4 converged=true delta=0.000000 (0.040ms)
+  probs: [1]=0.1483, [0]=0.1470, [7]=0.1470, [5]=0.1246, [4]=0.1174
+  quantum: phi=1.0000 omega=0.9937
+  density: purity=1.0000
+[confident] 'decoder': idx=7 confidence=0.8389 obs=20 early_stopped=false (0.095ms)
+  avg_probs: [0]=0.1561, [1]=0.1418, [2]=0.1299, [3]=0.1250, [4]=0.1370
+--- Total: 33.197ms ---

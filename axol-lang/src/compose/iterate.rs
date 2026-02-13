@@ -21,6 +21,8 @@ pub enum ConvergenceCriterion {
     PhiTarget,
     /// Stop when density matrix purity exceeds threshold.
     PurityThreshold,
+    /// Stop when basin TV distance from target distribution < threshold.
+    BasinDistribution(f64),
 }
 
 /// Configuration for the iterate loop.
@@ -130,6 +132,21 @@ pub fn iterate(
                         final_delta = 1.0;
                     }
                 }
+                ConvergenceCriterion::BasinDistribution(threshold) => {
+                    // TV distance between current basin volumes and uniform target
+                    let n = tapestry.basin_structure.n_basins.max(1);
+                    let uniform = crate::types::BasinStructure::from_direct(
+                        tapestry.basin_structure.dim,
+                        tapestry.basin_structure.centroids.clone(),
+                        vec![1.0 / n as f64; n],
+                        tapestry.basin_structure.fractal_dim,
+                    );
+                    let tv = tapestry.basin_structure.tv_distance(&uniform);
+                    final_delta = tv;
+                    if tv < *threshold {
+                        converged = true;
+                    }
+                }
             }
         }
 
@@ -167,8 +184,16 @@ fn max_prob_delta(a: &FloatVec, b: &FloatVec) -> f64 {
 
 /// Apply feedback to adjust chaos engine based on quality mismatch.
 fn apply_feedback(tapestry: &mut Tapestry, strength: f64) {
+    // When basin structure is user-defined (define_basins/from_basins),
+    // skip chaos feedback entirely — the structure is fixed by design.
+    if tapestry.preserve_basins {
+        return;
+    }
+
+    use crate::weaver::build_basin_structure;
+
     if let Some(ref mut chaos) = tapestry.chaos_engine {
-        let observed_omega = tapestry.global_attractor.omega();
+        let observed_omega = tapestry.basin_structure.omega();
         let target_omega = tapestry.report.target_omega;
 
         let delta_r = if observed_omega < target_omega * 0.8 {
@@ -189,10 +214,16 @@ fn apply_feedback(tapestry: &mut Tapestry, strength: f64) {
         tapestry.global_attractor.max_lyapunov = new_result.max_lyapunov;
         tapestry.global_attractor.fractal_dim = new_result.fractal_dim;
         tapestry.global_attractor.lyapunov_spectrum = new_result.lyapunov_spectrum.clone();
-        tapestry.global_attractor.trajectory_matrix = new_matrix;
+        tapestry.global_attractor.trajectory_matrix = new_matrix.clone();
 
-        if tapestry.quantum {
-            tapestry.basins = Some(chaos.find_basins(100, 200, 42));
-        }
+        // Re-detect basins and rebuild BasinStructure
+        let new_basins = chaos.find_basins(100, 200, 42);
+        tapestry.basin_structure = build_basin_structure(
+            &new_basins,
+            tapestry.basin_structure.dim,
+            new_result.fractal_dim,
+            Some(new_matrix),
+        );
+        tapestry.basins = Some(new_basins);
     }
 }

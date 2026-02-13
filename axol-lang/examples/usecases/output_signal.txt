@@ -1,0 +1,48 @@
+[learn] 'waveform': accuracy=50.0% r=4.0000 eps=0.0117 evals=4850 (24067.6ms)
+[observe] 'waveform': idx=0 label=None omega=0.9192 phi=0.6387 (5.0us)
+  probs: [0]=0.5348, [1]=0.3498, [7]=0.0592, [2]=0.0224, [6]=0.0214
+  quantum: phi=1.0000 omega=0.4403
+  density: purity=1.0000
+[observe] 'waveform': idx=0 label=None omega=0.9192 phi=0.6387 (4.2us)
+  probs: [0]=0.5273, [1]=0.3250, [7]=0.0949, [5]=0.0343, [3]=0.0135
+  quantum: phi=1.0000 omega=0.4304
+  density: purity=1.0000
+[observe] 'waveform': idx=2 label=None omega=0.9192 phi=0.6387 (3.9us)
+  probs: [2]=0.2648, [6]=0.2064, [4]=0.1918, [3]=0.1363, [5]=0.0781
+  quantum: phi=1.0000 omega=0.8625
+  density: purity=1.0000
+[observe] 'waveform': idx=2 label=None omega=0.9192 phi=0.6387 (3.9us)
+  probs: [2]=0.2448, [6]=0.1933, [4]=0.1659, [0]=0.1160, [3]=0.1106
+  quantum: phi=1.0000 omega=0.8706
+  density: purity=1.0000
+[define_basins] 'waveform_templates': dim=8 basins=4 omega=0.0000 phi=0.8333 entropy=1.3863
+[declare] 'template_matcher': 1 inputs, 1 relations, 1 outputs
+[weave] 'template_matcher': quantum=true seed=42 omega=0.0000 phi=0.8333 basins=4 (12.686ms)
+  density: purity=1.0000 dim=8
+[observe] 'template_matcher': idx=0 label=None omega=0.0000 phi=0.8333 (9.2us)
+  probs: [0]=0.1834, [1]=0.1703, [6]=0.1410, [7]=0.1366, [5]=0.1255
+  quantum: phi=1.0000 omega=0.9595
+  density: purity=1.0000
+[observe] 'template_matcher': idx=0 label=None omega=0.0000 phi=0.8333 (3.6us)
+  probs: [0]=0.1929, [1]=0.1818, [2]=0.1324, [6]=0.1302, [7]=0.1275
+  quantum: phi=1.0000 omega=0.9583
+  density: purity=1.0000
+[wave] 'ambig_signal' = gaze('template_matcher') -> Wave(dim=8, t=0.00, [0.153, 0.130, 0.079, 0.026, 0.116, 0.161, 0.172, 0.164]) (C=0, 1780.6us)
+[wave] 'sine_template' = gaze('template_matcher') -> Wave(dim=8, t=0.00, [0.186, 0.174, 0.123, 0.046, 0.077, 0.123, 0.138, 0.133]) (C=0, 43.6us)
+[wave] 'triangle_template' = gaze('template_matcher') -> Wave(dim=8, t=0.00, [0.145, 0.120, 0.071, 0.022, 0.124, 0.168, 0.179, 0.171]) (C=0, 22.8us)
+[rel] 'sine_match' = ambig_signal <-> sine_template negativity=0.0112 (131.0us)
+  probs: [0]=0.1700, [1]=0.1517, [2]=0.1008, [3]=0.0346, [4]=0.0961
+[rel] 'triangle_match' = ambig_signal <-> triangle_template negativity=0.0005 (82.8us)
+  probs: [0]=0.1492, [1]=0.1247, [2]=0.0749, [3]=0.0238, [4]=0.1202
+[gaze] 'ambig_signal': t=0.000 probs: [6]=0.1718, [7]=0.1639, [5]=0.1607, [0]=0.1532, [1]=0.1295 (C=0)
+[observe] rel 'sine_match': idx=0 negativity=0.0112
+  probs: [0]=0.1700, [1]=0.1517, [2]=0.1008, [3]=0.0346, [4]=0.0961
+[observe] rel 'triangle_match': idx=6 negativity=0.0005
+  probs: [0]=0.1492, [1]=0.1247, [2]=0.0749, [3]=0.0238, [4]=0.1202
+[resolve] ambig_signal, sine_template interfere with interfere: t=0.000 (2.8us)
+  probs: [0]=0.1702, [1]=0.1518, [2]=0.1007, [3]=0.0343, [4]=0.0960
+[resolve] ambig_signal, triangle_template interfere with interfere: t=0.000 (0.3us)
+  probs: [0]=0.1492, [1]=0.1247, [2]=0.0749, [3]=0.0238, [4]=0.1202
+[confident] 'template_matcher': idx=6 confidence=0.8389 obs=20 early_stopped=false (0.102ms)
+  avg_probs: [0]=0.1532, [1]=0.1295, [2]=0.0793, [3]=0.0255, [4]=0.1161
+--- Total: 24082.782ms ---

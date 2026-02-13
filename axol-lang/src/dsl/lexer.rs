@@ -40,6 +40,24 @@ pub enum Token {
     Else,
     Design,
     Learn,
+    DefineBasins,
+    FromBasins,
+
+    // Wave keywords
+    WaveKw,
+    Focus,
+    Gaze,
+    Glimpse,
+
+    // Relation-first (v2) keywords
+    Rel,
+    Expect,
+    Strength,
+    Widen,
+    Resolve,
+    With,
+    Interfere,
+    Superpose,
 
     // Literals
     Ident(String),
@@ -55,8 +73,10 @@ pub enum Token {
     LBracket,   // [
     RBracket,   // ]
     Arrow,      // <-
+    Bidir,      // <->
     Comma,      // ,
     Equals,     // =
+    ConflictOp, // ><
     Relation(String), // <~>, <+>, <*>, <!>, <?>
 
     // Control
@@ -101,6 +121,10 @@ impl Lexer {
                 ']' => { self.tokens.push(Token::RBracket); self.pos += 1; }
                 ',' => { self.tokens.push(Token::Comma); self.pos += 1; }
                 '=' => { self.tokens.push(Token::Equals); self.pos += 1; }
+                '>' if self.input.get(self.pos + 1) == Some(&'<') => {
+                    self.tokens.push(Token::ConflictOp);
+                    self.pos += 2;
+                }
                 '<' => { self.read_angle(); }
                 '"' => { self.read_string(); }
                 _ if ch.is_ascii_digit() || (ch == '-' && self.peek_next_digit()) => {
@@ -137,12 +161,18 @@ impl Lexer {
     }
 
     fn read_angle(&mut self) {
-        // Could be <-, <~>, <+>, <*>, <!>, <?>
-        let start = self.pos;
+        // Could be <-, <->, <~>, <+>, <*>, <!>, <?>
+        let _start = self.pos;
         self.pos += 1; // skip '<'
 
         if self.pos < self.input.len() && self.input[self.pos] == '-' {
             self.pos += 1;
+            // Check for <-> (bidir)
+            if self.pos < self.input.len() && self.input[self.pos] == '>' {
+                self.pos += 1;
+                self.tokens.push(Token::Bidir);
+                return;
+            }
             self.tokens.push(Token::Arrow);
             return;
         }
@@ -221,6 +251,20 @@ impl Lexer {
             "else" => Token::Else,
             "design" => Token::Design,
             "learn" => Token::Learn,
+            "define_basins" => Token::DefineBasins,
+            "from_basins" => Token::FromBasins,
+            "wave" => Token::WaveKw,
+            "focus" => Token::Focus,
+            "gaze" => Token::Gaze,
+            "glimpse" => Token::Glimpse,
+            "rel" => Token::Rel,
+            "expect" => Token::Expect,
+            "strength" => Token::Strength,
+            "widen" => Token::Widen,
+            "resolve" => Token::Resolve,
+            "with" => Token::With,
+            "interfere" => Token::Interfere,
+            "superpose" => Token::Superpose,
             "true" => Token::Int(1),
             "false" => Token::Int(0),
             _ => Token::Ident(word),

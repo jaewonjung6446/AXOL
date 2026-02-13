@@ -1,0 +1,40 @@
+[learn] 'sentiment': accuracy=33.3% r=3.7906 eps=0.3402 evals=4496 (18570.7ms)
+[observe] 'sentiment': idx=0 label=None omega=0.2122 phi=0.8869 (3.6us)
+  probs: [0]=0.5661, [1]=0.4044, [2]=0.0140, [4]=0.0071, [5]=0.0057
+  quantum: phi=1.0000 omega=0.2846
+  density: purity=1.0000
+[observe] 'sentiment': idx=0 label=None omega=0.2122 phi=0.8869 (3.0us)
+  probs: [0]=0.5273, [1]=0.4441, [2]=0.0141, [5]=0.0065, [3]=0.0039
+  quantum: phi=1.0000 omega=0.2856
+  density: purity=1.0000
+[observe] 'sentiment': idx=0 label=None omega=0.2122 phi=0.8869 (2.5us)
+  probs: [0]=0.5595, [1]=0.4131, [2]=0.0136, [4]=0.0082, [3]=0.0028
+  quantum: phi=1.0000 omega=0.2797
+  density: purity=1.0000
+[define_basins] 'sentiment_space': dim=8 basins=3 omega=0.0023 phi=0.8421 entropy=1.0961
+[declare] 'sentiment_basin': 2 inputs, 1 relations, 1 outputs
+[weave] 'sentiment_basin': quantum=true seed=42 omega=0.0023 phi=0.8421 basins=3 (11.675ms)
+  density: purity=1.0000 dim=8
+[wave] 'sarcastic' = gaze('sentiment_basin') -> Wave(dim=8, t=0.00, [0.190, 0.245, 0.143, 0.059, 0.220, 0.094, 0.002, 0.046]) (C=0, 980.6us)
+[wave] 'genuinely_positive' = gaze('sentiment_basin') -> Wave(dim=8, t=0.00, [0.219, 0.222, 0.147, 0.053, 0.220, 0.099, 0.001, 0.039]) (C=0, 58.2us)
+[rel] 'sarcasm_detector' = sarcastic >< genuinely_positive negativity=0.0014 (114.1us)
+  probs: [0]=0.1375, [1]=0.0887, [2]=0.1882, [3]=0.0323, [4]=0.2600
+[gaze] 'sarcastic': t=0.000 probs: [1]=0.2452, [4]=0.2201, [0]=0.1905, [2]=0.1429, [5]=0.0939 (C=0)
+[gaze] 'genuinely_positive': t=0.000 probs: [1]=0.2218, [4]=0.2202, [0]=0.2189, [2]=0.1473, [5]=0.0994 (C=0)
+[observe] rel 'sarcasm_detector': idx=4 negativity=0.0014
+  probs: [0]=0.1375, [1]=0.0887, [2]=0.1882, [3]=0.0323, [4]=0.2600
+[expect] 'review_prior' = [0.50, 0.30, 0.20, 0.00, 0.00] strength=0.70 (landscape dim=8)
+[observe] rel 'sarcasm_detector' with 'review_prior': idx=4 alignment=0.6193 negativity_delta=-0.0003 coherences=28 (33.8us)
+  probs: [0]=0.1375, [1]=0.0887, [2]=0.1882, [3]=0.0323, [4]=0.2600
+  negativity: 0.0011
+[widen] rel 'sarcasm_detector' amount=0.30: t=0.211->0.147 negativity=0.0011->0.1511 (105.7us)
+[observe] rel 'sarcasm_detector': idx=4 negativity=0.1511
+  probs: [0]=0.1338, [1]=0.0996, [2]=0.1692, [3]=0.0601, [4]=0.2195
+[wave] 'negative_review' = gaze('sentiment_basin') -> Wave(dim=8, t=0.00, [0.163, 0.267, 0.142, 0.065, 0.224, 0.091, 0.005, 0.042]) (C=0, 33.6us)
+[rel] 'negative_consensus' = sarcastic <-> negative_review negativity=0.0012 (58.9us)
+  probs: [0]=0.1767, [1]=0.2566, [2]=0.1423, [3]=0.0621, [4]=0.2219
+[observe] rel 'negative_consensus': idx=1 negativity=0.0012
+  probs: [0]=0.1767, [1]=0.2566, [2]=0.1423, [3]=0.0621, [4]=0.2219
+[resolve] sarcastic, negative_review interfere with interfere: t=0.000 (0.2us)
+  probs: [0]=0.1767, [1]=0.2567, [2]=0.1423, [3]=0.0621, [4]=0.2219
+--- Total: 18583.972ms ---

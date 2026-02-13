@@ -18,7 +18,7 @@ use rand_chacha::ChaCha8Rng;
 use std::collections::HashMap;
 
 use crate::dynamics::ChaosEngine;
-use crate::weaver::{Tapestry, Attractor, TapestryNode, WeaverReport};
+use crate::weaver::{Tapestry, Attractor, TapestryNode, WeaverReport, build_basin_structure};
 use crate::types::*;
 use crate::declare::RelationKind;
 use crate::observatory;
@@ -523,11 +523,9 @@ pub fn build_tapestry_from_engine(
         trajectory_matrix: matrix.clone(),
     };
 
-    let basins = if quantum {
-        Some(engine.find_basins(100, 100, seed))
-    } else {
-        None
-    };
+    // Always detect basins and build BasinStructure
+    let basins = engine.find_basins(100, 100, seed);
+    let basin_structure = build_basin_structure(&basins, dim, result.fractal_dim, Some(matrix.clone()));
 
     // Nodes
     let mut nodes = HashMap::new();
@@ -552,15 +550,20 @@ pub fn build_tapestry_from_engine(
         depth: 1,
     });
 
+    let estimated_omega = basin_structure.omega();
+    let estimated_phi = basin_structure.phi();
+
     let report = WeaverReport {
-        target_omega: global_attractor.omega(),
-        target_phi: global_attractor.phi(),
-        estimated_omega: global_attractor.omega(),
-        estimated_phi: global_attractor.phi(),
+        target_omega: estimated_omega,
+        target_phi: estimated_phi,
+        estimated_omega,
+        estimated_phi,
         max_lyapunov: result.max_lyapunov,
         fractal_dim: result.fractal_dim,
         feasible: true,
         warnings: Vec::new(),
+        shannon_entropy: basin_structure.shannon_entropy(),
+        n_basins: basin_structure.n_basins,
     };
 
     Ok(Tapestry {
@@ -575,6 +578,9 @@ pub fn build_tapestry_from_engine(
         density_matrix: None,
         kraus_operators: None,
         chaos_engine: Some(engine.clone()),
-        basins,
+        basins: Some(basins),
+        basin_structure,
+        interference_rules: Vec::new(),
+        preserve_basins: false,
     })
 }

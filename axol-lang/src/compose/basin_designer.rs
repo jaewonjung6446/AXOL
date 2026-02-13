@@ -4,6 +4,8 @@
 //! Phase 2: Nelder-Mead refinement on top candidates
 
 use crate::dynamics::{ChaosEngine, Basin};
+use crate::types::BasinStructure;
+use crate::weaver::build_basin_structure;
 use crate::errors::{AxolError, Result};
 
 /// Specification for desired basin structure.
@@ -44,6 +46,7 @@ impl Default for BasinDesignConfig {
 pub struct BasinDesign {
     pub engine: ChaosEngine,
     pub basins: Vec<Basin>,
+    pub basin_structure: BasinStructure,
     pub score: f64,
     pub iterations: usize,
 }
@@ -145,9 +148,12 @@ pub fn design_basins(spec: &BasinSpec, config: &BasinDesignConfig) -> Result<Bas
 
     let engine = best_engine.ok_or_else(|| AxolError::Compose("No valid basin design found".into()))?;
 
+    let basin_structure = build_basin_structure(&best_basins, spec.dim, 1.0, None);
+
     Ok(BasinDesign {
         engine,
         basins: best_basins,
+        basin_structure,
         score: best_score,
         iterations: total_iterations,
     })

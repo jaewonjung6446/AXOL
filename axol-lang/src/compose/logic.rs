@@ -1,10 +1,12 @@
-//! Logic gates — AND, OR, NOT, IF-THEN-ELSE (dim=2 boolean encoding).
+//! Logic gates — AND, OR, NOT, IF-THEN-ELSE using Wave variables.
 //!
 //! Boolean encoding: FALSE = [0.9, 0.1], TRUE = [0.1, 0.9]
-//! Uses dim=2 tapestries for gate operations.
+//! Gates compose Waves using interference patterns instead of
+//! direct amplitude manipulation.
 
 use crate::types::*;
 use crate::ops;
+use crate::wave::{Wave, InterferencePattern};
 use crate::declare::*;
 use crate::weaver;
 use crate::observatory::{self, Observation};
@@ -23,16 +25,22 @@ pub fn encode_bool(value: bool) -> FloatVec {
     }
 }
 
+/// Encode a boolean into a Wave.
+pub fn encode_bool_wave(value: bool) -> Wave {
+    Wave::from_classical(&encode_bool(value))
+}
+
+/// Decode a Wave to a boolean (dominant index == 1 → TRUE).
+pub fn decode_bool_wave(wave: &Wave) -> bool {
+    wave.dominant() == 1
+}
+
 /// Decode an Observation back to a boolean.
-///
-/// value_index == 1 → TRUE, else FALSE.
 pub fn decode_bool(obs: &Observation) -> bool {
     obs.value_index == 1
 }
 
-/// NOT gate: swap matrix [[0,1],[1,0]].
-///
-/// Trivial — no chaos needed, pure matrix swap.
+/// NOT gate: swap amplitudes (destructive interference with self-inverse).
 pub fn gate_not(input: &FloatVec) -> Result<Observation> {
     if input.dim() != 2 {
         return Err(AxolError::Compose(format!(
@@ -42,12 +50,12 @@ pub fn gate_not(input: &FloatVec) -> Result<Observation> {
 
     // Swap matrix
     let swap = TransMatrix::new(vec![0.0, 1.0, 1.0, 0.0], 2, 2);
-    let value = ops::transform(input, &swap)?;
-    let probs = ops::measure(&value);
-    let value_index = ops::argmax(&probs);
+    let wave = Wave::from_classical(input).transform(&swap)?;
+    let (value_index, collapsed) = wave.observe();
+    let probs = FloatVec::new(wave.probabilities().iter().map(|&p| p as f32).collect());
 
     Ok(Observation {
-        value,
+        value: wave.to_float_vec(),
         value_index,
         value_label: None,
         omega: 1.0,
@@ -60,30 +68,38 @@ pub fn gate_not(input: &FloatVec) -> Result<Observation> {
         quantum_omega: None,
         n_basins: None,
         chosen_basin: None,
+        basin_weights: None,
+        collapse_metrics: Some(collapsed.metrics),
+        wave: Some(wave),
     })
 }
 
-/// AND gate: both inputs must be TRUE for TRUE output.
-///
-/// TRUE component = a[1]*b[1] (both-high product).
-/// FALSE component = 1 - a[1]*b[1] (complement).
+/// NOT gate returning Wave (no collapse).
+pub fn wave_not(input: &Wave) -> Result<Wave> {
+    if input.dim != 2 {
+        return Err(AxolError::Compose(format!(
+            "NOT gate requires dim=2, got {}", input.dim
+        )));
+    }
+    let swap = TransMatrix::new(vec![0.0, 1.0, 1.0, 0.0], 2, 2);
+    input.transform(&swap)
+}
+
+/// AND gate: multiplicative interference (both must be high).
 pub fn gate_and(a: &FloatVec, b: &FloatVec) -> Result<Observation> {
     if a.dim() != 2 || b.dim() != 2 {
         return Err(AxolError::Compose("AND gate requires dim=2 inputs".into()));
     }
 
-    // AND: output TRUE only when both TRUE components are high
-    let both_true = a.data[1] * b.data[1];
-    let combined = FloatVec::new(vec![
-        1.0 - both_true, // FALSE component
-        both_true,       // TRUE component
-    ]);
+    let wave_a = Wave::from_classical(a);
+    let wave_b = Wave::from_classical(b);
+    let wave = Wave::compose(&wave_a, &wave_b, &InterferencePattern::Multiplicative)?;
 
-    let probs = ops::measure(&combined);
-    let value_index = ops::argmax(&probs);
+    let (value_index, collapsed) = wave.observe();
+    let probs = FloatVec::new(wave.probabilities().iter().map(|&p| p as f32).collect());
 
     Ok(Observation {
-        value: combined,
+        value: wave.to_float_vec(),
         value_index,
         value_label: None,
         omega: 1.0,
@@ -96,30 +112,35 @@ pub fn gate_and(a: &FloatVec, b: &FloatVec) -> Result<Observation> {
         quantum_omega: None,
         n_basins: None,
         chosen_basin: None,
+        basin_weights: None,
+        collapse_metrics: Some(collapsed.metrics),
+        wave: Some(wave),
     })
 }
 
-/// OR gate: at least one input must be TRUE for TRUE output.
-///
-/// FALSE component = a[0]*b[0] (both-low product).
-/// TRUE component = 1 - a[0]*b[0] (complement: at least one high).
+/// AND gate returning Wave (no collapse).
+pub fn wave_and(a: &Wave, b: &Wave) -> Result<Wave> {
+    if a.dim != 2 || b.dim != 2 {
+        return Err(AxolError::Compose("AND gate requires dim=2 inputs".into()));
+    }
+    Wave::compose(a, b, &InterferencePattern::Multiplicative)
+}
+
+/// OR gate: constructive interference (at least one high).
 pub fn gate_or(a: &FloatVec, b: &FloatVec) -> Result<Observation> {
     if a.dim() != 2 || b.dim() != 2 {
         return Err(AxolError::Compose("OR gate requires dim=2 inputs".into()));
     }
 
-    // OR: output FALSE only when both FALSE components are high
-    let both_false = a.data[0] * b.data[0];
-    let combined = FloatVec::new(vec![
-        both_false,       // FALSE component
-        1.0 - both_false, // TRUE component
-    ]);
+    let wave_a = Wave::from_classical(a);
+    let wave_b = Wave::from_classical(b);
+    let wave = Wave::compose(&wave_a, &wave_b, &InterferencePattern::Constructive)?;
 
-    let probs = ops::measure(&combined);
-    let value_index = ops::argmax(&probs);
+    let (value_index, collapsed) = wave.observe();
+    let probs = FloatVec::new(wave.probabilities().iter().map(|&p| p as f32).collect());
 
     Ok(Observation {
-        value: combined,
+        value: wave.to_float_vec(),
         value_index,
         value_label: None,
         omega: 1.0,
@@ -132,14 +153,21 @@ pub fn gate_or(a: &FloatVec, b: &FloatVec) -> Result<Observation> {
         quantum_omega: None,
         n_basins: None,
         chosen_basin: None,
+        basin_weights: None,
+        collapse_metrics: Some(collapsed.metrics),
+        wave: Some(wave),
     })
 }
 
+/// OR gate returning Wave (no collapse).
+pub fn wave_or(a: &Wave, b: &Wave) -> Result<Wave> {
+    if a.dim != 2 || b.dim != 2 {
+        return Err(AxolError::Compose("OR gate requires dim=2 inputs".into()));
+    }
+    Wave::compose(a, b, &InterferencePattern::Constructive)
+}
+
 /// IF-THEN-ELSE gate: evaluate condition, route to then/else branch.
-///
-/// 1. Observe condition tapestry with inputs
-/// 2. If condition → TRUE (value_index == 1), observe then_tapestry
-/// 3. If condition → FALSE (value_index == 0), observe else_tapestry
 pub fn eval_if_then_else(
     condition_input: &FloatVec,
     cond_tapestry: &weaver::Tapestry,

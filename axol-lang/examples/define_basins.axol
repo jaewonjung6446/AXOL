@@ -1,0 +1,29 @@
+# AXOL define_basins example — pure theory path (no dynamics needed)
+#
+# This demonstrates defining basin structures directly from geometry,
+# bypassing the chaos dynamics entirely. The theory layer is time-independent:
+# basins are defined by centroids and volumes, omega/phi derived from Shannon entropy.
+
+# Step 1: Define a basin structure with 3 basins in 4D
+define_basins "tristate" {
+    dim 4
+    basin [0.2, 0.3, 0.4, 0.1] volume=0.5
+    basin [0.8, 0.7, 0.6, 0.9] volume=0.3
+    basin [0.5, 0.5, 0.5, 0.5] volume=0.2
+    fractal_dim 1.5
+}
+
+# Step 2: Declare a normal tapestry
+declare "sensor" {
+    input x(4)
+    relate y <- x via <~>
+    output y
+    quality omega=0.9 phi=0.8
+}
+
+# Step 3: Weave using the pre-defined basin structure
+weave sensor quantum=1 seed=42 from_basins="tristate"
+
+# Step 4: Observe — uses geometric soft-assignment (no short_run)
+observe sensor { x = [0.3, 0.4, 0.5, 0.2] }
+observe sensor { x = [0.7, 0.6, 0.5, 0.8] }

@@ -11,6 +11,7 @@ pub enum AxolError {
     DimensionMismatch { expected: usize, got: usize },
     InvalidInput(String),
     Compose(String),
+    Relation(String),
 }
 
 impl fmt::Display for AxolError {
@@ -25,6 +26,7 @@ impl fmt::Display for AxolError {
             }
             Self::InvalidInput(msg) => write!(f, "InvalidInput: {msg}"),
             Self::Compose(msg) => write!(f, "ComposeError: {msg}"),
+            Self::Relation(msg) => write!(f, "RelationError: {msg}"),
         }
     }
 }

@@ -1,0 +1,62 @@
+# Benchmark: Collapse Spectrum
+# C=0(gaze) → C=gamma(glimpse/focus) → C=1(observe)
+# 같은 파동에 다른 관찰 깊이를 적용하여 비교
+
+# 비균일 basin 구조를 명시적으로 정의
+define_basins "spectrum_basins" {
+    dim 8
+    basin [0.9, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7] volume=0.4
+    basin [0.1, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2] volume=0.3
+    basin [0.5, 0.5, 0.9, 0.1, 0.8, 0.2, 0.7, 0.3] volume=0.2
+    basin [0.3, 0.3, 0.3, 0.9, 0.1, 0.1, 0.1, 0.9] volume=0.1
+    fractal_dim 1.8
+}
+
+declare "spectrum" {
+    input x(8)
+    input y(8)
+    relate z <- x, y via <~>
+    output z
+    quality omega=0.85 phi=0.8
+}
+
+weave spectrum quantum=true seed=77 from_basins="spectrum_basins"
+
+# Wave 생성 — 서로 다른 입력 → 서로 다른 분포가 나와야 함
+wave a = spectrum {
+    x = [0.9, 0.1, 0.3, 0.7, 0.2, 0.8, 0.4, 0.6]
+    y = [0.2, 0.8, 0.6, 0.4, 0.7, 0.3, 0.9, 0.1]
+}
+
+wave b = spectrum {
+    x = [0.1, 0.9, 0.8, 0.2, 0.7, 0.3, 0.5, 0.5]
+    y = [0.7, 0.3, 0.2, 0.8, 0.1, 0.9, 0.4, 0.6]
+}
+
+# C=0: 비파괴 관찰
+gaze a
+gaze b
+
+# C=0.1: 아주 살짝 엿보기
+glimpse a 0.1
+
+# C=0.3: 가벼운 관찰
+glimpse a 0.3
+
+# C=0.5: 중간 관찰
+glimpse a 0.5
+
+# C=0.7: 깊은 관찰
+focus a 0.7
+
+# C=0.9: 거의 완전 붕괴
+focus a 0.9
+
+# 최종 상태 확인
+gaze a
+
+# 완전 관찰 (tapestry 경유)
+observe spectrum {
+    x = [0.9, 0.1, 0.3, 0.7, 0.2, 0.8, 0.4, 0.6]
+    y = [0.2, 0.8, 0.6, 0.4, 0.7, 0.3, 0.9, 0.1]
+}

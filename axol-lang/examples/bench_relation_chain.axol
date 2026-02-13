@@ -1,0 +1,78 @@
+# Benchmark: Relation Chain
+# 여러 wave를 만들고 관계를 연쇄적으로 연결
+
+# 4개 basin으로 비균일 구조
+define_basins "field_basins" {
+    dim 8
+    basin [0.8, 0.2, 0.1, 0.3, 0.5, 0.7, 0.9, 0.4] volume=0.35
+    basin [0.2, 0.7, 0.8, 0.6, 0.4, 0.3, 0.1, 0.5] volume=0.30
+    basin [0.5, 0.5, 0.3, 0.9, 0.1, 0.8, 0.6, 0.2] volume=0.20
+    basin [0.1, 0.3, 0.6, 0.1, 0.9, 0.2, 0.4, 0.8] volume=0.15
+    fractal_dim 1.6
+}
+
+declare "field" {
+    input a(8)
+    input b(8)
+    relate c <- a, b via <~>
+    output c
+    quality omega=0.92 phi=0.85
+}
+
+weave field quantum=true seed=101 from_basins="field_basins"
+
+# 4개의 서로 다른 wave 생성 — 다른 basin 영역을 겨냥
+wave w1 = field {
+    a = [0.9, 0.1, 0.2, 0.3, 0.4, 0.6, 0.8, 0.5]
+    b = [0.8, 0.2, 0.1, 0.4, 0.5, 0.7, 0.9, 0.3]
+}
+
+wave w2 = field {
+    a = [0.2, 0.8, 0.7, 0.6, 0.3, 0.4, 0.1, 0.5]
+    b = [0.1, 0.7, 0.9, 0.5, 0.4, 0.3, 0.2, 0.6]
+}
+
+wave w3 = field {
+    a = [0.5, 0.5, 0.3, 0.9, 0.1, 0.8, 0.6, 0.2]
+    b = [0.4, 0.6, 0.2, 0.8, 0.2, 0.7, 0.5, 0.3]
+}
+
+wave w4 = field {
+    a = [0.1, 0.3, 0.6, 0.1, 0.9, 0.2, 0.4, 0.8]
+    b = [0.2, 0.4, 0.5, 0.2, 0.8, 0.1, 0.3, 0.9]
+}
+
+# 관계 체인
+rel r12 = w1 <-> w2 via <~>
+rel r23 = w2 <-> w3 via <+>
+rel r34 = w3 <-> w4 via <*>
+rel r14 = w1 <- w4 via <~>
+rel r_conflict = w1 >< w3 via <!>
+
+# 각 wave gaze — 비균일 분포 확인
+gaze w1
+gaze w2
+gaze w3
+gaze w4
+
+# expect 풍경 정의
+expect front_bias = [0.5, 0.3, 0.1, 0.05, 0.03, 0.01, 0.005, 0.005] strength=0.7
+expect mid_bias = [0.05, 0.1, 0.3, 0.3, 0.1, 0.05, 0.05, 0.05] strength=0.6
+expect back_bias = [0.005, 0.005, 0.01, 0.03, 0.05, 0.1, 0.3, 0.5] strength=0.8
+expect wave_bias = w2 strength=0.5
+
+# expect 적용하여 관찰
+observe r12 {} with front_bias
+observe r23 {} with mid_bias
+observe r34 {} with back_bias
+observe r14 {} with wave_bias
+
+# widen 후 재관찰
+widen r12 0.4
+widen r23 0.2
+observe r12 {}
+observe r23 {}
+
+# resolve
+resolve w1, w3 with interfere
+resolve w2, w4 with superpose

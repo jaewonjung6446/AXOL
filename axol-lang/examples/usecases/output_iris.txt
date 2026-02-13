@@ -1,0 +1,56 @@
+[define_basins] 'iris_species': dim=4 basins=3 omega=0.0001 phi=0.7547 entropy=1.0985
+[declare] 'iris_expert': 1 inputs, 1 relations, 1 outputs
+[weave] 'iris_expert': quantum=true seed=42 omega=0.0001 phi=0.7547 basins=3 (5.861ms)
+  density: purity=1.0000 dim=4
+[observe] 'iris_expert': idx=3 label=None omega=0.0001 phi=0.7547 (28.3us)
+  probs: [3]=0.4004, [2]=0.3633, [0]=0.2240, [1]=0.0122
+  quantum: phi=1.0000 omega=0.7702
+  density: purity=1.0000
+[observe] 'iris_expert': idx=3 label=None omega=0.0001 phi=0.7547 (3.6us)
+  probs: [3]=0.3996, [2]=0.3644, [0]=0.2266, [1]=0.0094
+  quantum: phi=1.0000 omega=0.7571
+  density: purity=1.0000
+[observe] 'iris_expert': idx=3 label=None omega=0.0001 phi=0.7547 (2.6us)
+  probs: [3]=0.3846, [2]=0.3474, [0]=0.2311, [1]=0.0368
+  quantum: phi=1.0000 omega=0.8476
+  density: purity=1.0000
+[observe] 'iris_expert': idx=3 label=None omega=0.0001 phi=0.7547 (2.2us)
+  probs: [3]=0.3878, [2]=0.3520, [0]=0.2323, [1]=0.0279
+  quantum: phi=1.0000 omega=0.8260
+  density: purity=1.0000
+[observe] 'iris_expert': idx=3 label=None omega=0.0001 phi=0.7547 (2.3us)
+  probs: [3]=0.3775, [2]=0.3404, [0]=0.2322, [1]=0.0499
+  quantum: phi=1.0000 omega=0.8739
+  density: purity=1.0000
+[observe] 'iris_expert': idx=3 label=None omega=0.0001 phi=0.7547 (2.2us)
+  probs: [3]=0.3767, [2]=0.3394, [0]=0.2320, [1]=0.0519
+  quantum: phi=1.0000 omega=0.8773
+  density: purity=1.0000
+[observe] 'iris_expert': idx=3 label=None omega=0.0001 phi=0.7547 (2.2us)
+  probs: [3]=0.3835, [2]=0.3473, [0]=0.2328, [1]=0.0364
+  quantum: phi=1.0000 omega=0.8471
+  density: purity=1.0000
+[confident] 'iris_expert': idx=3 confidence=0.8389 obs=20 early_stopped=false (0.047ms)
+  avg_probs: [0]=0.2328, [1]=0.0364, [2]=0.3473, [3]=0.3835
+[iterate] 'iris_expert': iters=4 converged=true delta=0.000000 (0.023ms)
+  probs: [3]=0.3835, [2]=0.3473, [0]=0.2328, [1]=0.0364
+  quantum: phi=1.0000 omega=0.8471
+  density: purity=1.0000
+[learn] 'iris_learned': accuracy=33.3% r=3.9330 eps=0.2183 evals=4621 (11558.9ms)
+[observe] 'iris_learned': idx=0 label=None omega=0.9192 phi=0.9756 (3.5us)
+  probs: [0]=0.9219, [1]=0.0695, [2]=0.0049, [3]=0.0037
+  quantum: phi=1.0000 omega=0.2781
+  density: purity=1.0000
+[observe] 'iris_learned': idx=3 label=None omega=0.9192 phi=0.9756 (2.2us)
+  probs: [3]=0.3159, [2]=0.3142, [1]=0.2609, [0]=0.1090
+  quantum: phi=1.0000 omega=0.9518
+  density: purity=1.0000
+[observe] 'iris_learned': idx=3 label=None omega=0.9192 phi=0.9756 (2.0us)
+  probs: [3]=0.2865, [2]=0.2860, [1]=0.2584, [0]=0.1691
+  quantum: phi=1.0000 omega=0.9862
+  density: purity=1.0000
+[observe] 'iris_learned': idx=3 label=None omega=0.9192 phi=0.9756 (7.6us)
+  probs: [3]=0.3424, [2]=0.3395, [1]=0.2592, [0]=0.0589
+  quantum: phi=1.0000 omega=0.8949
+  density: purity=1.0000
+--- Total: 11565.169ms ---

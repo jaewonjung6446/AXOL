@@ -192,6 +192,38 @@ fn cmd_check(path: &str) {
                     axol::dsl::parser::Statement::Learn(l) => {
                         println!("  learn '{}': dim={} samples={}", l.name, l.dim, l.samples.len());
                     }
+                    axol::dsl::parser::Statement::DefineBasinsCmd(db) => {
+                        println!("  define_basins '{}': dim={} basins={}", db.name, db.dim, db.basins.len());
+                    }
+                    axol::dsl::parser::Statement::WaveCreate(w) => {
+                        println!("  wave '{}' = '{}': {} inputs", w.var_name, w.tapestry_name, w.inputs.len());
+                    }
+                    axol::dsl::parser::Statement::FocusWave(f) => {
+                        println!("  focus '{}' gamma={}", f.var_name, f.gamma);
+                    }
+                    axol::dsl::parser::Statement::GazeWave(g) => {
+                        println!("  gaze '{}'", g.var_name);
+                    }
+                    axol::dsl::parser::Statement::GlimpseWave(g) => {
+                        println!("  glimpse '{}' gamma={}", g.var_name, g.gamma);
+                    }
+                    axol::dsl::parser::Statement::RelDeclare(r) => {
+                        let dir = match r.direction {
+                            axol::dsl::parser::RelDirection::Bidir => "<->",
+                            axol::dsl::parser::RelDirection::Forward => "<-",
+                            axol::dsl::parser::RelDirection::Conflict => "><",
+                        };
+                        println!("  rel '{}' = {} {} {} via={:?}", r.name, r.from, dir, r.to, r.via);
+                    }
+                    axol::dsl::parser::Statement::ExpectDeclare(e) => {
+                        println!("  expect '{}' strength={}", e.name, e.strength);
+                    }
+                    axol::dsl::parser::Statement::WidenWave(w) => {
+                        println!("  widen '{}' amount={}", w.var_name, w.amount);
+                    }
+                    axol::dsl::parser::Statement::ResolveObs(r) => {
+                        println!("  resolve {:?} with {:?}", r.observations, r.strategy);
+                    }
                 }
             }
         }
@@ -478,6 +510,131 @@ fn cmd_bench() {
         let us = start.elapsed().as_secs_f64() / iters as f64 * 1e6;
         println!("  dim={:>5}: {:.3} us  S={:.6}", dim, us, density::von_neumann_entropy(&rho));
     }
+
+    // 7.5. Wave operations
+    println!("\n[7.5] Wave operations");
+    {
+        use axol::wave::{Wave, InterferencePattern};
+
+        for dim in [4, 8, 16, 32] {
+            let data_a: Vec<f32> = (0..dim).map(|i| (i as f32 * 0.7).sin()).collect();
+            let data_b: Vec<f32> = (0..dim).map(|i| (i as f32 * 1.3).cos()).collect();
+            let wa = Wave::from_classical(&FloatVec::new(data_a));
+            let wb = Wave::from_classical(&FloatVec::new(data_b));
+
+            // compose
+            let start = Instant::now();
+            let iters = 100_000;
+            for _ in 0..iters {
+                std::hint::black_box(Wave::compose(&wa, &wb, &InterferencePattern::Constructive).unwrap());
+            }
+            let compose_us = start.elapsed().as_secs_f64() / iters as f64 * 1e6;
+
+            // focus
+            let start = Instant::now();
+            for _ in 0..iters {
+                std::hint::black_box(wa.focus(0.5));
+            }
+            let focus_us = start.elapsed().as_secs_f64() / iters as f64 * 1e6;
+
+            // gaze
+            let start = Instant::now();
+            for _ in 0..iters {
+                std::hint::black_box(wa.gaze());
+            }
+            let gaze_us = start.elapsed().as_secs_f64() / iters as f64 * 1e6;
+
+            println!("  dim={:>3}: compose={:.3}us  focus={:.3}us  gaze={:.3}us",
+                dim, compose_us, focus_us, gaze_us);
+        }
+    }
+
+    // =====================================================================
+    // COLLAPSE METRICS — computation measured by collapses, not time
+    // =====================================================================
+    println!("\n{}", "=".repeat(60));
+    println!("  COLLAPSE METRICS (C=collapses, I=info retained, R=relations)");
+    println!("{}", "=".repeat(60));
+
+    // 8. Collapse spectrum: gaze vs glimpse vs observe
+    println!("\n[8] Collapse spectrum (dim=4)");
+    {
+        use axol::collapse::{self, CollapseMetrics};
+        let dim = 4;
+        // Non-uniform state: clear dominant mode
+        let psi = ComplexVec::new(vec![
+            Complex64::new(0.1, 0.0),
+            Complex64::new(0.3, 0.0),
+            Complex64::new(0.8, 0.0),
+            Complex64::new(0.5, 0.0),
+        ]).normalized();
+        let rho = DensityMatrix::from_pure_state(&psi);
+        let probs: Vec<f64> = rho.diagonal();
+
+        println!("  state: |psi> = [0.1, 0.3, 0.8, 0.5] (normalized)");
+        println!("  {:>12}  {:>6}  {:>40}  {:>5}  {:>4}", "mode", "C", "probabilities", "I", "R");
+        println!("  {}", "-".repeat(75));
+
+        // Gaze: zero collapse
+        let mut m = CollapseMetrics::new();
+        m.update_from_density(&rho);
+        let p_str = format!("[{:.3}, {:.3}, {:.3}, {:.3}]", probs[0], probs[1], probs[2], probs[3]);
+        println!("  {:>12}  {:>5.2}  {:>40}  {:.3}  {:>4}", "gaze", 0.0, p_str, m.information_retained, m.relations);
+
+        // Glimpse at various gammas
+        for gamma in [0.1, 0.3, 0.5, 0.7, 0.9] {
+            let focused = collapse::focus_probabilities(&probs, gamma);
+            let dephased = density::apply_channel(&rho, &density::dephasing_channel(gamma, dim));
+            let mut m = CollapseMetrics::new();
+            m.record_glimpse(gamma);
+            m.update_from_density(&dephased);
+            let p_str = format!("[{:.3}, {:.3}, {:.3}, {:.3}]", focused[0], focused[1], focused[2], focused[3]);
+            println!("  {:>12}  {:>5.2}  {:>40}  {:.3}  {:>4}",
+                format!("glimpse {:.1}", gamma), gamma, p_str, m.information_retained, m.relations);
+        }
+
+        // Observe: full collapse
+        let collapsed = collapse::focus_probabilities(&probs, 1.0);
+        let p_str = format!("[{:.3}, {:.3}, {:.3}, {:.3}]", collapsed[0], collapsed[1], collapsed[2], collapsed[3]);
+        println!("  {:>12}  {:>5.2}  {:>40}  {:.3}  {:>4}", "observe", 1.0, p_str, 0.0, 0);
+    }
+
+    // 9. Information flow through channels
+    println!("\n[9] Information flow through channels (dim=4)");
+    {
+        use axol::collapse;
+        let dim = 4;
+        let psi = ComplexVec::new(
+            (0..dim).map(|i| Complex64::new((i as f64 * 0.7).sin(), (i as f64 * 0.3).cos())).collect()
+        ).normalized();
+        let rho = DensityMatrix::from_pure_state(&psi);
+        let i_before = density::phi_from_purity(&rho);
+        let r_before = collapse::count_relations(&rho);
+
+        println!("  input state: I={:.3}  R={}", i_before, r_before);
+        println!("  {:>25}  {:>8}  {:>8}  {:>8}", "channel", "I_out", "delta_I", "R_out");
+        println!("  {}", "-".repeat(55));
+
+        for (name, kraus) in [
+            ("dephasing gamma=0.1", density::dephasing_channel(0.1, dim)),
+            ("dephasing gamma=0.3", density::dephasing_channel(0.3, dim)),
+            ("dephasing gamma=0.9", density::dephasing_channel(0.9, dim)),
+            ("depolarizing p=0.1", density::depolarizing_channel(dim, 0.1)),
+            ("amplitude gamma=0.2", density::amplitude_damping_channel(0.2, dim)),
+        ] {
+            let result = density::apply_channel(&rho, &kraus);
+            let i_after = density::phi_from_purity(&result);
+            let r_after = collapse::count_relations(&result);
+            let delta = i_after - i_before;
+            println!("  {:>25}  {:>7.3}  {:>+7.3}  {:>6}", name, i_after, delta, r_after);
+        }
+    }
+
+    // 10. Confident: gaze (0 collapses) vs observe (N collapses)
+    println!("\n[10] Confident comparison: gaze vs observe");
+    println!("  gaze reads density matrix directly  → C = 0  collapses");
+    println!("  confident samples N times           → C = N  collapses");
+    println!("  Same distribution. Same answer. Different collapse cost.");
 
     println!("\n=== Done ===");
 }

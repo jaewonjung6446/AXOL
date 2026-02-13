@@ -1,0 +1,30 @@
+# =======================================================
+#   AXOL AI - Space/Probability Axis
+#   XOR Pattern Recognition (All 4 Cases)
+#   No epochs. No iteration. One-shot observation.
+# =======================================================
+
+# === Case 1: F XOR F = F ===
+# XOR(a,b) = AND(OR(a,b), NOT(AND(a,b)))
+gate or  { a = [0.9, 0.1], b = [0.9, 0.1] }
+gate and { a = [0.9, 0.1], b = [0.9, 0.1] }
+gate not { x = [0.9, 0.1] }
+gate and { a = [0.9, 0.1], b = [0.1, 0.9] }
+
+# === Case 2: F XOR T = T ===
+gate or  { a = [0.9, 0.1], b = [0.1, 0.9] }
+gate and { a = [0.9, 0.1], b = [0.1, 0.9] }
+gate not { x = [0.9, 0.1] }
+gate and { a = [0.1, 0.9], b = [0.1, 0.9] }
+
+# === Case 3: T XOR F = T ===
+gate or  { a = [0.1, 0.9], b = [0.9, 0.1] }
+gate and { a = [0.1, 0.9], b = [0.9, 0.1] }
+gate not { x = [0.9, 0.1] }
+gate and { a = [0.1, 0.9], b = [0.1, 0.9] }
+
+# === Case 4: T XOR T = F ===
+gate or  { a = [0.1, 0.9], b = [0.1, 0.9] }
+gate and { a = [0.1, 0.9], b = [0.1, 0.9] }
+gate not { x = [0.1, 0.9] }
+gate and { a = [0.1, 0.9], b = [0.9, 0.1] }

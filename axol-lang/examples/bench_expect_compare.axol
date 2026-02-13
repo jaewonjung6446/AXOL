@@ -1,0 +1,74 @@
+# Benchmark: Expect Landscape Comparison
+# 같은 관계에 다른 기대 풍경을 적용하여 결과 비교
+
+# 비대칭 3-basin 구조
+define_basins "lab_basins" {
+    dim 8
+    basin [0.85, 0.15, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6] volume=0.50
+    basin [0.15, 0.3, 0.7, 0.8, 0.6, 0.5, 0.4, 0.2] volume=0.30
+    basin [0.4, 0.6, 0.5, 0.3, 0.1, 0.9, 0.8, 0.7] volume=0.20
+    fractal_dim 1.7
+}
+
+declare "lab" {
+    input sensor(8)
+    input env(8)
+    relate state <- sensor, env via <~>
+    output state
+    quality omega=0.88 phi=0.82
+}
+
+weave lab quantum=true seed=55 from_basins="lab_basins"
+
+wave alpha = lab {
+    sensor = [0.8, 0.2, 0.1, 0.3, 0.4, 0.5, 0.6, 0.7]
+    env = [0.9, 0.1, 0.2, 0.2, 0.3, 0.4, 0.5, 0.5]
+}
+
+wave beta = lab {
+    sensor = [0.1, 0.3, 0.7, 0.9, 0.6, 0.5, 0.3, 0.2]
+    env = [0.2, 0.4, 0.8, 0.7, 0.5, 0.4, 0.3, 0.1]
+}
+
+rel experiment = alpha <-> beta via <~>
+
+# 기준선: expect 없이 관찰
+gaze alpha
+gaze beta
+observe experiment {}
+
+# --- 다양한 기대 풍경 ---
+
+# 1. 균일 풍경 (효과 없어야 함)
+expect uniform = [0.125, 0.125, 0.125, 0.125, 0.125, 0.125, 0.125, 0.125] strength=0.9
+observe experiment {} with uniform
+
+# 2. 날카로운 풍경 — basin 1 영역
+expect sharp = [0.9, 0.05, 0.01, 0.01, 0.01, 0.01, 0.005, 0.005] strength=0.9
+widen experiment 0.5
+observe experiment {} with sharp
+
+# 3. 이봉 풍경 — basin 1 + basin 3
+expect bimodal = [0.35, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.35] strength=0.7
+widen experiment 0.5
+observe experiment {} with bimodal
+
+# 4. 부드러운 그래디언트 — basin 2 영역
+expect gradient = [0.01, 0.03, 0.06, 0.1, 0.15, 0.2, 0.25, 0.2] strength=0.6
+widen experiment 0.5
+observe experiment {} with gradient
+
+# 5. 약한 strength
+expect weak = [0.9, 0.05, 0.01, 0.01, 0.01, 0.01, 0.005, 0.005] strength=0.1
+widen experiment 0.5
+observe experiment {} with weak
+
+# 6. 강한 strength
+expect strong = [0.9, 0.05, 0.01, 0.01, 0.01, 0.01, 0.005, 0.005] strength=1.0
+widen experiment 0.5
+observe experiment {} with strong
+
+# 7. wave 참조 풍경
+expect alpha_guide = alpha strength=0.8
+widen experiment 0.5
+observe experiment {} with alpha_guide

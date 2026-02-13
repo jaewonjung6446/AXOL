@@ -16,6 +16,11 @@ from axol.core.types import FloatVec, TransMatrix, StateBundle, ComplexVec, Dens
 from axol.core.program import Program
 from axol.core import operations as ops
 
+# TYPE_CHECKING import to avoid circular dependency
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from axol.core.amplitude import Amplitude
+
 
 # ---------------------------------------------------------------------------
 # SuperposedState — state vector with labels and Born-rule probabilities
@@ -169,6 +174,10 @@ class Tapestry:
     _quantum: bool = False  # True when complex amplitudes are used
     _density_matrix: DensityMatrix | None = None  # global density matrix
     _kraus_operators: list | None = None  # Kraus ops from Hybrid SVD
+    _fit_info: dict | None = None  # {"n_samples", "n_classes", "accuracy", "method"}
+    # --- TransAmplitude (open relations) ---
+    _trans_amplitude: object | None = None  # TransAmplitude | None (avoids circular import)
+    _trans_amplitude_info: dict | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -191,3 +200,5 @@ class Observation:
     density_matrix: DensityMatrix | None = None  # post-observation density matrix
     quantum_phi: float | None = None  # Phi from purity (when quantum=True)
     quantum_omega: float | None = None  # Omega from coherence (when quantum=True)
+    # --- Amplitude extensions (Phase 1) ---
+    amplitude: Amplitude | None = None  # pre-collapse amplitude distribution

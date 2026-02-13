@@ -1,0 +1,128 @@
+# ============================================================
+# AXOL Use Case 1: NLP Sentiment Analysis
+# ============================================================
+# Task: Classify text sentiment as positive (0) / negative (1) / neutral (2)
+# with sarcasm detection via destructive interference
+#
+# 8-dim feature encoding:
+#   [0] positive_word_ratio     ("great", "love", "excellent")
+#   [1] negative_word_ratio     ("bad", "hate", "terrible")
+#   [2] intensity_modifier      ("very", "extremely", "slightly")
+#   [3] negation_presence       ("not", "never", "no")
+#   [4] subjectivity_score      (objective=0.0 ... subjective=1.0)
+#   [5] punctuation_energy      (exclamation, caps, emoji density)
+#   [6] sentence_complexity     (clause depth, avg words/sentence)
+#   [7] context_formality       (casual=0.0 ... formal=1.0)
+
+# === Step 1: Learn from 12 labeled examples ===
+# 4 positive (0), 4 negative (1), 4 neutral (2)
+
+learn "sentiment" dim=8 quantum=1 seed=42 {
+    # --- Positive samples ---
+    # "I absolutely love this product! Best purchase ever!"
+    [0.92, 0.05, 0.85, 0.02, 0.90, 0.80, 0.30, 0.20] = 0
+    # "Great work team, this is excellent progress."
+    [0.80, 0.08, 0.60, 0.05, 0.70, 0.40, 0.50, 0.60] = 0
+    # "This movie was fantastic, highly recommend it!"
+    [0.88, 0.03, 0.75, 0.03, 0.85, 0.70, 0.35, 0.25] = 0
+    # "What a beautiful day, feeling wonderful."
+    [0.75, 0.05, 0.50, 0.02, 0.80, 0.30, 0.25, 0.15] = 0
+
+    # --- Negative samples ---
+    # "The service was terrible. Never coming back."
+    [0.05, 0.88, 0.60, 0.70, 0.85, 0.50, 0.40, 0.30] = 1
+    # "This is the worst experience I've ever had."
+    [0.03, 0.92, 0.80, 0.10, 0.90, 0.60, 0.45, 0.25] = 1
+    # "I hate waiting in long lines, so frustrating."
+    [0.05, 0.80, 0.55, 0.05, 0.85, 0.45, 0.30, 0.15] = 1
+    # "Disappointing results, not worth the money."
+    [0.08, 0.75, 0.50, 0.60, 0.80, 0.35, 0.40, 0.35] = 1
+
+    # --- Neutral samples ---
+    # "The meeting is scheduled for 3 PM tomorrow."
+    [0.15, 0.10, 0.10, 0.05, 0.10, 0.10, 0.50, 0.85] = 2
+    # "The report contains quarterly financial data."
+    [0.10, 0.08, 0.05, 0.03, 0.05, 0.05, 0.70, 0.90] = 2
+    # "Please submit the form by Friday."
+    [0.12, 0.10, 0.15, 0.05, 0.15, 0.10, 0.55, 0.80] = 2
+    # "The package weighs approximately 2.5 kg."
+    [0.08, 0.05, 0.08, 0.02, 0.05, 0.05, 0.40, 0.85] = 2
+}
+
+# === Step 2: Test learned model ===
+# Positive test
+observe sentiment { x = [0.85, 0.05, 0.70, 0.03, 0.80, 0.65, 0.35, 0.20] }
+# Negative test
+observe sentiment { x = [0.05, 0.85, 0.65, 0.50, 0.85, 0.50, 0.40, 0.30] }
+# Neutral test
+observe sentiment { x = [0.10, 0.08, 0.10, 0.05, 0.10, 0.08, 0.60, 0.85] }
+
+# === Step 3: Basin-based approach for comparison ===
+define_basins "sentiment_space" {
+    dim 8
+    # Positive: high positive words, low negative, high intensity
+    basin [0.85, 0.05, 0.70, 0.05, 0.80, 0.60, 0.35, 0.25] volume=0.35
+    # Negative: low positive, high negative, high intensity
+    basin [0.05, 0.85, 0.65, 0.40, 0.85, 0.50, 0.40, 0.30] volume=0.30
+    # Neutral: balanced, low intensity, objective, formal
+    basin [0.12, 0.10, 0.10, 0.05, 0.10, 0.10, 0.55, 0.85] volume=0.35
+    fractal_dim 1.5
+}
+
+declare "sentiment_basin" {
+    input text(8)
+    input context(8)
+    relate sentiment <- text, context via <~>
+    output sentiment
+    quality omega=0.88 phi=0.82
+}
+
+weave sentiment_basin quantum=true seed=42 from_basins="sentiment_space"
+
+# === Step 4: Sarcasm detection via destructive interference ===
+# "Oh great, another Monday. Just wonderful." — positive words, negative meaning
+# The text features look positive, but context features reveal negativity
+
+wave sarcastic = sentiment_basin {
+    text = [0.70, 0.15, 0.30, 0.40, 0.85, 0.20, 0.50, 0.30]
+    context = [0.30, 0.50, 0.20, 0.60, 0.80, 0.15, 0.40, 0.30]
+}
+
+wave genuinely_positive = sentiment_basin {
+    text = [0.92, 0.05, 0.85, 0.02, 0.90, 0.80, 0.30, 0.20]
+    context = [0.70, 0.10, 0.60, 0.05, 0.80, 0.50, 0.40, 0.30]
+}
+
+# Destructive interference: sarcasm cancels genuine positivity
+rel sarcasm_detector = sarcastic >< genuinely_positive via <!>
+
+# Gaze: read probabilities without collapse
+gaze sarcastic
+gaze genuinely_positive
+
+# Observe: the destructive interference reveals the gap
+observe sarcasm_detector {}
+
+# === Step 5: Domain knowledge via expectations ===
+# Prior: most online reviews are positive (selection bias)
+expect review_prior = [0.50, 0.30, 0.20, 0.0, 0.0, 0.0, 0.0, 0.0] strength=0.7
+
+# Observe with domain knowledge
+observe sarcasm_detector {} with review_prior
+
+# Widen to explore alternative interpretations
+widen sarcasm_detector 0.3
+observe sarcasm_detector {}
+
+# === Step 6: Constructive relation for agreement ===
+wave negative_review = sentiment_basin {
+    text = [0.05, 0.88, 0.60, 0.70, 0.85, 0.50, 0.40, 0.30]
+    context = [0.10, 0.70, 0.50, 0.60, 0.70, 0.30, 0.30, 0.40]
+}
+
+# Sarcasm + genuine negative: constructive reinforcement of negativity
+rel negative_consensus = sarcastic <-> negative_review via <~>
+observe negative_consensus {}
+
+# Resolve: sarcasm vs genuine negative
+resolve sarcastic, negative_review with interfere

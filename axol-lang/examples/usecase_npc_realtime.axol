@@ -1,0 +1,105 @@
+# ============================================================
+# AXOL Use Case: Real-time NPC AI (O(1) per frame)
+# ============================================================
+# 게임 NPC의 매 프레임 의사결정.
+# weave 1회 → observe N회. N이 커져도 비용 동일.
+#
+# NPC "personality"는 basin 구조로 표현:
+#   basin 0: 공격적 — [높은 적의, 낮은 공포, 높은 자신감]
+#   basin 1: 방어적 — [낮은 적의, 높은 공포, 낮은 자신감]
+#   basin 2: 중립    — [중간 적의, 중간 공포, 중간 호기심]
+#   basin 3: 도주    — [낮은 적의, 매우 높은 공포, 낮은 모든 것]
+#
+# dim=8: [hostility, fear, confidence, curiosity, loyalty, fatigue, hunger, alertness]
+
+define_basins "warrior_personality" {
+    dim 8
+    basin [0.9, 0.1, 0.85, 0.3, 0.7, 0.2, 0.3, 0.8] volume=0.30
+    basin [0.2, 0.8, 0.2, 0.2, 0.6, 0.5, 0.4, 0.9] volume=0.25
+    basin [0.4, 0.4, 0.5, 0.7, 0.5, 0.3, 0.5, 0.6] volume=0.25
+    basin [0.1, 0.95, 0.1, 0.1, 0.2, 0.8, 0.3, 0.3] volume=0.20
+    fractal_dim 1.5
+}
+
+declare "npc" {
+    input state(8)
+    input environment(8)
+    relate action <- state, environment via <~>
+    output action
+    quality omega=0.88 phi=0.82
+}
+
+weave npc quantum=true seed=42 from_basins="warrior_personality"
+
+# ============================================================
+# 시뮬레이션: 60프레임 = 1초 분량
+# 각 observe는 O(1). 전부 합쳐도 ~300μs.
+# ============================================================
+
+# Frame 1-5: 평화로운 마을. 낮은 위협, 높은 호기심.
+observe npc { state = [0.1, 0.2, 0.6, 0.8, 0.7, 0.2, 0.4, 0.5] environment = [0.1, 0.1, 0.5, 0.7, 0.6, 0.2, 0.3, 0.6] }
+observe npc { state = [0.1, 0.2, 0.6, 0.8, 0.7, 0.2, 0.4, 0.5] environment = [0.1, 0.1, 0.5, 0.7, 0.6, 0.2, 0.3, 0.6] }
+observe npc { state = [0.12, 0.2, 0.6, 0.78, 0.7, 0.22, 0.4, 0.5] environment = [0.1, 0.12, 0.5, 0.68, 0.6, 0.2, 0.3, 0.6] }
+observe npc { state = [0.12, 0.2, 0.6, 0.78, 0.7, 0.22, 0.4, 0.5] environment = [0.1, 0.12, 0.5, 0.68, 0.6, 0.2, 0.3, 0.6] }
+observe npc { state = [0.13, 0.21, 0.6, 0.77, 0.7, 0.23, 0.4, 0.5] environment = [0.12, 0.13, 0.5, 0.67, 0.6, 0.2, 0.3, 0.6] }
+
+# Frame 6-10: 적 발견! hostility 급등, fear도 상승.
+observe npc { state = [0.5, 0.4, 0.5, 0.3, 0.7, 0.25, 0.4, 0.9] environment = [0.7, 0.5, 0.3, 0.2, 0.3, 0.2, 0.3, 0.9] }
+observe npc { state = [0.6, 0.45, 0.5, 0.2, 0.7, 0.3, 0.4, 0.9] environment = [0.75, 0.5, 0.3, 0.15, 0.3, 0.2, 0.3, 0.95] }
+observe npc { state = [0.7, 0.5, 0.5, 0.15, 0.65, 0.3, 0.4, 0.95] environment = [0.8, 0.55, 0.25, 0.1, 0.25, 0.2, 0.3, 0.95] }
+observe npc { state = [0.8, 0.5, 0.55, 0.1, 0.65, 0.35, 0.4, 0.95] environment = [0.85, 0.6, 0.2, 0.1, 0.2, 0.2, 0.3, 0.95] }
+observe npc { state = [0.85, 0.45, 0.6, 0.1, 0.7, 0.35, 0.4, 0.95] environment = [0.9, 0.6, 0.2, 0.05, 0.2, 0.2, 0.3, 0.95] }
+
+# Frame 11-15: 전투 중. 체력 소모, 피로 누적.
+observe npc { state = [0.9, 0.3, 0.7, 0.05, 0.75, 0.5, 0.5, 0.9] environment = [0.9, 0.4, 0.3, 0.05, 0.2, 0.3, 0.3, 0.9] }
+observe npc { state = [0.85, 0.35, 0.65, 0.05, 0.7, 0.55, 0.55, 0.85] environment = [0.85, 0.45, 0.3, 0.05, 0.2, 0.3, 0.3, 0.85] }
+observe npc { state = [0.8, 0.4, 0.55, 0.05, 0.65, 0.6, 0.6, 0.8] environment = [0.8, 0.5, 0.3, 0.05, 0.2, 0.3, 0.3, 0.8] }
+observe npc { state = [0.7, 0.5, 0.45, 0.05, 0.6, 0.7, 0.65, 0.75] environment = [0.8, 0.55, 0.25, 0.05, 0.15, 0.3, 0.3, 0.75] }
+observe npc { state = [0.6, 0.6, 0.35, 0.05, 0.55, 0.8, 0.7, 0.7] environment = [0.75, 0.6, 0.2, 0.05, 0.15, 0.3, 0.3, 0.7] }
+
+# Frame 16-20: 패배 직전. fear 급등, confidence 하락. 도주 전환점?
+observe npc { state = [0.4, 0.75, 0.2, 0.05, 0.5, 0.85, 0.75, 0.6] environment = [0.7, 0.7, 0.15, 0.05, 0.1, 0.3, 0.3, 0.6] }
+observe npc { state = [0.3, 0.8, 0.15, 0.05, 0.45, 0.9, 0.8, 0.55] environment = [0.7, 0.75, 0.1, 0.05, 0.1, 0.3, 0.3, 0.55] }
+observe npc { state = [0.2, 0.85, 0.1, 0.05, 0.4, 0.9, 0.8, 0.5] environment = [0.65, 0.8, 0.1, 0.05, 0.1, 0.3, 0.3, 0.5] }
+observe npc { state = [0.15, 0.9, 0.1, 0.05, 0.35, 0.95, 0.85, 0.45] environment = [0.6, 0.85, 0.1, 0.05, 0.1, 0.3, 0.3, 0.45] }
+observe npc { state = [0.1, 0.95, 0.05, 0.05, 0.3, 0.95, 0.9, 0.4] environment = [0.55, 0.9, 0.05, 0.05, 0.1, 0.3, 0.3, 0.4] }
+
+# ============================================================
+# V2: NPC간 관계 — 동료 NPC와의 간섭
+# 역시 O(1) per observation
+# ============================================================
+
+wave npc_warrior = npc {
+    state = [0.85, 0.2, 0.8, 0.1, 0.8, 0.3, 0.3, 0.9]
+    environment = [0.8, 0.4, 0.3, 0.1, 0.3, 0.2, 0.3, 0.9]
+}
+
+wave npc_healer = npc {
+    state = [0.1, 0.6, 0.4, 0.3, 0.9, 0.5, 0.5, 0.7]
+    environment = [0.8, 0.4, 0.3, 0.1, 0.3, 0.2, 0.3, 0.9]
+}
+
+wave npc_coward = npc {
+    state = [0.1, 0.9, 0.1, 0.1, 0.3, 0.8, 0.7, 0.4]
+    environment = [0.8, 0.4, 0.3, 0.1, 0.3, 0.2, 0.3, 0.9]
+}
+
+# 동료 관계: warrior ↔ healer (constructive — 서로 보완)
+rel alliance = npc_warrior <-> npc_healer via <~>
+
+# 갈등 관계: warrior ↔ coward (destructive — 전투 vs 도주)
+rel tension = npc_warrior <-> npc_coward via <!>
+
+# healer가 coward를 설득하는 관계 (additive)
+rel persuasion = npc_healer <-> npc_coward via <+>
+
+# 각 관계의 현재 상태를 O(1)로 관측
+observe alliance {}
+observe tension {}
+observe persuasion {}
+
+# warrior의 기대: "전투를 계속해야 한다"
+expect fight_instinct = [0.8, 0.05, 0.1, 0.05, 0.0, 0.0, 0.0, 0.0] strength=0.7
+
+# coward의 기대와 충돌
+observe tension {} with fight_instinct

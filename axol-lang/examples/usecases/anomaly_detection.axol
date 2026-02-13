@@ -1,0 +1,131 @@
+# ============================================================
+# AXOL Use Case 3: Industrial Sensor Anomaly Detection
+# ============================================================
+# Task: Detect anomalies in industrial sensor readings
+#
+# Scenario: Factory with 8-dimensional sensor suite
+#   [0] temperature      (normalized operating range)
+#   [1] vibration         (motor vibration amplitude)
+#   [2] pressure          (hydraulic pressure)
+#   [3] flow_rate         (coolant flow)
+#   [4] current_draw      (motor electrical current)
+#   [5] acoustic_level    (sound intensity)
+#   [6] humidity          (environmental)
+#   [7] rpm               (rotational speed)
+#
+# 3 normal operating regimes:
+#   Idle:    low temp, low vibration, low pressure
+#   Steady:  moderate all readings
+#   Peak:    high temp, high vibration, high pressure
+
+# === Step 1: Define normal operating regimes ===
+define_basins "normal_regimes" {
+    dim 8
+    # Idle regime: machine on standby
+    basin [0.20, 0.15, 0.25, 0.30, 0.18, 0.20, 0.50, 0.10] volume=0.30
+    # Steady-state regime: normal production
+    basin [0.50, 0.45, 0.55, 0.60, 0.50, 0.45, 0.50, 0.55] volume=0.45
+    # Peak regime: high-load production
+    basin [0.75, 0.70, 0.80, 0.85, 0.78, 0.72, 0.45, 0.85] volume=0.25
+    fractal_dim 1.4
+}
+
+declare "sensor_monitor" {
+    input readings(8)
+    relate state <- readings via <~>
+    output state
+    quality omega=0.90 phi=0.85
+}
+
+weave sensor_monitor quantum=true seed=42 from_basins="normal_regimes"
+
+# === Step 2: Normal readings — should classify to known regimes ===
+
+# Idle state reading
+observe sensor_monitor {
+    readings = [0.22, 0.18, 0.27, 0.32, 0.20, 0.22, 0.48, 0.12]
+}
+
+# Steady state reading
+observe sensor_monitor {
+    readings = [0.48, 0.43, 0.52, 0.58, 0.47, 0.42, 0.50, 0.53]
+}
+
+# Peak state reading
+observe sensor_monitor {
+    readings = [0.73, 0.68, 0.78, 0.82, 0.75, 0.70, 0.47, 0.83]
+}
+
+# === Step 3: Anomaly detection via gaze (non-destructive) ===
+# Create waves for non-destructive monitoring
+
+wave normal_steady = sensor_monitor {
+    readings = [0.48, 0.43, 0.52, 0.58, 0.47, 0.42, 0.50, 0.53]
+}
+
+wave bearing_failure = sensor_monitor {
+    readings = [0.60, 0.92, 0.55, 0.58, 0.80, 0.88, 0.50, 0.40]
+}
+
+wave coolant_leak = sensor_monitor {
+    readings = [0.75, 0.50, 0.20, 0.10, 0.55, 0.48, 0.70, 0.52]
+}
+
+wave power_surge = sensor_monitor {
+    readings = [0.55, 0.50, 0.55, 0.60, 0.95, 0.70, 0.50, 0.90]
+}
+
+# Gaze: read probabilities without disturbing quantum state
+gaze normal_steady
+gaze bearing_failure
+gaze coolant_leak
+gaze power_surge
+
+# === Step 4: Destructive interference for anomaly amplification ===
+# Normal vs anomaly: destructive interference reveals deviations
+
+rel bearing_anomaly = normal_steady >< bearing_failure via <!>
+rel coolant_anomaly = normal_steady >< coolant_leak via <!>
+rel power_anomaly = normal_steady >< power_surge via <!>
+
+# Observe anomaly scores — higher negativity = stronger anomaly
+observe bearing_anomaly {}
+observe coolant_anomaly {}
+observe power_anomaly {}
+
+# === Step 5: Constructive interference between anomalies ===
+# If two anomalies reinforce each other, system is in critical state
+rel correlated_failure = bearing_failure <-> coolant_leak via <~>
+observe correlated_failure {}
+
+# Multiplicative: both must be present for high score
+rel co_occurrence = bearing_failure <-> power_surge via <*>
+observe co_occurrence {}
+
+# === Step 6: Domain knowledge — most readings are normal ===
+expect normal_prior = [0.70, 0.15, 0.15, 0.0, 0.0, 0.0, 0.0, 0.0] strength=0.6
+
+# With prior: suppress false alarms
+observe bearing_anomaly {} with normal_prior
+observe coolant_anomaly {} with normal_prior
+
+# === Step 7: Subtle anomaly — gradual drift ===
+# Temperature slowly climbing over window (thermal runaway precursor)
+wave thermal_drift = sensor_monitor {
+    readings = [0.55, 0.48, 0.58, 0.60, 0.52, 0.50, 0.50, 0.55]
+}
+
+gaze thermal_drift
+
+# Destructive interference against normal baseline
+rel drift_score = normal_steady >< thermal_drift via <!>
+observe drift_score {}
+
+# Iterate for convergence on ambiguous case
+iterate sensor_monitor max=10 converge=prob_delta value=0.005 {
+    readings = [0.55, 0.48, 0.58, 0.60, 0.52, 0.50, 0.50, 0.55]
+}
+
+# === Step 8: Resolve conflicting anomaly assessments ===
+resolve bearing_failure, coolant_leak with interfere
+resolve bearing_failure, power_surge with superpose

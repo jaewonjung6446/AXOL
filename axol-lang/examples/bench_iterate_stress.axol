@@ -1,0 +1,60 @@
+# Benchmark: Iterate/Confident Stress Test
+# v1 연산의 수렴 속도와 비용 측정
+
+define_basins "stress_basins" {
+    dim 8
+    basin [0.9, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7] volume=0.35
+    basin [0.1, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2] volume=0.30
+    basin [0.5, 0.5, 0.9, 0.1, 0.8, 0.2, 0.7, 0.3] volume=0.20
+    basin [0.3, 0.3, 0.3, 0.9, 0.1, 0.9, 0.1, 0.9] volume=0.15
+    fractal_dim 1.6
+}
+
+declare "model" {
+    input x(8)
+    input ctx(8)
+    relate y <- x, ctx via <~>
+    output y
+    quality omega=0.9 phi=0.85
+}
+
+weave model quantum=true seed=42 from_basins="stress_basins"
+
+# --- iterate 수렴 테스트 ---
+iterate model max=5 converge=prob_delta value=0.01 {
+    x = [0.9, 0.1, 0.3, 0.7, 0.2, 0.8, 0.4, 0.6]
+    ctx = [0.2, 0.8, 0.6, 0.4, 0.7, 0.3, 0.9, 0.1]
+}
+
+iterate model max=20 converge=prob_delta value=0.001 {
+    x = [0.9, 0.1, 0.3, 0.7, 0.2, 0.8, 0.4, 0.6]
+    ctx = [0.2, 0.8, 0.6, 0.4, 0.7, 0.3, 0.9, 0.1]
+}
+
+iterate model max=50 converge=prob_delta value=0.0001 {
+    x = [0.9, 0.1, 0.3, 0.7, 0.2, 0.8, 0.4, 0.6]
+    ctx = [0.2, 0.8, 0.6, 0.4, 0.7, 0.3, 0.9, 0.1]
+}
+
+# --- confident 투표 테스트 ---
+confident model max=10 threshold=0.7 {
+    x = [0.9, 0.1, 0.3, 0.7, 0.2, 0.8, 0.4, 0.6]
+    ctx = [0.2, 0.8, 0.6, 0.4, 0.7, 0.3, 0.9, 0.1]
+}
+
+confident model max=30 threshold=0.9 {
+    x = [0.9, 0.1, 0.3, 0.7, 0.2, 0.8, 0.4, 0.6]
+    ctx = [0.2, 0.8, 0.6, 0.4, 0.7, 0.3, 0.9, 0.1]
+}
+
+confident model max=100 threshold=0.95 {
+    x = [0.9, 0.1, 0.3, 0.7, 0.2, 0.8, 0.4, 0.6]
+    ctx = [0.2, 0.8, 0.6, 0.4, 0.7, 0.3, 0.9, 0.1]
+}
+
+# --- 다중 관찰 부하 ---
+observe model { x = [0.9, 0.1, 0.3, 0.7, 0.2, 0.8, 0.4, 0.6] ctx = [0.2, 0.8, 0.6, 0.4, 0.7, 0.3, 0.9, 0.1] }
+observe model { x = [0.1, 0.9, 0.7, 0.3, 0.8, 0.2, 0.6, 0.4] ctx = [0.8, 0.2, 0.4, 0.6, 0.3, 0.7, 0.1, 0.9] }
+observe model { x = [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5] ctx = [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5] }
+observe model { x = [0.3, 0.7, 0.2, 0.8, 0.1, 0.9, 0.4, 0.6] ctx = [0.7, 0.3, 0.8, 0.2, 0.9, 0.1, 0.6, 0.4] }
+observe model { x = [0.8, 0.2, 0.4, 0.6, 0.3, 0.7, 0.1, 0.9] ctx = [0.1, 0.8, 0.5, 0.5, 0.6, 0.4, 0.7, 0.3] }

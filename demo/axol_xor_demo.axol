@@ -1,0 +1,33 @@
+# =======================================================
+#   AXOL AI - Space/Probability Axis Pattern Recognition
+#   XOR (Non-linear) Classification
+# =======================================================
+
+# --- Declare: define the pattern space ---
+declare "xor_classifier" {
+    input x(4)
+    output class
+    relate class <- x via <~>
+    quality omega=0.9 phi=0.85
+}
+
+# --- Weave: construct the tapestry (one-shot, no iteration) ---
+weave xor_classifier quantum=1 seed=42
+
+# --- Observe: classify all 4 XOR cases ---
+
+# Case 1: FALSE XOR FALSE = FALSE
+# Input: [F, F] = [0.9, 0.1, 0.9, 0.1]
+observe xor_classifier { x = [0.9, 0.1, 0.9, 0.1] }
+
+# Case 2: FALSE XOR TRUE = TRUE
+# Input: [F, T] = [0.9, 0.1, 0.1, 0.9]
+observe xor_classifier { x = [0.9, 0.1, 0.1, 0.9] }
+
+# Case 3: TRUE XOR FALSE = TRUE
+# Input: [T, F] = [0.1, 0.9, 0.9, 0.1]
+observe xor_classifier { x = [0.1, 0.9, 0.9, 0.1] }
+
+# Case 4: TRUE XOR TRUE = FALSE
+# Input: [T, T] = [0.1, 0.9, 0.1, 0.9]
+observe xor_classifier { x = [0.1, 0.9, 0.1, 0.9] }

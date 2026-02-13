@@ -1,0 +1,156 @@
+# ============================================================
+# AXOL Use Case 5: Multi-Stage Quality Control Pipeline
+# ============================================================
+# Task: 3-stage quality inspection pipeline
+#   Stage 1 (Encoder):   Raw sensor → feature extraction
+#   Stage 2 (Processor): Feature → defect classification
+#   Stage 3 (Decoder):   Classification → quality decision
+#
+# Scenario: Manufacturing quality control
+#   8-dim input: surface roughness, dimensional accuracy, color uniformity,
+#   hardness, weight deviation, crack density, porosity, surface reflectance
+#
+# Uses compose for pipeline chaining, multiplicative interference
+# for co-occurrence detection, and resolve for disagreement handling
+
+# === Step 1: Basin structures for each stage ===
+
+define_basins "encoder_basins" {
+    dim 8
+    # Good product features
+    basin [0.85, 0.90, 0.88, 0.80, 0.92, 0.05, 0.05, 0.85] volume=0.50
+    # Marginal product features
+    basin [0.60, 0.65, 0.60, 0.55, 0.70, 0.20, 0.18, 0.60] volume=0.30
+    # Defective product features
+    basin [0.25, 0.30, 0.35, 0.30, 0.40, 0.70, 0.65, 0.25] volume=0.20
+    fractal_dim 1.5
+}
+
+define_basins "processor_basins" {
+    dim 8
+    # Pass: all quality metrics high
+    basin [0.90, 0.85, 0.88, 0.82, 0.90, 0.10, 0.08, 0.90] volume=0.45
+    # Rework: some metrics below threshold
+    basin [0.55, 0.60, 0.58, 0.50, 0.65, 0.25, 0.22, 0.55] volume=0.30
+    # Reject: critical defects detected
+    basin [0.20, 0.25, 0.30, 0.25, 0.35, 0.75, 0.70, 0.20] volume=0.25
+    fractal_dim 1.4
+}
+
+define_basins "decoder_basins" {
+    dim 8
+    # Ship: final quality approval
+    basin [0.92, 0.90, 0.90, 0.85, 0.93, 0.05, 0.05, 0.92] volume=0.40
+    # Hold: needs further inspection
+    basin [0.60, 0.65, 0.62, 0.58, 0.68, 0.18, 0.15, 0.62] volume=0.35
+    # Scrap: beyond repair
+    basin [0.15, 0.20, 0.22, 0.18, 0.25, 0.80, 0.75, 0.15] volume=0.25
+    fractal_dim 1.3
+}
+
+# === Step 2: Declare 3-stage pipeline ===
+
+declare "encoder" {
+    input raw(8)
+    relate features <- raw via <~>
+    output features
+    quality omega=0.90 phi=0.85
+}
+
+declare "processor" {
+    input features(8)
+    relate classification <- features via <~>
+    output classification
+    quality omega=0.88 phi=0.82
+}
+
+declare "decoder" {
+    input classification(8)
+    relate decision <- classification via <~>
+    output decision
+    quality omega=0.92 phi=0.88
+}
+
+weave encoder quantum=true seed=42 from_basins="encoder_basins"
+weave processor quantum=true seed=43 from_basins="processor_basins"
+weave decoder quantum=true seed=44 from_basins="decoder_basins"
+
+# === Step 3: Compose pipeline ===
+compose "quality_pipeline" stages=[encoder, processor, decoder]
+
+# === Step 4: Test items through pipeline ===
+
+# Good product: high quality, smooth surface, accurate dimensions
+observe encoder {
+    raw = [0.88, 0.92, 0.85, 0.82, 0.90, 0.08, 0.06, 0.87]
+}
+
+# Marginal product: some metrics borderline
+observe encoder {
+    raw = [0.58, 0.62, 0.55, 0.50, 0.65, 0.22, 0.20, 0.58]
+}
+
+# Defective product: cracks and porosity detected
+observe encoder {
+    raw = [0.30, 0.28, 0.35, 0.25, 0.38, 0.72, 0.68, 0.28]
+}
+
+# === Step 5: Wave analysis — multiplicative interference ===
+# Co-occurrence: surface defect AND structural defect together
+
+wave good_item = encoder {
+    raw = [0.88, 0.92, 0.85, 0.82, 0.90, 0.08, 0.06, 0.87]
+}
+
+wave surface_defect = encoder {
+    raw = [0.30, 0.85, 0.35, 0.78, 0.88, 0.60, 0.10, 0.30]
+}
+
+wave structural_defect = encoder {
+    raw = [0.82, 0.30, 0.80, 0.28, 0.40, 0.15, 0.70, 0.80]
+}
+
+wave dual_defect = encoder {
+    raw = [0.28, 0.30, 0.32, 0.25, 0.38, 0.68, 0.65, 0.28]
+}
+
+# Gaze: non-destructive quality read
+gaze good_item
+gaze surface_defect
+gaze structural_defect
+gaze dual_defect
+
+# Multiplicative interference: both defect types must co-occur
+rel co_occurrence = surface_defect <-> structural_defect via <*>
+observe co_occurrence {}
+
+# Cross-product comparison
+rel surface_vs_good = surface_defect >< good_item via <!>
+rel structural_vs_good = structural_defect >< good_item via <!>
+
+observe surface_vs_good {}
+observe structural_vs_good {}
+
+# === Step 6: Disagreement handling ===
+# What if encoder says "good" but processor says "defective"?
+
+wave encoder_pass = processor {
+    features = [0.85, 0.88, 0.82, 0.80, 0.88, 0.10, 0.08, 0.85]
+}
+
+wave processor_reject = processor {
+    features = [0.22, 0.28, 0.30, 0.25, 0.35, 0.72, 0.68, 0.22]
+}
+
+# Resolve disagreements between stages
+resolve encoder_pass, processor_reject with interfere
+resolve encoder_pass, processor_reject with superpose
+
+# === Step 7: Iterate on borderline case ===
+iterate encoder max=10 converge=prob_delta value=0.005 {
+    raw = [0.58, 0.62, 0.55, 0.50, 0.65, 0.22, 0.20, 0.58]
+}
+
+confident decoder max=20 threshold=0.90 {
+    classification = [0.60, 0.65, 0.62, 0.58, 0.68, 0.18, 0.15, 0.62]
+}

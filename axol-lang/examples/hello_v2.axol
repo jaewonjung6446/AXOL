@@ -1,0 +1,62 @@
+# AXOL v2 — Relation-First Grammar Example
+# Backward-compatible: uses existing declare/weave/observe + new v2 features
+
+# === 비균일 basin 구조 정의 ===
+define_basins "mood_basins" {
+    dim 8
+    basin [0.8, 0.2, 0.1, 0.3, 0.5, 0.7, 0.9, 0.4] volume=0.4
+    basin [0.2, 0.7, 0.8, 0.6, 0.4, 0.3, 0.1, 0.5] volume=0.35
+    basin [0.5, 0.5, 0.5, 0.9, 0.1, 0.5, 0.5, 0.8] volume=0.25
+    fractal_dim 1.6
+}
+
+# === Step 1: Classic declare/weave ===
+declare "mood" {
+    input text(8)
+    input context(8)
+    relate sentiment <- text, context via <~>
+    output sentiment
+    quality omega=0.85 phi=0.8
+}
+
+weave mood quantum=true seed=42 from_basins="mood_basins"
+
+# === Step 2: Create waves ===
+wave x = mood {
+    text = [0.8, 0.2, 0.1, 0.5, 0.3, 0.1, 0.9, 0.4]
+    context = [0.1, 0.3, 0.7, 0.2, 0.5, 0.8, 0.1, 0.6]
+}
+
+wave y = mood {
+    text = [0.1, 0.7, 0.3, 0.2, 0.6, 0.9, 0.1, 0.5]
+    context = [0.5, 0.2, 0.4, 0.8, 0.1, 0.3, 0.6, 0.7]
+}
+
+# === Step 3: Create a Relation ===
+rel r = x <-> y via <~>
+
+# === Step 4: Gaze ===
+gaze x
+gaze y
+
+# === Step 5: Expectation landscape ===
+expect bias = [0.6, 0.3, 0.05, 0.05, 0.0, 0.0, 0.0, 0.0] strength=0.8
+
+# === Step 6: Observe with expectation ===
+observe r {} with bias
+
+# === Step 7: Widen ===
+widen r 0.3
+
+# === Step 8: Observe again after widen ===
+observe r {}
+
+# === Step 9: Wave reference expectation ===
+expect wave_bias = x strength=0.5
+observe r {} with wave_bias
+
+# === Step 10: Classic observe ===
+observe mood {
+    text = [0.8, 0.2, 0.1, 0.5, 0.3, 0.1, 0.9, 0.4]
+    context = [0.1, 0.3, 0.7, 0.2, 0.5, 0.8, 0.1, 0.6]
+}

@@ -434,6 +434,85 @@ def _compose_hybrid_chain_from_transitions(
     return composed_matrix, rotation, scales, chain_info
 
 
+def _build_one_hot(targets: np.ndarray, dim: int) -> np.ndarray:
+    """Build one-hot matrix (N, dim) from integer label array (N,)."""
+    N = len(targets)
+    Y = np.zeros((N, dim), dtype=np.float64)
+    for i, t in enumerate(targets):
+        Y[i, int(t) % dim] = 1.0
+    return Y
+
+
+def _fit_readout(
+    program: Program,
+    composed_matrix: TransMatrix | None,
+    input_key: str,
+    output_key: str,
+    dim: int,
+    fit_data: dict,
+) -> tuple[TransMatrix, dict]:
+    """Fit a readout matrix W via lstsq so that argmax(|H @ W|^2) = target.
+
+    Reservoir Computing approach:
+    - composed_matrix exists → H = X @ C (fast, single matmul)
+    - composed_matrix is None → run program to collect H
+    - Y = one-hot(targets, dim)
+    - W = lstsq(H, Y) — single shot, no epochs
+    """
+    X = np.asarray(fit_data["input"], dtype=np.float64)
+    targets = np.asarray(fit_data["target"], dtype=np.int64)
+    N = X.shape[0]
+    n_classes = int(targets.max()) + 1
+
+    # Build reservoir features H
+    if composed_matrix is not None:
+        C = composed_matrix.data.astype(np.float64)
+        H = X @ C
+    else:
+        # Fallback: run the full program per sample
+        from axol.core.program import run_program as _run_program
+
+        H = np.empty((N, dim), dtype=np.float64)
+        for i in range(N):
+            x_data = X[i].astype(np.float32)
+            x_vec = FloatVec(data=x_data)
+            state = program.initial_state.copy()
+            state[input_key] = x_vec
+            injected = Program(
+                name=program.name,
+                initial_state=state,
+                transitions=program.transitions,
+            )
+            result = _run_program(injected)
+            final = result.final_state
+            if output_key in final:
+                H[i] = final[output_key].data.astype(np.float64)
+            else:
+                H[i] = x_data.astype(np.float64)
+
+    # Target one-hot
+    Y = _build_one_hot(targets, dim)
+
+    # Solve H @ W = Y in least-squares sense
+    W, _, _, _ = np.linalg.lstsq(H, Y, rcond=None)
+    W = np.nan_to_num(W, nan=0.0, posinf=10.0, neginf=-10.0)
+
+    # Training accuracy (Born rule: argmax(|H @ W|^2))
+    scores = H @ W
+    probs = scores ** 2
+    preds = np.argmax(probs, axis=1)
+    accuracy = float(np.mean(preds == targets))
+
+    method = "reservoir" if composed_matrix is not None else "end_to_end"
+    fit_info = {
+        "n_samples": N,
+        "n_classes": n_classes,
+        "accuracy": accuracy,
+        "method": method,
+    }
+    return TransMatrix(data=W.astype(np.float32)), fit_info
+
+
 def _distill_end_to_end(
     program: Program,
     input_key: str,
@@ -501,6 +580,7 @@ def weave(
     koopman_samples: int = 500,
     koopman_basis: str = "poly",
     quantum: bool = False,  # Enable complex amplitudes + density matrix
+    fit_data: dict | None = None,  # {"input": (N, dim) ndarray, "target": (N,) int labels}
 ) -> Tapestry:
     """Weave a declaration into a Tapestry.
 
@@ -855,6 +935,37 @@ def weave(
                     basis=koopman_basis,
                 )
 
+    # Step 9b: Fit readout from training data (Reservoir Computing)
+    fit_info = None
+    if fit_data is not None:
+        # Determine input/output keys for fit
+        transform_ops = [t for t in transitions if isinstance(t.operation, TransformOp)]
+        if transform_ops:
+            input_key = transform_ops[0].operation.key
+            output_key = transform_ops[-1].operation.out_key or transform_ops[-1].operation.key
+        else:
+            input_key = declaration.input_names[0]
+            output_key = declaration.outputs[0]
+
+        readout, fit_info = _fit_readout(
+            program, composed_matrix, input_key, output_key, work_dim, fit_data,
+        )
+        if composed_matrix is not None:
+            # reservoir @ readout → single combined matrix
+            final = composed_matrix.data.astype(np.float64) @ readout.data.astype(np.float64)
+            composed_matrix = TransMatrix(data=final.astype(np.float32))
+        else:
+            # end-to-end fit: direct input → target mapping
+            X = np.asarray(fit_data["input"], dtype=np.float64)
+            Y = _build_one_hot(fit_data["target"], work_dim)
+            M, _, _, _ = np.linalg.lstsq(X, Y, rcond=None)
+            composed_matrix = TransMatrix(data=np.nan_to_num(M).astype(np.float32))
+            composed_chain_info = {
+                "input_key": input_key,
+                "output_key": output_key,
+                "num_composed": 1,
+            }
+
     # Step 10: Quantum structure (density matrix + Kraus operators)
     density_matrix = None
     kraus_operators = None
@@ -906,4 +1017,5 @@ def weave(
         _quantum=quantum,
         _density_matrix=density_matrix,
         _kraus_operators=kraus_operators,
+        _fit_info=fit_info,
     )

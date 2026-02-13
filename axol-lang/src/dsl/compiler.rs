@@ -3,12 +3,14 @@
 use std::collections::HashMap;
 use std::time::Instant;
 
-use crate::types::FloatVec;
+use crate::types::{FloatVec, BasinStructure};
 use crate::declare::*;
+use crate::wave::{Wave, InterferencePattern};
 use crate::weaver::{self, Tapestry};
 use crate::observatory::{self, Observation};
 use crate::compose;
 use crate::learn;
+use crate::relation::{self, Relation, Expectation};
 use crate::dsl::parser::*;
 use crate::errors::{AxolError, Result};
 
@@ -17,6 +19,11 @@ pub struct Runtime {
     tapestries: HashMap<String, Tapestry>,
     chains: HashMap<String, compose::TapestryChain>,
     basin_designs: HashMap<String, compose::BasinDesign>,
+    basin_structures: HashMap<String, BasinStructure>,
+    waves: HashMap<String, Wave>,
+    relations: HashMap<String, Relation>,
+    observations: HashMap<String, (Wave, Observation)>,
+    expectations: HashMap<String, Expectation>,
 }
 
 impl Runtime {
@@ -26,6 +33,11 @@ impl Runtime {
             tapestries: HashMap::new(),
             chains: HashMap::new(),
             basin_designs: HashMap::new(),
+            basin_structures: HashMap::new(),
+            waves: HashMap::new(),
+            relations: HashMap::new(),
+            observations: HashMap::new(),
+            expectations: HashMap::new(),
         }
     }
 
@@ -64,6 +76,33 @@ impl Runtime {
                 }
                 Statement::Learn(cmd) => {
                     self.exec_learn(cmd, &mut output_lines)?;
+                }
+                Statement::DefineBasinsCmd(cmd) => {
+                    self.exec_define_basins(cmd, &mut output_lines)?;
+                }
+                Statement::WaveCreate(cmd) => {
+                    self.exec_wave(cmd, &mut output_lines)?;
+                }
+                Statement::FocusWave(cmd) => {
+                    self.exec_focus(cmd, &mut output_lines)?;
+                }
+                Statement::GazeWave(cmd) => {
+                    self.exec_gaze(cmd, &mut output_lines)?;
+                }
+                Statement::GlimpseWave(cmd) => {
+                    self.exec_glimpse(cmd, &mut output_lines)?;
+                }
+                Statement::RelDeclare(cmd) => {
+                    self.exec_rel(cmd, &mut output_lines)?;
+                }
+                Statement::ExpectDeclare(cmd) => {
+                    self.exec_expect(cmd, &mut output_lines)?;
+                }
+                Statement::WidenWave(cmd) => {
+                    self.exec_widen(cmd, &mut output_lines)?;
+                }
+                Statement::ResolveObs(cmd) => {
+                    self.exec_resolve(cmd, &mut output_lines)?;
                 }
             }
         }
@@ -105,14 +144,31 @@ impl Runtime {
             .clone();
 
         let start = Instant::now();
-        let tapestry = weaver::weave(&decl, cmd.quantum, cmd.seed)?;
+        let mut tapestry = weaver::weave(&decl, cmd.quantum, cmd.seed)?;
+
+        // If from_basins specified, override the basin_structure
+        if let Some(ref bs_name) = cmd.from_basins {
+            if let Some(bs) = self.basin_structures.get(bs_name) {
+                tapestry.basin_structure = bs.clone();
+                // Update report with overridden basin structure
+                tapestry.report.estimated_omega = bs.omega();
+                tapestry.report.estimated_phi = bs.phi();
+                tapestry.report.shannon_entropy = bs.shannon_entropy();
+                tapestry.report.n_basins = bs.n_basins;
+                tapestry.preserve_basins = true;
+            } else {
+                return Err(AxolError::Weaver(format!("BasinStructure '{}' not found", bs_name)));
+            }
+        }
+
         let elapsed = start.elapsed();
 
         out.push(format!(
-            "[weave] '{}': quantum={} seed={} omega={:.4} phi={:.4} ({:.3}ms)",
+            "[weave] '{}': quantum={} seed={} omega={:.4} phi={:.4} basins={} ({:.3}ms)",
             cmd.name, cmd.quantum, cmd.seed,
             tapestry.report.estimated_omega,
             tapestry.report.estimated_phi,
+            tapestry.report.n_basins,
             elapsed.as_secs_f64() * 1000.0,
         ));
 
@@ -125,6 +181,62 @@ impl Runtime {
     }
 
     fn exec_observe(&mut self, cmd: &ObserveCmd, out: &mut Vec<String>) -> Result<()> {
+        // Check if observing a relation
+        if self.relations.contains_key(&cmd.name) {
+            if let Some(ref expect_name) = cmd.with_expect {
+                // Observe relation with expectation landscape
+                let expect = self.expectations.get(expect_name)
+                    .ok_or_else(|| AxolError::Relation(format!("Expectation '{}' not found", expect_name)))?
+                    .clone();
+
+                let rel = self.relations.get_mut(&cmd.name).unwrap();
+
+                let start = Instant::now();
+                let result = rel.apply_expect(&expect)?;
+                let elapsed = start.elapsed();
+
+                out.push(format!(
+                    "[observe] rel '{}' with '{}': idx={} alignment={:.4} negativity_delta={:+.4} coherences={} ({:.1}us)",
+                    cmd.name, expect_name, result.value_index, result.alignment,
+                    result.negativity_delta, result.surviving_coherences,
+                    elapsed.as_secs_f64() * 1e6,
+                ));
+
+                let top: Vec<String> = result.probabilities.iter().enumerate()
+                    .take(5)
+                    .map(|(i, p)| format!("[{}]={:.4}", i, p))
+                    .collect();
+                out.push(format!("  probs: {}", top.join(", ")));
+                out.push(format!("  negativity: {:.4}", rel.negativity));
+
+                if let Some(ref var) = cmd.result_var {
+                    self.waves.insert(var.clone(), result.wave);
+                }
+                return Ok(());
+            } else {
+                // Observe relation without expectation — just read its state
+                let rel = self.relations.get(&cmd.name).unwrap();
+                let probs = rel.gaze();
+                let (value_index, _) = rel.wave.observe();
+
+                let top: Vec<String> = probs.iter().enumerate()
+                    .take(5)
+                    .map(|(i, p)| format!("[{}]={:.4}", i, p))
+                    .collect();
+
+                out.push(format!(
+                    "[observe] rel '{}': idx={} negativity={:.4}",
+                    cmd.name, value_index, rel.negativity,
+                ));
+                out.push(format!("  probs: {}", top.join(", ")));
+
+                if let Some(ref var) = cmd.result_var {
+                    self.waves.insert(var.clone(), rel.wave.clone());
+                }
+                return Ok(());
+            }
+        }
+
         let tapestry = self.tapestries.get(&cmd.name)
             .ok_or_else(|| AxolError::Observatory(format!("Tapestry '{}' not woven", cmd.name)))?;
 
@@ -145,6 +257,18 @@ impl Runtime {
         ));
 
         self.print_observation_details(&obs, out);
+
+        // Store observation if result_var is set
+        if let Some(ref var) = cmd.result_var {
+            if let Some(ref wave) = obs.wave {
+                self.waves.insert(var.clone(), wave.clone());
+            }
+            self.observations.insert(var.clone(), (
+                obs.wave.clone().unwrap_or_else(|| Wave::collapsed(obs.probabilities.dim(), obs.value_index)),
+                obs,
+            ));
+        }
+
         Ok(())
     }
 
@@ -290,6 +414,7 @@ impl Runtime {
             "omega_target" => compose::ConvergenceCriterion::OmegaTarget,
             "phi_target" => compose::ConvergenceCriterion::PhiTarget,
             "purity" => compose::ConvergenceCriterion::PurityThreshold,
+            "basin_dist" => compose::ConvergenceCriterion::BasinDistribution(cmd.converge_value),
             _ => compose::ConvergenceCriterion::ProbabilityDelta(cmd.converge_value),
         };
 
@@ -372,6 +497,304 @@ impl Runtime {
 
         self.tapestries.insert(cmd.name.clone(), result.tapestry);
         Ok(())
+    }
+
+    fn exec_define_basins(&mut self, cmd: &DefineBasinsBlock, out: &mut Vec<String>) -> Result<()> {
+        let centroids: Vec<Vec<f64>> = cmd.basins.iter().map(|b| b.centroid.clone()).collect();
+        let volumes: Vec<f64> = cmd.basins.iter().map(|b| b.volume).collect();
+
+        let bs = BasinStructure::from_direct(
+            cmd.dim,
+            centroids,
+            volumes,
+            cmd.fractal_dim,
+        );
+
+        out.push(format!(
+            "[define_basins] '{}': dim={} basins={} omega={:.4} phi={:.4} entropy={:.4}",
+            cmd.name, bs.dim, bs.n_basins, bs.omega(), bs.phi(), bs.shannon_entropy(),
+        ));
+
+        self.basin_structures.insert(cmd.name.clone(), bs);
+        Ok(())
+    }
+
+    // --- Wave system ---
+
+    fn exec_wave(&mut self, cmd: &WaveCmd, out: &mut Vec<String>) -> Result<()> {
+        let tapestry = self.tapestries.get(&cmd.tapestry_name)
+            .ok_or_else(|| AxolError::Observatory(format!("Tapestry '{}' not woven", cmd.tapestry_name)))?;
+
+        let input_vecs: Vec<(String, FloatVec)> = cmd.inputs.iter().map(|(name, vals)| {
+            (name.clone(), FloatVec::new(vals.iter().map(|&v| v as f32).collect()))
+        }).collect();
+        let inputs: Vec<(&str, &FloatVec)> = input_vecs.iter().map(|(n, v)| (n.as_str(), v)).collect();
+
+        let start = Instant::now();
+        let wave = observatory::gaze(tapestry, &inputs)?;
+        let elapsed = start.elapsed();
+
+        out.push(format!(
+            "[wave] '{}' = gaze('{}') -> {} (C=0, {:.1}us)",
+            cmd.var_name, cmd.tapestry_name, wave,
+            elapsed.as_secs_f64() * 1e6,
+        ));
+
+        self.waves.insert(cmd.var_name.clone(), wave);
+        Ok(())
+    }
+
+    fn exec_focus(&mut self, cmd: &FocusCmd, out: &mut Vec<String>) -> Result<()> {
+        let wave = self.waves.get(&cmd.var_name)
+            .ok_or_else(|| AxolError::Observatory(format!("Wave '{}' not found", cmd.var_name)))?
+            .clone();
+
+        let start = Instant::now();
+        let focused = wave.focus(cmd.gamma);
+        let elapsed = start.elapsed();
+
+        out.push(format!(
+            "[focus] '{}' gamma={:.2} -> t={:.3} dominant={} (C={:.2}, {:.1}us)",
+            cmd.var_name, cmd.gamma, focused.t, focused.dominant(), cmd.gamma,
+            elapsed.as_secs_f64() * 1e6,
+        ));
+
+        self.waves.insert(cmd.var_name.clone(), focused);
+        Ok(())
+    }
+
+    fn exec_gaze(&mut self, cmd: &GazeCmd, out: &mut Vec<String>) -> Result<()> {
+        let wave = self.waves.get(&cmd.var_name)
+            .ok_or_else(|| AxolError::Observatory(format!("Wave '{}' not found", cmd.var_name)))?;
+
+        let probs = wave.gaze();
+        let mut indexed: Vec<(usize, f64)> = probs.iter().enumerate()
+            .map(|(i, &p)| (i, p)).collect();
+        indexed.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        let top: Vec<String> = indexed.iter().take(5)
+            .map(|(i, p)| format!("[{}]={:.4}", i, p))
+            .collect();
+
+        out.push(format!(
+            "[gaze] '{}': t={:.3} probs: {} (C=0)",
+            cmd.var_name, wave.t, top.join(", "),
+        ));
+
+        Ok(())
+    }
+
+    fn exec_glimpse(&mut self, cmd: &GlimpseCmd, out: &mut Vec<String>) -> Result<()> {
+        let wave = self.waves.get(&cmd.var_name)
+            .ok_or_else(|| AxolError::Observatory(format!("Wave '{}' not found", cmd.var_name)))?
+            .clone();
+
+        let start = Instant::now();
+        let glimpsed = wave.focus(cmd.gamma);
+        let elapsed = start.elapsed();
+
+        let probs = glimpsed.gaze();
+        let mut indexed: Vec<(usize, f64)> = probs.iter().enumerate()
+            .map(|(i, &p)| (i, p)).collect();
+        indexed.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        let top: Vec<String> = indexed.iter().take(5)
+            .map(|(i, p)| format!("[{}]={:.4}", i, p))
+            .collect();
+
+        out.push(format!(
+            "[glimpse] '{}' gamma={:.2}: t={:.3} probs: {} (C={:.2}, {:.1}us)",
+            cmd.var_name, cmd.gamma, glimpsed.t, top.join(", "), cmd.gamma,
+            elapsed.as_secs_f64() * 1e6,
+        ));
+
+        self.waves.insert(cmd.var_name.clone(), glimpsed);
+        Ok(())
+    }
+
+    // --- Relation-first (v2) ---
+
+    fn exec_rel(&mut self, cmd: &RelDecl, out: &mut Vec<String>) -> Result<()> {
+        // Look up from/to waves
+        let from_wave = self.waves.get(&cmd.from)
+            .ok_or_else(|| AxolError::Relation(format!("Wave '{}' not found", cmd.from)))?
+            .clone();
+        let to_wave = self.waves.get(&cmd.to)
+            .ok_or_else(|| AxolError::Relation(format!("Wave '{}' not found", cmd.to)))?
+            .clone();
+
+        // Determine interference pattern from via clause
+        let pattern = if let Some(ref via) = cmd.via {
+            let kind = RelationKind::from_str(via)
+                .ok_or_else(|| AxolError::Parse(format!("Unknown relation kind: {}", via)))?;
+            InterferencePattern::from_relation(&kind)
+        } else {
+            InterferencePattern::Constructive // default
+        };
+
+        let dir_str = match cmd.direction {
+            RelDirection::Bidir => "<->",
+            RelDirection::Forward => "<-",
+            RelDirection::Conflict => "><",
+        };
+
+        let start = Instant::now();
+        let rel = Relation::new(
+            &cmd.name, &cmd.from, &cmd.to,
+            cmd.direction.clone(), &from_wave, &to_wave, pattern,
+        )?;
+        let elapsed = start.elapsed();
+
+        out.push(format!(
+            "[rel] '{}' = {} {} {} negativity={:.4} ({:.1}us)",
+            cmd.name, cmd.from, dir_str, cmd.to, rel.negativity,
+            elapsed.as_secs_f64() * 1e6,
+        ));
+
+        let probs = rel.gaze();
+        let top: Vec<String> = probs.iter().enumerate()
+            .take(5)
+            .map(|(i, p)| format!("[{}]={:.4}", i, p))
+            .collect();
+        out.push(format!("  probs: {}", top.join(", ")));
+
+        self.relations.insert(cmd.name.clone(), rel);
+        Ok(())
+    }
+
+    fn exec_expect(&mut self, cmd: &ExpectDecl, out: &mut Vec<String>) -> Result<()> {
+        let landscape = match &cmd.landscape {
+            ExpectLandscape::Distribution(values) => values.clone(),
+            ExpectLandscape::WaveRef(wave_name) => {
+                let wave = self.waves.get(wave_name)
+                    .ok_or_else(|| AxolError::Relation(format!("Wave '{}' not found for expect landscape", wave_name)))?;
+                wave.probabilities()
+            }
+        };
+
+        let expect = Expectation::from_distribution(&cmd.name, landscape.clone(), cmd.strength);
+
+        let source_desc = match &cmd.landscape {
+            ExpectLandscape::Distribution(_) => format!("[{}]", landscape.iter().take(5).map(|v| format!("{:.2}", v)).collect::<Vec<_>>().join(", ")),
+            ExpectLandscape::WaveRef(name) => format!("wave '{}'", name),
+        };
+
+        out.push(format!(
+            "[expect] '{}' = {} strength={:.2} (landscape dim={})",
+            cmd.name, source_desc, cmd.strength, landscape.len(),
+        ));
+
+        self.expectations.insert(cmd.name.clone(), expect);
+        Ok(())
+    }
+
+    fn exec_widen(&mut self, cmd: &WidenCmd, out: &mut Vec<String>) -> Result<()> {
+        // Try relation first, then wave
+        if let Some(rel) = self.relations.get_mut(&cmd.var_name) {
+            let old_neg = rel.negativity;
+            let old_t = rel.wave.t;
+
+            let start = Instant::now();
+            rel.widen(cmd.amount)?;
+            let elapsed = start.elapsed();
+
+            out.push(format!(
+                "[widen] rel '{}' amount={:.2}: t={:.3}->{:.3} negativity={:.4}->{:.4} ({:.1}us)",
+                cmd.var_name, cmd.amount, old_t, rel.wave.t,
+                old_neg, rel.negativity, elapsed.as_secs_f64() * 1e6,
+            ));
+            return Ok(());
+        }
+
+        if let Some(wave) = self.waves.get(&cmd.var_name) {
+            let old_t = wave.t;
+            let amount = cmd.amount.clamp(0.0, 1.0);
+
+            let start = Instant::now();
+            // Widen: reduce t and apply depolarizing channel
+            let new_t = old_t * (1.0 - amount);
+            let rho = wave.to_density();
+            let kraus = crate::density::depolarizing_channel(wave.dim, amount);
+            let widened_rho = crate::density::apply_channel(&rho, &kraus);
+            let mut new_wave = Wave::from_density(widened_rho);
+            new_wave.t = new_t;
+            let elapsed = start.elapsed();
+
+            out.push(format!(
+                "[widen] wave '{}' amount={:.2}: t={:.3}->{:.3} ({:.1}us)",
+                cmd.var_name, cmd.amount, old_t, new_wave.t,
+                elapsed.as_secs_f64() * 1e6,
+            ));
+
+            self.waves.insert(cmd.var_name.clone(), new_wave);
+            return Ok(());
+        }
+
+        Err(AxolError::Relation(format!(
+            "No relation or wave named '{}' found", cmd.var_name
+        )))
+    }
+
+    fn exec_resolve(&mut self, cmd: &ResolveCmd, out: &mut Vec<String>) -> Result<()> {
+        if cmd.observations.len() < 2 {
+            return Err(AxolError::Relation("Resolve needs at least 2 observations".into()));
+        }
+
+        // Look up waves from observations or waves map
+        let wave_a = self.get_resolve_wave(&cmd.observations[0])?;
+        let wave_b = self.get_resolve_wave(&cmd.observations[1])?;
+
+        let strategy_name = match cmd.strategy {
+            ResolveStrategy::Interfere => "interfere",
+            ResolveStrategy::Branch => "branch",
+            ResolveStrategy::Rebase(_) => "rebase",
+            ResolveStrategy::Superpose => "superpose",
+        };
+
+        let start = Instant::now();
+        let resolved = match &cmd.strategy {
+            ResolveStrategy::Interfere => relation::resolve_interfere(&wave_a, &wave_b)?,
+            ResolveStrategy::Branch => relation::resolve_branch(&wave_a, &wave_b)?,
+            ResolveStrategy::Rebase(target_name) => {
+                let target = self.get_resolve_wave(target_name)?;
+                relation::resolve_rebase(&wave_a, &target)?
+            }
+            ResolveStrategy::Superpose => relation::resolve_superpose(&wave_a, &wave_b)?,
+        };
+        let elapsed = start.elapsed();
+
+        let probs = resolved.gaze();
+        let top: Vec<String> = probs.iter().enumerate()
+            .take(5)
+            .map(|(i, p)| format!("[{}]={:.4}", i, p))
+            .collect();
+
+        out.push(format!(
+            "[resolve] {} {} with {}: t={:.3} ({:.1}us)",
+            cmd.observations.join(", "), strategy_name,
+            strategy_name, resolved.t, elapsed.as_secs_f64() * 1e6,
+        ));
+        out.push(format!("  probs: {}", top.join(", ")));
+
+        // Store the resolved wave under a combined name
+        let resolved_name = format!("resolved_{}_{}", cmd.observations[0], cmd.observations[1]);
+        self.waves.insert(resolved_name, resolved);
+
+        Ok(())
+    }
+
+    /// Helper: look up a wave from observations, relations, or waves map.
+    fn get_resolve_wave(&self, name: &str) -> Result<Wave> {
+        if let Some((wave, _)) = self.observations.get(name) {
+            return Ok(wave.clone());
+        }
+        if let Some(rel) = self.relations.get(name) {
+            return Ok(rel.wave.clone());
+        }
+        if let Some(wave) = self.waves.get(name) {
+            return Ok(wave.clone());
+        }
+        Err(AxolError::Relation(format!(
+            "No observation, relation, or wave named '{}' found", name
+        )))
     }
 
     fn print_observation_details(&self, obs: &Observation, out: &mut Vec<String>) {

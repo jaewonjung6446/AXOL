@@ -1,0 +1,67 @@
+# Benchmark: Conflict Detection & Resolution
+# 서로 다른 basin 영역을 겨냥하는 wave들 사이의 충돌
+
+# 극적으로 다른 3 basin
+define_basins "detector_basins" {
+    dim 8
+    basin [0.95, 0.05, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1] volume=0.4
+    basin [0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.05, 0.95] volume=0.4
+    basin [0.4, 0.4, 0.5, 0.6, 0.6, 0.5, 0.4, 0.4] volume=0.2
+    fractal_dim 1.5
+}
+
+declare "detector" {
+    input signal(8)
+    input noise(8)
+    relate result <- signal, noise via <~>
+    output result
+    quality omega=0.95 phi=0.9
+}
+
+weave detector quantum=true seed=33 from_basins="detector_basins"
+
+# 상반된 영역을 겨냥하는 입력
+wave clean = detector {
+    signal = [0.95, 0.05, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1]
+    noise = [0.8, 0.1, 0.05, 0.05, 0.1, 0.1, 0.1, 0.1]
+}
+
+wave noisy = detector {
+    signal = [0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.05, 0.95]
+    noise = [0.1, 0.1, 0.1, 0.1, 0.05, 0.05, 0.1, 0.9]
+}
+
+wave ambiguous = detector {
+    signal = [0.4, 0.4, 0.5, 0.6, 0.6, 0.5, 0.4, 0.4]
+    noise = [0.3, 0.3, 0.5, 0.5, 0.5, 0.5, 0.3, 0.3]
+}
+
+# wave 분포 확인
+gaze clean
+gaze noisy
+gaze ambiguous
+
+# 관계 생성
+rel clean_vs_noisy = clean <-> noisy via <~>
+rel clean_vs_ambig = clean <-> ambiguous via <~>
+rel conflict1 = clean >< noisy via <!>
+
+# 관계 관찰
+observe clean_vs_noisy {}
+observe clean_vs_ambig {}
+observe conflict1 {}
+
+# --- 해결 전략 비교 ---
+resolve clean, noisy with interfere
+resolve clean, noisy with superpose
+resolve clean, noisy with branch
+resolve clean, ambiguous with interfere
+resolve noisy, ambiguous with superpose
+
+# expect를 통한 충돌 해결 가이드
+expect prefer_clean = clean strength=0.8
+observe clean_vs_noisy {} with prefer_clean
+
+expect prefer_noisy = noisy strength=0.8
+widen clean_vs_noisy 0.5
+observe clean_vs_noisy {} with prefer_noisy

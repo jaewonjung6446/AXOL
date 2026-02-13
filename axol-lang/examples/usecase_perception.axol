@@ -1,0 +1,130 @@
+# ============================================================
+# AXOL Use Case: Predictive Coding / Perception Engine
+# ============================================================
+# 뇌의 지각 과정을 모델링:
+#   expect = 뇌의 예측 (top-down)
+#   wave   = 감각 입력 (bottom-up)
+#   observe with expect = 지각 (interference)
+#   negativity_delta = 예측 오류
+#
+# O(1) per perception cycle.
+# 1000Hz 센서에서도 실시간 처리 가능.
+#
+# dim=8: [brightness, contrast, edge_density, motion,
+#         color_warmth, texture, depth, salience]
+
+define_basins "visual_field" {
+    dim 8
+    basin [0.8, 0.7, 0.6, 0.1, 0.5, 0.4, 0.3, 0.7] volume=0.30
+    basin [0.3, 0.5, 0.8, 0.7, 0.3, 0.7, 0.6, 0.8] volume=0.30
+    basin [0.5, 0.3, 0.2, 0.05, 0.6, 0.3, 0.8, 0.3] volume=0.20
+    basin [0.2, 0.8, 0.9, 0.9, 0.4, 0.5, 0.2, 0.9] volume=0.20
+    fractal_dim 1.6
+}
+
+declare "perceiver" {
+    input sensory(8)
+    relate percept <- sensory via <~>
+    output percept
+    quality omega=0.90 phi=0.85
+}
+
+weave perceiver quantum=true seed=42 from_basins="visual_field"
+
+# ============================================================
+# Cycle 1: 안정된 장면. 예측과 현실이 일치.
+# expect ≈ sensory → 낮은 negativity_delta (확인)
+# ============================================================
+
+wave scene_1 = perceiver {
+    sensory = [0.7, 0.6, 0.5, 0.1, 0.5, 0.4, 0.35, 0.6]
+}
+
+# 뇌의 예측: "밝고, 대비 있고, 정적인 장면"
+expect prediction_1 = [0.7, 0.6, 0.5, 0.1, 0.5, 0.4, 0.35, 0.6] strength=0.8
+
+# Gaze: 붕괴 없이 가능성 공간 확인 (C=0, 비용 0)
+gaze scene_1
+
+# 지각: 예측과 입력의 간섭
+rel perception_1 = scene_1 <-> scene_1 via <~>
+observe perception_1 {} with prediction_1
+
+# ============================================================
+# Cycle 2: 갑자기 움직임 감지! motion 급등.
+# 예측은 여전히 "정적" → 큰 prediction error
+# ============================================================
+
+wave scene_2 = perceiver {
+    sensory = [0.7, 0.6, 0.5, 0.85, 0.5, 0.4, 0.35, 0.9]
+}
+
+# 예측은 아직 이전 프레임 기반
+expect prediction_2 = [0.7, 0.6, 0.5, 0.1, 0.5, 0.4, 0.35, 0.6] strength=0.8
+
+gaze scene_2
+
+# 현재 장면과 이전 장면의 관계
+rel scene_change = scene_1 <-> scene_2 via <~>
+observe scene_change {}
+
+# 예측 오류가 큰 지각
+rel perception_2 = scene_2 <-> scene_2 via <~>
+observe perception_2 {} with prediction_2
+
+# ============================================================
+# Cycle 3: 예측 업데이트. "움직임이 있는 장면"
+# 업데이트된 expect → negativity_delta 감소
+# ============================================================
+
+# 뇌가 예측을 업데이트함
+expect prediction_3 = [0.7, 0.6, 0.5, 0.8, 0.5, 0.4, 0.35, 0.85] strength=0.8
+
+wave scene_3 = perceiver {
+    sensory = [0.7, 0.6, 0.5, 0.82, 0.5, 0.4, 0.35, 0.88]
+}
+
+rel perception_3 = scene_3 <-> scene_3 via <~>
+observe perception_3 {} with prediction_3
+
+# ============================================================
+# Cycle 4: 착시 — 감각은 정적인데 뇌가 움직임을 예측
+# 예측 > 현실 → 착시
+# ============================================================
+
+wave scene_4 = perceiver {
+    sensory = [0.7, 0.6, 0.5, 0.1, 0.5, 0.4, 0.35, 0.5]
+}
+
+# 뇌는 아직 움직임을 기대
+expect illusion = [0.7, 0.6, 0.5, 0.8, 0.5, 0.4, 0.35, 0.85] strength=0.9
+
+rel perception_4 = scene_4 <-> scene_4 via <~>
+observe perception_4 {} with illusion
+
+# Widen: 착시에서 벗어나기 — 가능성 재개방
+widen perception_4 0.4
+observe perception_4 {}
+
+# ============================================================
+# Collapse Spectrum 시연: 같은 장면을 다른 깊이로 관찰
+# 모두 O(1). 비용 차이 없음.
+# ============================================================
+
+wave ambiguous_scene = perceiver {
+    sensory = [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5]
+}
+
+# C=0: 모든 가능성을 본다
+gaze ambiguous_scene
+
+# C=0.3: 살짝 집중
+glimpse ambiguous_scene 0.3
+
+# C=0.6: 더 집중
+glimpse ambiguous_scene 0.6
+
+# C=1.0: 완전 붕괴 — 하나의 해석으로 결정. 다른 가능성 소멸.
+observe perceiver {
+    sensory = [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5]
+}

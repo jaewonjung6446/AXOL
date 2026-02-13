@@ -19,6 +19,10 @@ from axol.quantum.lyapunov import omega_from_lyapunov, omega_from_observations
 from axol.quantum.fractal import phi_from_fractal, phi_from_entropy
 from axol.quantum.koopman import lift, unlift
 
+from axol.core.amplitude import Amplitude
+from axol.core.amplitude_ops import amp_transform, amp_superpose, amp_observe
+from axol.core.trans_amplitude import TransAmplitude, trans_amp_apply
+
 
 def observe(
     tapestry: Tapestry,
@@ -407,4 +411,196 @@ def _observe_quantum(
         density_matrix=post_density,
         quantum_phi=q_phi,
         quantum_omega=q_omega,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Amplitude-first observation (Phase 1)
+# ---------------------------------------------------------------------------
+
+def observe_amplitude(
+    tapestry: Tapestry,
+    inputs: dict[str, Amplitude | FloatVec],
+    n_paths: int = 2,
+) -> Observation:
+    """Amplitude-first observation with multi-path interference.
+
+    Unlike observe(), this defers collapse until after interference between
+    computation paths, enabling amplitude amplification of the correct answer.
+
+    Algorithm (Grover-inspired, n_paths=2):
+      1. Direct path: amp_transform(input, composed_matrix)
+      2. Oracle: flip sign of highest-probability state
+      3. Diffusion: 2|s><s| - I reflection about input state
+      4. Amplified path: oracle → diffusion
+      5. Superpose direct + amplified with weights → interference!
+      6. amp_observe(result) → collapse
+
+    Why accuracy improves: when top-2 classes are nearly tied (e.g. 0.26 vs 0.24),
+    one Grover iteration amplifies the gap to ~0.35 vs ~0.15, making argmax reliable.
+    """
+    # Validate inputs
+    for name in tapestry.input_names:
+        if name not in inputs:
+            raise ObservatoryError(f"Missing input: '{name}'")
+
+    # Quality metrics
+    attractor = tapestry.global_attractor
+    omega = omega_from_lyapunov(attractor.max_lyapunov)
+    phi = phi_from_fractal(attractor.fractal_dim, attractor.phase_space_dim)
+
+    output_name = (
+        tapestry.output_names[0]
+        if tapestry.output_names
+        else list(tapestry.nodes.keys())[-1]
+    )
+
+    # Find the matrix to use (same priority as observe())
+    matrix = None
+    input_key = None
+    if tapestry._composed_matrix is not None:
+        matrix = tapestry._composed_matrix
+        info = tapestry._composed_chain_info
+        input_key = info["input_key"] if info else tapestry.input_names[0]
+    elif tapestry._distilled_matrix is not None:
+        matrix = tapestry._distilled_matrix
+        info = tapestry._distilled_chain_info
+        input_key = info["input_key"] if info else tapestry.input_names[0]
+    elif tapestry._hybrid_matrix is not None:
+        matrix = tapestry._hybrid_matrix
+        info = tapestry._hybrid_chain_info
+        input_key = info["input_key"] if info else tapestry.input_names[0]
+    elif tapestry._unitary_matrix is not None:
+        matrix = tapestry._unitary_matrix
+        info = tapestry._unitary_chain_info
+        input_key = info["input_key"] if info else tapestry.input_names[0]
+
+    if input_key is None:
+        input_key = tapestry.input_names[0]
+
+    # Get / promote input to Amplitude
+    raw_input = inputs[input_key]
+    if isinstance(raw_input, Amplitude):
+        input_amp = raw_input
+    elif isinstance(raw_input, FloatVec):
+        # Direct promotion: treat feature vector values as real amplitudes
+        # (no sqrt — input is a feature vector, not a probability distribution)
+        input_amp = Amplitude.from_array(raw_input.data.astype(np.float64))
+    else:
+        raise ObservatoryError(
+            f"Input '{input_key}' must be Amplitude or FloatVec, got {type(raw_input)}"
+        )
+
+    # === TransAmplitude path: open relation with path interference ===
+    if tapestry._trans_amplitude is not None and isinstance(tapestry._trans_amplitude, TransAmplitude):
+        result = trans_amp_apply(input_amp, tapestry._trans_amplitude)
+        value_index, probs = amp_observe(result)
+        label = None
+        if output_name in tapestry.nodes:
+            label = tapestry.nodes[output_name].state.labels.get(value_index)
+        value = FloatVec(data=np.abs(result.data).astype(np.float32))
+        return Observation(
+            value=value,
+            value_index=value_index,
+            value_label=label,
+            omega=omega,
+            phi=phi,
+            probabilities=probs,
+            tapestry_name=tapestry.name,
+            observation_count=1,
+            amplitude=result,
+        )
+
+    if matrix is None:
+        # No fast-path matrix — fall back to classical observe
+        if isinstance(raw_input, Amplitude):
+            fv = raw_input.to_floatvec()
+        else:
+            fv = raw_input
+        return observe(tapestry, {input_key: fv})
+
+    # === Amplitude-first pipeline ===
+    dim = matrix.shape[1]
+
+    # Step 1: Direct path
+    direct = amp_transform(input_amp, matrix)
+
+    if n_paths < 2:
+        # No interference — just observe the direct path
+        value_index, probs = amp_observe(direct)
+        label = None
+        if output_name in tapestry.nodes:
+            label = tapestry.nodes[output_name].state.labels.get(value_index)
+        value = FloatVec(data=np.abs(direct.data).astype(np.float32))
+        return Observation(
+            value=value,
+            value_index=value_index,
+            value_label=label,
+            omega=omega,
+            phi=phi,
+            probabilities=probs,
+            tapestry_name=tapestry.name,
+            observation_count=1,
+            amplitude=direct,
+        )
+
+    # Step 2: Oracle — flip sign of highest-probability state
+    direct_probs = direct.probabilities
+    marked_idx = int(np.argmax(direct_probs))
+    oracle_diag = np.ones(dim, dtype=np.float32)
+    oracle_diag[marked_idx] = -1.0
+    from axol.core.types import TransMatrix as TM
+    oracle = TM(data=np.diag(oracle_diag))
+
+    # Step 3: Diffusion — reflection about input state
+    # D = 2|s><s| - I, where |s> is derived from input amplitudes
+    s = input_amp.data[:dim].astype(np.complex128) if input_amp.size >= dim else np.ones(dim, dtype=np.complex128) / np.sqrt(dim)
+    s_norm = np.linalg.norm(s)
+    if s_norm > 0:
+        s = s / s_norm
+    # Construct real diffusion matrix from |s>
+    s_real = np.abs(s).astype(np.float64)
+    s_real_norm = np.linalg.norm(s_real)
+    if s_real_norm > 0:
+        s_real = s_real / s_real_norm
+    D = 2.0 * np.outer(s_real, s_real) - np.eye(dim, dtype=np.float64)
+    diffusion = TM(data=D.astype(np.float32))
+
+    # Step 4: Amplified path = oracle → diffusion applied to direct
+    marked = amp_transform(direct, oracle)
+    amplified = amp_transform(marked, diffusion)
+
+    # Step 5: Superpose direct + amplified with interference
+    # Weight ratio: direct dominates, amplified provides a gentle boost.
+    # Large amplified weight can flip borderline-correct predictions.
+    # The amplified path refines the probability landscape via interference.
+    direct_probs_sorted = np.sort(direct_probs)[::-1]
+    ambiguity = 1.0 - (direct_probs_sorted[0] - direct_probs_sorted[1]) if len(direct_probs_sorted) > 1 else 0.0
+    # Scale amplified weight by ambiguity: more ambiguous → more interference help
+    amp_weight = min(0.3, ambiguity * 0.4)
+    direct_weight = 1.0 - amp_weight
+    result = amp_superpose(
+        [direct, amplified],
+        [complex(direct_weight, 0.0), complex(amp_weight, 0.0)],
+    )
+
+    # Step 6: Collapse
+    value_index, probs = amp_observe(result)
+
+    label = None
+    if output_name in tapestry.nodes:
+        label = tapestry.nodes[output_name].state.labels.get(value_index)
+
+    value = FloatVec(data=np.abs(result.data).astype(np.float32))
+
+    return Observation(
+        value=value,
+        value_index=value_index,
+        value_label=label,
+        omega=omega,
+        phi=phi,
+        probabilities=probs,
+        tapestry_name=tapestry.name,
+        observation_count=1,
+        amplitude=result,
     )

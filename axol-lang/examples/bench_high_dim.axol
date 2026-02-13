@@ -1,0 +1,74 @@
+# Benchmark: High Dimension Scaling
+# 차원이 커질수록 성능이 어떻게 변하는지 테스트
+
+# --- dim=4, 3 basins ---
+define_basins "basins4" {
+    dim 4
+    basin [0.9, 0.1, 0.2, 0.3] volume=0.5
+    basin [0.1, 0.8, 0.7, 0.4] volume=0.3
+    basin [0.4, 0.3, 0.2, 0.9] volume=0.2
+    fractal_dim 1.3
+}
+declare "small" {
+    input x(4)
+    relate y <- x via <~>
+    output y
+    quality omega=0.9 phi=0.85
+}
+weave small quantum=true seed=42 from_basins="basins4"
+wave s1 = small { x = [0.8, 0.2, 0.3, 0.4] }
+wave s2 = small { x = [0.2, 0.7, 0.6, 0.5] }
+gaze s1
+gaze s2
+rel rs = s1 <-> s2 via <~>
+expect s_bias = [0.6, 0.3, 0.05, 0.05] strength=0.7
+observe rs {} with s_bias
+
+# --- dim=8, 4 basins ---
+define_basins "basins8" {
+    dim 8
+    basin [0.9, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7] volume=0.35
+    basin [0.1, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2] volume=0.30
+    basin [0.5, 0.5, 0.9, 0.1, 0.8, 0.2, 0.7, 0.3] volume=0.20
+    basin [0.3, 0.3, 0.3, 0.9, 0.1, 0.9, 0.1, 0.9] volume=0.15
+    fractal_dim 1.6
+}
+declare "medium" {
+    input x(8)
+    relate y <- x via <~>
+    output y
+    quality omega=0.9 phi=0.85
+}
+weave medium quantum=true seed=42 from_basins="basins8"
+wave m1 = medium { x = [0.8, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8] }
+wave m2 = medium { x = [0.2, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1] }
+gaze m1
+gaze m2
+rel rm = m1 <-> m2 via <~>
+expect m_bias = [0.3, 0.25, 0.15, 0.1, 0.08, 0.05, 0.04, 0.03] strength=0.7
+observe rm {} with m_bias
+
+# --- dim=16, 5 basins ---
+define_basins "basins16" {
+    dim 16
+    basin [0.9, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.1] volume=0.30
+    basin [0.1, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.8] volume=0.25
+    basin [0.5, 0.5, 0.9, 0.1, 0.8, 0.2, 0.7, 0.3, 0.6, 0.4, 0.9, 0.1, 0.8, 0.2, 0.5, 0.5] volume=0.20
+    basin [0.3, 0.3, 0.3, 0.9, 0.1, 0.9, 0.1, 0.9, 0.3, 0.3, 0.3, 0.9, 0.1, 0.9, 0.3, 0.3] volume=0.15
+    basin [0.6, 0.6, 0.4, 0.4, 0.6, 0.6, 0.4, 0.4, 0.5, 0.5, 0.5, 0.5, 0.6, 0.4, 0.6, 0.4] volume=0.10
+    fractal_dim 1.8
+}
+declare "large" {
+    input x(16)
+    relate y <- x via <~>
+    output y
+    quality omega=0.9 phi=0.85
+}
+weave large quantum=true seed=42 from_basins="basins16"
+wave l1 = large { x = [0.9, 0.1, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.1] }
+wave l2 = large { x = [0.1, 0.8, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1, 0.2, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.8] }
+gaze l1
+gaze l2
+rel rl = l1 <-> l2 via <~>
+expect l_bias = [0.2, 0.15, 0.1, 0.08, 0.07, 0.06, 0.05, 0.04, 0.04, 0.03, 0.03, 0.03, 0.02, 0.02, 0.02, 0.06] strength=0.7
+observe rl {} with l_bias

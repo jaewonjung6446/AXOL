@@ -1,0 +1,144 @@
+# ============================================================
+# AXOL Use Case: Dialogue Dynamics
+# ============================================================
+# 대화를 분류하지 않는다. 대화의 구조를 본다.
+#
+# 각 발화 = wave
+# 두 발화의 관계 = rel (동의/반박/무관)
+# negativity = 대화가 아직 열려있는 정도
+# expect = 화자의 기대
+# negativity_delta = 놀라움/확인
+#
+# 모든 관측 O(1). 실시간 대화 추적 가능.
+#
+# dim=8: [assertion, question, agreement, disagreement,
+#         emotion, logic, novelty, relevance]
+
+define_basins "dialogue_space" {
+    dim 8
+    basin [0.9, 0.1, 0.3, 0.1, 0.3, 0.7, 0.5, 0.8] volume=0.30
+    basin [0.1, 0.9, 0.2, 0.1, 0.2, 0.5, 0.6, 0.7] volume=0.20
+    basin [0.3, 0.1, 0.9, 0.05, 0.5, 0.4, 0.2, 0.8] volume=0.25
+    basin [0.2, 0.1, 0.05, 0.9, 0.7, 0.3, 0.7, 0.6] volume=0.25
+    fractal_dim 1.4
+}
+
+declare "speaker" {
+    input utterance(8)
+    relate meaning <- utterance via <~>
+    output meaning
+    quality omega=0.88 phi=0.82
+}
+
+weave speaker quantum=true seed=42 from_basins="dialogue_space"
+
+# ============================================================
+# 대화 1: 건설적 토론 (constructive)
+# A: "I think we should use Rust." (assertion, logic, novel)
+# B: "That makes sense, the safety guarantees are strong." (agreement, logic)
+# ============================================================
+
+wave utterance_a1 = speaker {
+    utterance = [0.85, 0.1, 0.2, 0.05, 0.2, 0.8, 0.7, 0.8]
+}
+
+wave utterance_b1 = speaker {
+    utterance = [0.3, 0.05, 0.85, 0.05, 0.3, 0.8, 0.3, 0.9]
+}
+
+# 두 발화의 관계: constructive (동의)
+rel turn_1 = utterance_a1 <-> utterance_b1 via <~>
+
+# A의 기대: "상대가 동의할 것"
+expect a_expects_agreement = [0.2, 0.05, 0.7, 0.05, 0.0, 0.0, 0.0, 0.0] strength=0.6
+
+# 관측: 기대와 현실의 간섭
+observe turn_1 {} with a_expects_agreement
+
+# ============================================================
+# 대화 2: 반박 (destructive)
+# A: "Rust is too complex for this project."
+# B: "No, the complexity pays off in maintenance." (disagreement)
+# ============================================================
+
+wave utterance_a2 = speaker {
+    utterance = [0.8, 0.1, 0.1, 0.3, 0.4, 0.6, 0.5, 0.7]
+}
+
+wave utterance_b2 = speaker {
+    utterance = [0.7, 0.1, 0.05, 0.85, 0.5, 0.7, 0.6, 0.8]
+}
+
+# 반박: destructive interference
+rel turn_2 = utterance_a2 <-> utterance_b2 via <!>
+
+observe turn_2 {}
+
+# A의 기대: "상대가 동의할 것" — 하지만 반박이 옴
+observe turn_2 {} with a_expects_agreement
+
+# ============================================================
+# 대화 3: 질문 → 답변 (additive — 정보 추가)
+# A: "How does the borrow checker work?" (question)
+# B: "It tracks ownership at compile time." (assertion, logic)
+# ============================================================
+
+wave question = speaker {
+    utterance = [0.1, 0.9, 0.1, 0.05, 0.1, 0.3, 0.8, 0.8]
+}
+
+wave answer = speaker {
+    utterance = [0.85, 0.05, 0.2, 0.05, 0.1, 0.9, 0.6, 0.9]
+}
+
+# 질문+답변: additive (정보 누적)
+rel qa_pair = question <-> answer via <+>
+
+observe qa_pair {}
+
+# ============================================================
+# 대화 흐름 전체 — 각 턴의 negativity 추적
+# negativity 높음 = 대화가 열려있음 (탐색 중)
+# negativity 낮음 = 대화가 수렴함 (합의/종결)
+# ============================================================
+
+# 열린 질문으로 시작 → widen으로 가능성 확장
+widen qa_pair 0.3
+observe qa_pair {}
+
+# 후속 질문: 더 구체적
+wave followup = speaker {
+    utterance = [0.1, 0.85, 0.1, 0.1, 0.1, 0.5, 0.5, 0.9]
+}
+
+rel deepening = answer <-> followup via <~>
+observe deepening {}
+
+# ============================================================
+# 다자 대화: A, B, C 세 사람의 의견 충돌
+# ============================================================
+
+wave opinion_a = speaker {
+    utterance = [0.8, 0.1, 0.1, 0.3, 0.3, 0.8, 0.6, 0.7]
+}
+
+wave opinion_b = speaker {
+    utterance = [0.7, 0.1, 0.1, 0.6, 0.5, 0.7, 0.5, 0.7]
+}
+
+wave opinion_c = speaker {
+    utterance = [0.6, 0.2, 0.3, 0.2, 0.2, 0.9, 0.8, 0.8]
+}
+
+# 세 관계
+rel ab = opinion_a <-> opinion_b via <!>
+rel bc = opinion_b <-> opinion_c via <~>
+rel ac = opinion_a <-> opinion_c via <~>
+
+observe ab {}
+observe bc {}
+observe ac {}
+
+# 충돌 해결: interfere vs superpose
+resolve ab, bc with interfere
+resolve ab, ac with superpose

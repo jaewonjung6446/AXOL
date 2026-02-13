@@ -8,6 +8,7 @@ license = "MIT"
 [dependencies]
 num-complex = "0.4"
 num-traits = "0.2"
+faer = "0.19"
 rand = "0.8"
 rand_chacha = "0.3"
 clap = { version = "4", features = ["derive"] }
@@ -19,6 +20,10 @@ path = "src/lib.rs"
 [[bin]]
 name = "axol"
 path = "src/main.rs"
+
+[[bin]]
+name = "bench_wave"
+path = "src/bin/bench_wave.rs"
 
 [profile.release]
 opt-level = 3

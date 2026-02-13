@@ -1,0 +1,122 @@
+# ============================================================
+# AXOL Use Case: Observation Cost — 알기 위해 무엇을 잃는가
+# ============================================================
+# AXOL만의 고유한 능력: 관측의 비용을 명시적으로 추적.
+#
+# gaze   (C=0) → 아무것도 잃지 않음. 가능성 전체를 봄.
+# glimpse(C=γ) → γ만큼의 가능성을 잃음.
+# observe(C=1) → 전부 잃음. 하나의 답만 남음.
+#
+# 이 프로그램은 같은 시스템을 다른 C로 관측하며
+# "얼마나 알면 충분한가"를 탐색한다.
+#
+# 시나리오: 미지의 행성 탐사.
+# dim=8: [atmosphere, temperature, water, radiation,
+#         gravity, magnetic, organic, mineral]
+
+define_basins "planet_types" {
+    dim 8
+    basin [0.8, 0.5, 0.7, 0.2, 0.5, 0.6, 0.8, 0.4] volume=0.20
+    basin [0.3, 0.9, 0.1, 0.8, 0.7, 0.3, 0.05, 0.6] volume=0.25
+    basin [0.6, 0.4, 0.9, 0.3, 0.4, 0.5, 0.6, 0.3] volume=0.25
+    basin [0.1, 0.2, 0.05, 0.5, 0.9, 0.8, 0.02, 0.9] volume=0.30
+    fractal_dim 1.7
+}
+
+declare "scanner" {
+    input reading(8)
+    relate planet <- reading via <~>
+    output planet
+    quality omega=0.90 phi=0.85
+}
+
+weave scanner quantum=true seed=42 from_basins="planet_types"
+
+# ============================================================
+# 미지의 행성 데이터
+# ============================================================
+
+wave unknown_planet = scanner {
+    reading = [0.55, 0.6, 0.45, 0.4, 0.55, 0.5, 0.35, 0.5]
+}
+
+# --- C=0: 원격 스캔. 아무것도 잃지 않음. ---
+# 모든 가능성이 공존한다.
+gaze unknown_planet
+
+# --- C=0.2: 궤도 진입. 약간의 정보를 얻음. ---
+# 일부 가능성이 약해지기 시작.
+glimpse unknown_planet 0.2
+
+# --- C=0.4: 대기 분석. 더 많이 알게 됨. ---
+# 가능성이 눈에 띄게 줄어듦.
+glimpse unknown_planet 0.4
+
+# --- C=0.6: 착륙 준비. 상당히 확실해짐. ---
+# 이제 돌아갈 수 없다.
+glimpse unknown_planet 0.6
+
+# --- C=0.8: 착륙. 거의 확정. ---
+glimpse unknown_planet 0.8
+
+# --- C=1.0: 착륙 완료. 하나의 현실이 됨. ---
+# 다른 모든 가능성은 소멸했다.
+observe scanner {
+    reading = [0.55, 0.6, 0.45, 0.4, 0.55, 0.5, 0.35, 0.5]
+}
+
+# ============================================================
+# 비교: 두 번째 행성을 같은 스펙트럼으로
+# ============================================================
+
+wave planet_2 = scanner {
+    reading = [0.2, 0.85, 0.1, 0.75, 0.65, 0.35, 0.05, 0.7]
+}
+
+gaze planet_2
+glimpse planet_2 0.3
+glimpse planet_2 0.6
+glimpse planet_2 0.9
+
+# ============================================================
+# 의사결정의 비가역성: observe 후에는 widen해도 완전히 복구 불가
+# ============================================================
+
+wave planet_3 = scanner {
+    reading = [0.7, 0.3, 0.8, 0.2, 0.4, 0.6, 0.7, 0.3]
+}
+
+# 붕괴 전
+gaze planet_3
+
+# 부분 붕괴
+focus planet_3 0.5
+
+# 되돌리기 시도
+widen planet_3 0.3
+
+# 다시 gaze — 원래와 다르다. 정보는 이미 일부 소실.
+gaze planet_3
+
+# ============================================================
+# 두 행성의 관계: 알기 전 vs 안 후
+# ============================================================
+
+wave fresh_scan_a = scanner {
+    reading = [0.55, 0.6, 0.45, 0.4, 0.55, 0.5, 0.35, 0.5]
+}
+
+wave fresh_scan_b = scanner {
+    reading = [0.2, 0.85, 0.1, 0.75, 0.65, 0.35, 0.05, 0.7]
+}
+
+# 붕괴 전: 두 행성의 관계
+rel before_knowing = fresh_scan_a <-> fresh_scan_b via <~>
+observe before_knowing {}
+
+# fresh_scan_a를 붕괴시킴
+focus fresh_scan_a 0.8
+
+# 붕괴 후: 같은 관계지만 다르다
+rel after_knowing = fresh_scan_a <-> fresh_scan_b via <~>
+observe after_knowing {}

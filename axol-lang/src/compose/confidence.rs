@@ -1,6 +1,8 @@
 //! Confidence observer — majority-vote with early stopping and Wilson score.
+//! Also provides Wave-based zero-collapse confident observation.
 
 use crate::types::FloatVec;
+use crate::wave::Wave;
 use crate::observatory;
 use crate::weaver::Tapestry;
 use crate::errors::{AxolError, Result};
@@ -32,13 +34,13 @@ pub struct ConfidenceResult {
     pub total_observations: usize,
     pub early_stopped: bool,
     pub avg_probabilities: Vec<f64>,
+    /// The Wave that produced this result (if available)
+    pub wave: Option<Wave>,
 }
 
 /// Observe a tapestry repeatedly until confidence threshold is met.
 ///
-/// Tracks vote counts per value_index across observations.
-/// Uses Wilson score interval for robust small-sample confidence.
-/// Early stops when any index exceeds the confidence threshold.
+/// C = total_observations (one collapse per observation).
 pub fn observe_confident(
     tapestry: &Tapestry,
     inputs: &[(&str, &FloatVec)],
@@ -68,7 +70,6 @@ pub fn observe_confident(
 
         let total = obs_idx + 1;
 
-        // Check early stopping after min_observations
         if total >= config.min_observations {
             let best_idx = vote_counts.iter().enumerate()
                 .max_by_key(|(_, &c)| c)
@@ -99,20 +100,76 @@ pub fn observe_confident(
         total_observations: total,
         early_stopped,
         avg_probabilities,
+        wave: None,
+    })
+}
+
+/// Zero-collapse confident observation using Wave.
+///
+/// Instead of sampling N times (N collapses), reads the Wave directly.
+/// The probability distribution IS the confidence.
+///
+/// C = 0
+pub fn observe_gaze(
+    tapestry: &Tapestry,
+    inputs: &[(&str, &FloatVec)],
+) -> Result<ConfidenceResult> {
+    let wave = observatory::gaze(tapestry, inputs)?;
+    let probs = wave.probabilities();
+
+    let dim = probs.len();
+    let best_idx = probs.iter().enumerate()
+        .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
+        .map(|(i, _)| i)
+        .unwrap_or(0);
+
+    Ok(ConfidenceResult {
+        value_index: best_idx,
+        confidence: probs[best_idx],
+        vote_counts: vec![0; dim],
+        total_observations: 0,
+        early_stopped: true,
+        avg_probabilities: probs,
+        wave: Some(wave),
+    })
+}
+
+/// Partial-collapse confident observation using glimpse.
+///
+/// C = gamma (fractional collapse).
+pub fn observe_glimpse(
+    tapestry: &Tapestry,
+    inputs: &[(&str, &FloatVec)],
+    gamma: f64,
+) -> Result<ConfidenceResult> {
+    let wave = observatory::glimpse(tapestry, inputs, gamma)?;
+    let probs = wave.probabilities();
+
+    let dim = probs.len();
+    let best_idx = probs.iter().enumerate()
+        .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
+        .map(|(i, _)| i)
+        .unwrap_or(0);
+
+    Ok(ConfidenceResult {
+        value_index: best_idx,
+        confidence: probs[best_idx],
+        vote_counts: vec![0; dim],
+        total_observations: 0,
+        early_stopped: true,
+        avg_probabilities: probs,
+        wave: Some(wave),
     })
 }
 
 /// Wilson score lower bound for binomial proportion.
-///
-/// Provides robust confidence estimate even for small samples.
-/// z = 1.96 for 95% confidence level.
 fn wilson_lower(successes: usize, total: usize) -> f64 {
     if total == 0 {
         return 0.0;
     }
     let n = total as f64;
     let p_hat = successes as f64 / n;
-    let z = 1.96; // 95% confidence z-score
+    let z = 1.96;
     let z2 = z * z;
 
     let denominator = 1.0 + z2 / n;
