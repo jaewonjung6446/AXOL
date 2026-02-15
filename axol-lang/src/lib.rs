@@ -23,3 +23,4 @@ pub mod axol_ai;
 pub mod learn;
 pub mod relation;
 pub mod dsl;
+pub mod text;
