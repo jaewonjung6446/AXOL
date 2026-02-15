@@ -203,8 +203,8 @@ impl SemanticPhaseSpace {
         // magnitude = |embedding value|, phase = sign-based
         let data: Vec<Complex64> = emb.iter().enumerate()
             .map(|(_i, &val)| {
-                let mag = (0.1 + 0.9 * val.abs()).max(1e-8); // full range preserved, no zero
-                let phase = val * std::f64::consts::PI; // embedding value directly encodes phase (continuous)
+                let mag = val.abs().max(1e-8); // zero embedding → silent dimension
+                let phase = val * std::f64::consts::PI;
                 Complex64::from_polar(mag, phase)
             })
             .collect();
@@ -261,11 +261,44 @@ impl SemanticPhaseSpace {
         let emb = &self.embeddings[token_id];
         emb.iter().enumerate()
             .map(|(_i, &val)| {
-                let mag = (0.1 + 0.9 * val.abs()).max(1e-8);
-                let phase = val * std::f64::consts::PI;
+                let mag = 1.0; // 균일 진폭 — 모든 차원 동등 활용
+                let phase = val * std::f64::consts::PI; // 위상으로만 토큰 구분
                 Complex64::from_polar(mag, phase)
             })
             .collect()
+    }
+
+    /// Convert a word (multiple BPE tokens) to a single Wave via superposition.
+    ///
+    /// The word's wave = normalized superposition of constituent token waves.
+    /// This lifts measurement from subword-level to word/concept-level
+    /// without introducing any time axis.
+    pub fn word_to_wave(&self, token_ids: &[usize]) -> Wave {
+        if token_ids.is_empty() {
+            return self.token_to_wave(0); // fallback
+        }
+        if token_ids.len() == 1 {
+            return self.token_to_wave(token_ids[0]);
+        }
+
+        // Superpose all constituent token waves
+        let mut superposed = vec![Complex64::new(0.0, 0.0); self.dim];
+        for &tid in token_ids {
+            let w = self.token_to_wave(tid);
+            let d = self.dim.min(w.dim);
+            for k in 0..d {
+                superposed[k] += w.amplitudes.data[k];
+            }
+        }
+
+        // Normalize
+        Wave {
+            amplitudes: ComplexVec::new(superposed).normalized(),
+            t: 0.0,
+            density: None,
+            dim: self.dim,
+            metrics: CollapseMetrics::new(),
+        }
     }
 
     /// Cosine similarity between two token embeddings.

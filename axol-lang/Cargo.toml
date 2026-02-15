@@ -22,6 +22,10 @@ name = "axol"
 path = "src/main.rs"
 
 [[bin]]
+name = "wte_chat"
+path = "src/bin/wte_chat.rs"
+
+[[bin]]
 name = "bench_wave"
 path = "src/bin/bench_wave.rs"
 

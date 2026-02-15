@@ -17,7 +17,7 @@ use crate::collapse::CollapseMetrics;
 use super::reservoir::{WaveResonanceReservoir, ReservoirState};
 use super::generator::{compute_omega, compute_phi, softmax};
 use super::sps::SemanticPhaseSpace;
-use super::readout::LinearReadout;
+use super::readout::ReadoutLayer;
 
 // ---------------------------------------------------------------------------
 // StyleFingerprint
@@ -141,7 +141,7 @@ impl StyleFingerprint {
         documents: &[&str],
         sps: &SemanticPhaseSpace,
         reservoir: &mut WaveResonanceReservoir,
-        readout: Option<&LinearReadout>,
+        readout: Option<&ReadoutLayer>,
     ) -> Self {
         let mut states = Vec::with_capacity(documents.len());
         let mut probs_list = Vec::with_capacity(documents.len());
@@ -228,12 +228,12 @@ impl StyleFingerprint {
         let omega_overlap = 1.0 - (self.omega_stats.0 - other.omega_stats.0).abs().min(1.0);
         let phi_overlap = 1.0 - (self.phi_stats.0 - other.phi_stats.0).abs().min(1.0);
 
-        // Weighted combination
+        // Weighted combination (Φ is primary certainty metric)
         let sim = 0.4 * wave_sim
             + 0.2 * energy_sim
             + 0.15 * coherence_sim
-            + 0.15 * omega_overlap
-            + 0.1 * phi_overlap;
+            + 0.1 * omega_overlap
+            + 0.15 * phi_overlap;
 
         sim.clamp(0.0, 1.0)
     }

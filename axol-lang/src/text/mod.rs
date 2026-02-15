@@ -25,3 +25,4 @@ pub mod readout;
 pub mod heads;
 pub mod fingerprint;
 pub mod engine;
+pub mod chat;

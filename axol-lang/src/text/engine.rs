@@ -13,14 +13,14 @@
 use super::tokenizer::{BpeTokenizer, Vocabulary, EOS_ID};
 use super::sps::SemanticPhaseSpace;
 use super::reservoir::{WaveResonanceReservoir, ReservoirState};
-use super::readout::LinearReadout;
+use super::readout::{LinearReadout, MlpReadout, ReadoutLayer};
 use super::heads::{
     AutocompleteHead, SentenceGenerationHead, ClassificationHead,
     AnomalyDetectionHead, ClassificationResult,
 };
 use super::fingerprint::{StyleFingerprint, AnomalyScore};
 use super::generator::{
-    TokenPrediction, GenerationResult, softmax,
+    TokenPrediction, GenerationResult,
 };
 
 // ---------------------------------------------------------------------------
@@ -40,6 +40,12 @@ pub struct EngineConfig {
     pub seed: u64,
     /// Anomaly detection threshold (default: 1.5)
     pub anomaly_threshold: f64,
+    /// Number of nodes per reservoir register (default: 4)
+    /// More nodes = more capacity for superposition, longer effective context
+    pub num_nodes: usize,
+    /// Hidden dimension for MLP readout (default: 0 = Linear)
+    /// When > 0, uses MLP: features → hidden(tanh) → output
+    pub hidden_dim: usize,
 }
 
 impl Default for EngineConfig {
@@ -50,6 +56,8 @@ impl Default for EngineConfig {
             max_vocab: 2000,
             seed: 42,
             anomaly_threshold: 1.5,
+            num_nodes: 4,
+            hidden_dim: 0,
         }
     }
 }
@@ -110,22 +118,22 @@ impl WaveTextEngine {
             config.seed,
         );
 
-        // Build reservoir
-        let reservoir = WaveResonanceReservoir::new(config.dim);
+        // Build reservoir with multi-node configuration
+        let reservoir = WaveResonanceReservoir::new_with_nodes(config.dim, config.num_nodes);
 
         // Feature dimension: (1 + num_scales) * dim + 2
         let feature_dim = ReservoirState::feature_dim(config.dim, reservoir.num_scales());
 
         // Build autocomplete head
-        let autocomplete = Some(AutocompleteHead::new(feature_dim, bpe.size));
+        let autocomplete = Some(AutocompleteHead::new(feature_dim, bpe.size, config.hidden_dim));
 
         // Build generation head
-        let generator = Some(SentenceGenerationHead::new(feature_dim, bpe.size));
+        let generator = Some(SentenceGenerationHead::new(feature_dim, bpe.size, config.hidden_dim));
 
         // Build anomaly detector
         let anomaly_detector = Some(AnomalyDetectionHead::new(config.anomaly_threshold));
 
-        let mut engine = Self {
+        let engine = Self {
             bpe,
             vocab,
             sps,
@@ -138,8 +146,8 @@ impl WaveTextEngine {
             feature_dim,
         };
 
-        // Auto-train autocomplete and generator on the corpus
-        engine.train_autocomplete(documents);
+        // No autocomplete training needed — quantum measurement is training-free.
+        // Classification and anomaly detection are trained on-demand.
 
         engine
     }
@@ -191,12 +199,7 @@ impl WaveTextEngine {
             ac.train(&features_batch, &target_ids);
         }
 
-        // Share trained readout with generator
-        if let Some(ref ac) = self.autocomplete {
-            if let Some(ref mut gen) = self.generator {
-                gen.autocomplete.readout = ac.readout.clone();
-            }
-        }
+        // Generator uses quantum measurement — no readout sharing needed.
     }
 
     /// Train a classifier on labeled documents.
@@ -221,7 +224,7 @@ impl WaveTextEngine {
             class_ids.push(*class_id);
         }
 
-        let mut head = ClassificationHead::new(self.feature_dim, class_labels);
+        let mut head = ClassificationHead::new(self.feature_dim, class_labels, self.config.hidden_dim);
         head.train(&features_batch, &class_ids);
         self.classifier = Some(head);
     }
@@ -261,7 +264,7 @@ impl WaveTextEngine {
         let mut reservoir = self.reservoir.clone();
         let state = reservoir.process_sequence(&token_waves);
 
-        ac.predict_top_n(&state, &self.vocab, n)
+        ac.predict_top_n(&state, &self.sps, &self.vocab, n)
     }
 
     /// Generate text by completing a prompt.
@@ -319,11 +322,9 @@ impl WaveTextEngine {
 
         let fp = ad.fingerprint.as_ref().unwrap();
 
-        // Get prediction probabilities for Ω/Φ computation
+        // Get prediction probabilities via quantum measurement (Born rule)
         let probs = if let Some(ref ac) = self.autocomplete {
-            let features = state.to_feature_vector();
-            let scores = ac.readout.forward(&features);
-            softmax(&scores)
+            ac.quantum_probs(&state, &self.sps)
         } else {
             state.merged.probabilities()
         };
@@ -341,8 +342,6 @@ impl WaveTextEngine {
         let mut states = Vec::with_capacity(documents.len());
         let mut probs_list = Vec::with_capacity(documents.len());
 
-        let readout = self.autocomplete.as_ref().map(|ac| &ac.readout);
-
         for doc in documents {
             let ids = self.bpe.encode(doc);
             let token_waves = self.sps.tokens_to_waves(&ids);
@@ -350,10 +349,9 @@ impl WaveTextEngine {
             let mut reservoir = self.reservoir.clone();
             let state = reservoir.process_sequence(&token_waves);
 
-            let probs = if let Some(ro) = readout {
-                let features = state.to_feature_vector();
-                let scores = ro.forward(&features);
-                softmax(&scores)
+            // Quantum measurement (Born rule) for probability distributions
+            let probs = if let Some(ref ac) = self.autocomplete {
+                ac.quantum_probs(&state, &self.sps)
             } else {
                 state.merged.probabilities()
             };
@@ -366,6 +364,66 @@ impl WaveTextEngine {
     }
 
     // =======================================================================
+    // Word-level quantum measurement
+    // =======================================================================
+
+    /// Compute word-level resonance via Born rule.
+    ///
+    /// |⟨ψ_merged | ψ_word⟩|² where ψ_word = superposition of BPE token waves.
+    /// Lifts measurement from subword tokens to semantic word units.
+    pub fn word_resonance(&self, state: &ReservoirState, word: &str) -> f64 {
+        let ids = self.bpe.encode_word(word);
+        let word_wave = self.sps.word_to_wave(&ids);
+
+        let merged = &state.merged;
+        let dim = merged.dim.min(word_wave.dim);
+        let mut inner = num_complex::Complex64::new(0.0, 0.0);
+        for k in 0..dim {
+            inner += merged.amplitudes.data[k].conj() * word_wave.amplitudes.data[k];
+        }
+        inner.norm_sqr()
+    }
+
+    /// Compute sentence-level resonance via Born rule.
+    ///
+    /// `|⟨ψ_input | ψ_response⟩|²` where both waves are merged reservoir states.
+    /// Used by ChatEngine to select the best response from a pool.
+    pub fn sentence_resonance(&self, input_state: &ReservoirState, response: &str) -> f64 {
+        let resp_state = self.process_text(response);
+        let merged_in = &input_state.merged;
+        let merged_resp = &resp_state.merged;
+        let dim = merged_in.dim.min(merged_resp.dim);
+        let mut inner = num_complex::Complex64::new(0.0, 0.0);
+        for k in 0..dim {
+            inner += merged_in.amplitudes.data[k].conj() * merged_resp.amplitudes.data[k];
+        }
+        inner.norm_sqr()
+    }
+
+    /// Measure resonance for a list of candidate words against a text context.
+    ///
+    /// Returns (word, resonance) pairs sorted by descending resonance.
+    pub fn word_resonances(&self, context: &str, candidates: &[&str]) -> Vec<(String, f64)> {
+        let ids = self.bpe.encode(context);
+        let token_waves = self.sps.tokens_to_waves(&ids);
+        let mut reservoir = self.reservoir.clone();
+        let state = reservoir.process_sequence(&token_waves);
+
+        let mut results: Vec<(String, f64)> = candidates.iter()
+            .map(|&w| (w.to_string(), self.word_resonance(&state, w)))
+            .collect();
+
+        // Normalize to probabilities
+        let sum: f64 = results.iter().map(|(_, r)| r).sum();
+        if sum > 1e-10 {
+            for (_, r) in results.iter_mut() { *r /= sum; }
+        }
+
+        results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        results
+    }
+
+    // =======================================================================
     // Serialization
     // =======================================================================
 
@@ -373,8 +431,8 @@ impl WaveTextEngine {
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut data = Vec::new();
 
-        // Magic number + version
-        data.extend_from_slice(b"WTE1");
+        // Magic number + version (WTE4 = quantum measurement + feature normalization)
+        data.extend_from_slice(b"WTE4");
 
         // Config
         push_u64(&mut data, self.config.dim as u64);
@@ -382,6 +440,8 @@ impl WaveTextEngine {
         push_u64(&mut data, self.config.max_vocab as u64);
         push_u64(&mut data, self.config.seed);
         push_f64(&mut data, self.config.anomaly_threshold);
+        push_u64(&mut data, self.config.num_nodes as u64);
+        push_u64(&mut data, self.config.hidden_dim as u64);
 
         // BPE tokenizer
         push_u64(&mut data, self.bpe.size as u64);
@@ -412,20 +472,8 @@ impl WaveTextEngine {
             push_f64(&mut data, v as f64);
         }
 
-        // Autocomplete readout (if trained)
-        let has_ac = self.autocomplete.as_ref().map_or(false, |ac| ac.is_trained());
-        data.push(has_ac as u8);
-        if has_ac {
-            let ac = self.autocomplete.as_ref().unwrap();
-            push_u64(&mut data, ac.readout.feature_dim as u64);
-            push_u64(&mut data, ac.readout.output_dim as u64);
-            for &w in &ac.readout.weights {
-                push_f64(&mut data, w);
-            }
-            for &b in &ac.readout.bias {
-                push_f64(&mut data, b);
-            }
-        }
+        // Autocomplete: quantum measurement is training-free, no readout to serialize
+        data.push(0u8);
 
         // Classifier (if trained)
         let has_clf = self.classifier.as_ref().map_or(false, |c| c.is_trained());
@@ -436,14 +484,11 @@ impl WaveTextEngine {
             for label in &clf.class_labels {
                 push_string(&mut data, label);
             }
-            push_u64(&mut data, clf.readout.feature_dim as u64);
-            push_u64(&mut data, clf.readout.output_dim as u64);
-            for &w in &clf.readout.weights {
-                push_f64(&mut data, w);
-            }
-            for &b in &clf.readout.bias {
-                push_f64(&mut data, b);
-            }
+            serialize_readout_layer(&mut data, &clf.readout);
+            // Feature normalization stats (WTE4+)
+            push_u64(&mut data, clf.feature_means.len() as u64);
+            for &v in &clf.feature_means { push_f64(&mut data, v); }
+            for &v in &clf.feature_stds { push_f64(&mut data, v); }
         }
 
         // Anomaly detector fingerprint
@@ -468,10 +513,18 @@ impl WaveTextEngine {
 
     /// Deserialize an engine from bytes.
     pub fn from_bytes(data: &[u8]) -> Result<Self, String> {
-        // Magic number
-        if data.len() < 4 || &data[0..4] != b"WTE1" {
+        // Magic number (WTE1=legacy, WTE2=multi-node, WTE3=MLP, WTE4=quantum+normalization)
+        if data.len() < 4 {
             return Err("Invalid WTE format".to_string());
         }
+        let magic = &data[0..4];
+        let version = match magic {
+            b"WTE1" => 1,
+            b"WTE2" => 2,
+            b"WTE3" => 3,
+            b"WTE4" => 4,
+            _ => return Err("Invalid WTE format".to_string()),
+        };
         let mut pos = 4;
 
         // Config
@@ -480,6 +533,16 @@ impl WaveTextEngine {
         let max_vocab = read_u64(data, &mut pos)? as usize;
         let seed = read_u64(data, &mut pos)?;
         let anomaly_threshold = read_f64(data, &mut pos)?;
+        let num_nodes = if version >= 2 {
+            read_u64(data, &mut pos)? as usize
+        } else {
+            1 // backward compat: single node
+        };
+        let hidden_dim = if version >= 3 {
+            read_u64(data, &mut pos)? as usize
+        } else {
+            0 // backward compat: Linear readout
+        };
 
         let config = EngineConfig {
             dim,
@@ -487,6 +550,8 @@ impl WaveTextEngine {
             max_vocab,
             seed,
             anomaly_threshold,
+            num_nodes,
+            hidden_dim,
         };
 
         // BPE tokenizer
@@ -546,45 +611,20 @@ impl WaveTextEngine {
             transform: crate::types::TransMatrix::new(transform_data, sps_dim, sps_dim),
         };
 
-        // Reservoir
-        let reservoir = WaveResonanceReservoir::new(dim);
+        // Reservoir (with configured num_nodes)
+        let reservoir = WaveResonanceReservoir::new_with_nodes(dim, num_nodes);
         let feature_dim = ReservoirState::feature_dim(dim, reservoir.num_scales());
 
-        // Autocomplete readout
+        // Autocomplete: quantum measurement is training-free
         let has_ac = read_u8(data, &mut pos)? != 0;
-        let autocomplete = if has_ac {
-            let feat_dim = read_u64(data, &mut pos)? as usize;
-            let out_dim = read_u64(data, &mut pos)? as usize;
-            let mut weights = Vec::with_capacity(out_dim * feat_dim);
-            for _ in 0..out_dim * feat_dim {
-                weights.push(read_f64(data, &mut pos)?);
-            }
-            let mut bias = Vec::with_capacity(out_dim);
-            for _ in 0..out_dim {
-                bias.push(read_f64(data, &mut pos)?);
-            }
-            Some(AutocompleteHead {
-                readout: LinearReadout {
-                    feature_dim: feat_dim,
-                    output_dim: out_dim,
-                    weights,
-                    bias,
-                    trained: true,
-                },
-                vocab_size: out_dim,
-            })
-        } else {
-            Some(AutocompleteHead::new(feature_dim, bpe_size))
-        };
+        if has_ac && version <= 3 {
+            // WTE3 backward compat: skip serialized readout (unused with quantum measurement)
+            let _readout = deserialize_readout_layer(data, &mut pos, version)?;
+        }
+        let autocomplete = Some(AutocompleteHead::new(feature_dim, bpe_size, hidden_dim));
 
-        // Generator shares autocomplete readout
-        let generator = if let Some(ref ac) = autocomplete {
-            let mut gen = SentenceGenerationHead::new(feature_dim, bpe_size);
-            gen.autocomplete.readout = ac.readout.clone();
-            Some(gen)
-        } else {
-            Some(SentenceGenerationHead::new(feature_dim, bpe_size))
-        };
+        // Generator uses quantum measurement — no readout sharing needed
+        let generator = Some(SentenceGenerationHead::new(feature_dim, bpe_size, hidden_dim));
 
         // Classifier
         let has_clf = read_u8(data, &mut pos)? != 0;
@@ -594,27 +634,19 @@ impl WaveTextEngine {
             for _ in 0..n_classes {
                 class_labels.push(read_string(data, &mut pos)?);
             }
-            let feat_dim = read_u64(data, &mut pos)? as usize;
-            let out_dim = read_u64(data, &mut pos)? as usize;
-            let mut weights = Vec::with_capacity(out_dim * feat_dim);
-            for _ in 0..out_dim * feat_dim {
-                weights.push(read_f64(data, &mut pos)?);
-            }
-            let mut bias = Vec::with_capacity(out_dim);
-            for _ in 0..out_dim {
-                bias.push(read_f64(data, &mut pos)?);
-            }
-            Some(ClassificationHead {
-                readout: LinearReadout {
-                    feature_dim: feat_dim,
-                    output_dim: out_dim,
-                    weights,
-                    bias,
-                    trained: true,
-                },
-                n_classes,
-                class_labels,
-            })
+            let readout = deserialize_readout_layer(data, &mut pos, version)?;
+            // Feature normalization stats (WTE4+)
+            let (feature_means, feature_stds) = if version >= 4 {
+                let fd = read_u64(data, &mut pos)? as usize;
+                let mut means = Vec::with_capacity(fd);
+                for _ in 0..fd { means.push(read_f64(data, &mut pos)?); }
+                let mut stds = Vec::with_capacity(fd);
+                for _ in 0..fd { stds.push(read_f64(data, &mut pos)?); }
+                (means, stds)
+            } else {
+                (Vec::new(), Vec::new())
+            };
+            Some(ClassificationHead { readout, n_classes, class_labels, feature_means, feature_stds })
         } else {
             None
         };
@@ -674,8 +706,10 @@ impl WaveTextEngine {
         let sps_size = self.sps.vocab_size * self.sps.dim * 8;
         let transform_size = self.sps.dim * self.sps.dim * 4;
 
-        let ac_size = self.autocomplete.as_ref().map_or(0, |ac| ac.readout.size_bytes());
-        let clf_size = self.classifier.as_ref().map_or(0, |c| c.readout.size_bytes());
+        let ac_size = self.autocomplete.as_ref()
+            .map_or(0, |ac| ac.readout.size_bytes());
+        let clf_size = self.classifier.as_ref()
+            .map_or(0, |c| c.readout.size_bytes());
 
         sps_size + transform_size + ac_size + clf_size
     }
@@ -702,6 +736,91 @@ impl WaveTextEngine {
 // ---------------------------------------------------------------------------
 // Serialization helpers
 // ---------------------------------------------------------------------------
+
+/// Serialize a ReadoutLayer (type_tag + weights).
+fn serialize_readout_layer(data: &mut Vec<u8>, layer: &ReadoutLayer) {
+    data.push(layer.type_tag()); // 0=Linear, 1=MLP
+    match layer {
+        ReadoutLayer::Linear(r) => {
+            push_u64(data, r.feature_dim as u64);
+            push_u64(data, r.output_dim as u64);
+            for &w in &r.weights { push_f64(data, w); }
+            for &b in &r.bias { push_f64(data, b); }
+        }
+        ReadoutLayer::Mlp(r) => {
+            push_u64(data, r.feature_dim as u64);
+            push_u64(data, r.hidden_dim as u64);
+            push_u64(data, r.output_dim as u64);
+            for &w in &r.w_hidden { push_f64(data, w); }
+            for &b in &r.b_hidden { push_f64(data, b); }
+            for &w in &r.w_output { push_f64(data, w); }
+            for &b in &r.b_output { push_f64(data, b); }
+        }
+    }
+}
+
+/// Deserialize a ReadoutLayer. For WTE1/WTE2 (version < 3), assume Linear.
+fn deserialize_readout_layer(data: &[u8], pos: &mut usize, version: u32) -> Result<ReadoutLayer, String> {
+    let type_tag = if version >= 3 {
+        read_u8(data, pos)?
+    } else {
+        0 // backward compat: Linear
+    };
+
+    match type_tag {
+        0 => {
+            let feat_dim = read_u64(data, pos)? as usize;
+            let out_dim = read_u64(data, pos)? as usize;
+            let mut weights = Vec::with_capacity(out_dim * feat_dim);
+            for _ in 0..out_dim * feat_dim {
+                weights.push(read_f64(data, pos)?);
+            }
+            let mut bias = Vec::with_capacity(out_dim);
+            for _ in 0..out_dim {
+                bias.push(read_f64(data, pos)?);
+            }
+            Ok(ReadoutLayer::Linear(LinearReadout {
+                feature_dim: feat_dim,
+                output_dim: out_dim,
+                weights,
+                bias,
+                trained: true,
+            }))
+        }
+        1 => {
+            let feat_dim = read_u64(data, pos)? as usize;
+            let hid_dim = read_u64(data, pos)? as usize;
+            let out_dim = read_u64(data, pos)? as usize;
+            let mut w_hidden = Vec::with_capacity(hid_dim * feat_dim);
+            for _ in 0..hid_dim * feat_dim {
+                w_hidden.push(read_f64(data, pos)?);
+            }
+            let mut b_hidden = Vec::with_capacity(hid_dim);
+            for _ in 0..hid_dim {
+                b_hidden.push(read_f64(data, pos)?);
+            }
+            let mut w_output = Vec::with_capacity(out_dim * hid_dim);
+            for _ in 0..out_dim * hid_dim {
+                w_output.push(read_f64(data, pos)?);
+            }
+            let mut b_output = Vec::with_capacity(out_dim);
+            for _ in 0..out_dim {
+                b_output.push(read_f64(data, pos)?);
+            }
+            Ok(ReadoutLayer::Mlp(MlpReadout {
+                feature_dim: feat_dim,
+                hidden_dim: hid_dim,
+                output_dim: out_dim,
+                w_hidden,
+                b_hidden,
+                w_output,
+                b_output,
+                trained: true,
+            }))
+        }
+        _ => Err(format!("Unknown readout type tag: {}", type_tag)),
+    }
+}
 
 fn push_u64(data: &mut Vec<u8>, val: u64) {
     data.extend_from_slice(&val.to_le_bytes());

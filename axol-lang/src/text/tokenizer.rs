@@ -312,6 +312,35 @@ impl BpeTokenizer {
         ids
     }
 
+    /// Encode a single word into subword token IDs (no BOS/EOS).
+    ///
+    /// Used for word-level wave construction via superposition.
+    pub fn encode_word(&self, word: &str) -> Vec<usize> {
+        let word = word.to_lowercase();
+        let mut pieces: Vec<String> = Vec::new();
+        for (i, c) in word.chars().enumerate() {
+            if i == 0 {
+                pieces.push(format!("{}{}", WORD_PREFIX, c));
+            } else {
+                pieces.push(c.to_string());
+            }
+        }
+        for merge in &self.merges {
+            let mut i = 0;
+            while i + 1 < pieces.len() {
+                if pieces[i] == merge.pair.0 && pieces[i + 1] == merge.pair.1 {
+                    pieces[i] = merge.merged.clone();
+                    pieces.remove(i + 1);
+                } else {
+                    i += 1;
+                }
+            }
+        }
+        pieces.iter()
+            .map(|p| self.token_to_id.get(p).copied().unwrap_or(UNK_ID))
+            .collect()
+    }
+
     /// Decode token IDs back to a string.
     ///
     /// Joins subword tokens and converts ▁ markers back to spaces.

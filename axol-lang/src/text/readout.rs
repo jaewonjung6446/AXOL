@@ -103,10 +103,10 @@ impl LinearReadout {
             }
         }
 
-        // Adaptive regularization: λ = 1% of average diagonal
+        // Adaptive regularization: λ = 0.1% of average diagonal
         let trace: f64 = (0..fd).map(|i| xtx[i * fd + i]).sum::<f64>();
         let avg_diag = trace / fd as f64;
-        let lambda = (avg_diag * 0.01).max(1e-6);
+        let lambda = (avg_diag * 0.001).max(1e-6);
         for i in 0..fd {
             xtx[i * fd + i] += lambda;
         }
@@ -153,12 +153,176 @@ impl LinearReadout {
 }
 
 // ---------------------------------------------------------------------------
+// MlpReadout — nonlinear readout with hidden layer
+// ---------------------------------------------------------------------------
+
+/// MLP readout: features → hidden(tanh) → output.
+///
+/// Provides nonlinear feature transformation before the output projection.
+/// Training: lstsq warm-start on output layer, then SGD fine-tuning.
+#[derive(Clone, Debug)]
+pub struct MlpReadout {
+    pub feature_dim: usize,
+    pub hidden_dim: usize,
+    pub output_dim: usize,
+    /// Hidden weights: hidden_dim × feature_dim (row-major)
+    pub w_hidden: Vec<f64>,
+    /// Hidden bias: hidden_dim
+    pub b_hidden: Vec<f64>,
+    /// Output weights: output_dim × hidden_dim (row-major)
+    pub w_output: Vec<f64>,
+    /// Output bias: output_dim
+    pub b_output: Vec<f64>,
+    pub trained: bool,
+}
+
+impl MlpReadout {
+    /// Create with Xavier initialization.
+    pub fn new(feature_dim: usize, hidden_dim: usize, output_dim: usize) -> Self {
+        let mut rng: u64 = 42;
+        let limit_h = (6.0 / (feature_dim + hidden_dim) as f64).sqrt();
+        let w_hidden: Vec<f64> = (0..hidden_dim * feature_dim)
+            .map(|_| lcg_f64(&mut rng) * limit_h)
+            .collect();
+        let limit_o = (6.0 / (hidden_dim + output_dim) as f64).sqrt();
+        let w_output: Vec<f64> = (0..output_dim * hidden_dim)
+            .map(|_| lcg_f64(&mut rng) * limit_o * 0.01)
+            .collect();
+
+        Self {
+            feature_dim, hidden_dim, output_dim,
+            w_hidden,
+            b_hidden: vec![0.0; hidden_dim],
+            w_output,
+            b_output: vec![0.0; output_dim],
+            trained: false,
+        }
+    }
+
+    /// Forward through hidden layer only (tanh activation).
+    fn forward_hidden(&self, features: &[f64]) -> Vec<f64> {
+        let fl = features.len().min(self.feature_dim);
+        let mut h = vec![0.0; self.hidden_dim];
+        for i in 0..self.hidden_dim {
+            let mut s = self.b_hidden[i];
+            let row = i * self.feature_dim;
+            for j in 0..fl {
+                s += self.w_hidden[row + j] * features[j];
+            }
+            h[i] = s.tanh();
+        }
+        h
+    }
+
+    /// Full forward pass: features → hidden(tanh) → output.
+    pub fn forward(&self, features: &[f64]) -> Vec<f64> {
+        let h = self.forward_hidden(features);
+        let mut out = vec![0.0; self.output_dim];
+        for i in 0..self.output_dim {
+            let mut s = self.b_output[i];
+            let row = i * self.hidden_dim;
+            for j in 0..self.hidden_dim {
+                s += self.w_output[row + j] * h[j];
+            }
+            out[i] = s;
+        }
+        out
+    }
+
+    /// Train via ELM: random hidden layer (fixed) + lstsq output layer.
+    ///
+    /// The hidden layer provides nonlinear feature expansion via tanh,
+    /// while the output layer is solved optimally via least squares.
+    /// No SGD needed — this is guaranteed to find the global optimum
+    /// for the output weights given the fixed hidden representation.
+    pub fn train(&mut self, features_batch: &[Vec<f64>], targets_batch: &[Vec<f64>]) {
+        let n = features_batch.len();
+        if n == 0 || targets_batch.len() != n { return; }
+
+        // Forward through fixed random hidden layer
+        let hidden_batch: Vec<Vec<f64>> = features_batch.iter()
+            .map(|f| self.forward_hidden(f))
+            .collect();
+
+        // Optimal output layer via lstsq
+        let mut out_linear = LinearReadout::new(self.hidden_dim, self.output_dim);
+        out_linear.train(&hidden_batch, targets_batch);
+        if out_linear.trained {
+            self.w_output = out_linear.weights;
+            self.b_output = out_linear.bias;
+        }
+
+        self.trained = true;
+    }
+
+    pub fn size_bytes(&self) -> usize {
+        (self.w_hidden.len() + self.b_hidden.len()
+            + self.w_output.len() + self.b_output.len()) * 8
+    }
+}
+
+/// LCG pseudo-random in [-1, 1].
+fn lcg_f64(state: &mut u64) -> f64 {
+    *state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+    (*state >> 33) as f64 / (1u64 << 31) as f64 * 2.0 - 1.0
+}
+
+// ---------------------------------------------------------------------------
+// ReadoutLayer — unified enum for Linear / MLP readout
+// ---------------------------------------------------------------------------
+
+/// Readout layer: either Linear (lstsq) or MLP (hidden + SGD).
+///
+/// `hidden_dim == 0` → Linear, `hidden_dim > 0` → MLP.
+#[derive(Clone, Debug)]
+pub enum ReadoutLayer {
+    Linear(LinearReadout),
+    Mlp(MlpReadout),
+}
+
+impl ReadoutLayer {
+    pub fn new(feature_dim: usize, output_dim: usize, hidden_dim: usize) -> Self {
+        if hidden_dim == 0 {
+            ReadoutLayer::Linear(LinearReadout::new(feature_dim, output_dim))
+        } else {
+            ReadoutLayer::Mlp(MlpReadout::new(feature_dim, hidden_dim, output_dim))
+        }
+    }
+
+    pub fn forward(&self, features: &[f64]) -> Vec<f64> {
+        match self { ReadoutLayer::Linear(r) => r.forward(features), ReadoutLayer::Mlp(r) => r.forward(features) }
+    }
+
+    pub fn train(&mut self, features_batch: &[Vec<f64>], targets_batch: &[Vec<f64>]) {
+        match self { ReadoutLayer::Linear(r) => r.train(features_batch, targets_batch), ReadoutLayer::Mlp(r) => r.train(features_batch, targets_batch) }
+    }
+
+    pub fn trained(&self) -> bool {
+        match self { ReadoutLayer::Linear(r) => r.trained, ReadoutLayer::Mlp(r) => r.trained }
+    }
+
+    pub fn size_bytes(&self) -> usize {
+        match self { ReadoutLayer::Linear(r) => r.size_bytes(), ReadoutLayer::Mlp(r) => r.size_bytes() }
+    }
+
+    pub fn feature_dim(&self) -> usize {
+        match self { ReadoutLayer::Linear(r) => r.feature_dim, ReadoutLayer::Mlp(r) => r.feature_dim }
+    }
+
+    pub fn output_dim(&self) -> usize {
+        match self { ReadoutLayer::Linear(r) => r.output_dim, ReadoutLayer::Mlp(r) => r.output_dim }
+    }
+
+    pub fn type_tag(&self) -> u8 {
+        match self { ReadoutLayer::Linear(_) => 0, ReadoutLayer::Mlp(_) => 1 }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Feature extraction helpers
 // ---------------------------------------------------------------------------
 
 /// Extract features from a ReservoirState for the readout layer.
-///
-/// This is a convenience wrapper around ReservoirState::to_feature_vector().
 pub fn extract_features(state: &ReservoirState) -> Vec<f64> {
     state.to_feature_vector()
 }

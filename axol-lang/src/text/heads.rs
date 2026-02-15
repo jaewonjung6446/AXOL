@@ -1,15 +1,20 @@
 //! Task-specific heads for the Wave Text Engine.
 //!
-//! Each head maps reservoir features to a specific task output.
-//! All heads use LinearReadout internally, trained via lstsq (one-shot).
+//! Autocomplete/generation use quantum measurement (Born rule):
+//!   |⟨ψ_state|ψ_token⟩|² — no learned parameters, no time axis.
+//!
+//! Classification uses ReadoutLayer with feature normalization:
+//!   z-scored features → ReadoutLayer → softmax (timeless task).
 //!
 //! Available heads:
-//!   - AutocompleteHead: next-token prediction
+//!   - AutocompleteHead: quantum measurement prediction
 //!   - SentenceGenerationHead: multi-token generation with quality gate
-//!   - ClassificationHead: text classification
+//!   - ClassificationHead: text classification (with feature normalization)
 //!   - AnomalyDetectionHead: anomaly scoring via fingerprint comparison
 
-use super::readout::LinearReadout;
+use num_complex::Complex64;
+
+use super::readout::ReadoutLayer;
 use super::reservoir::{WaveResonanceReservoir, ReservoirState};
 use super::fingerprint::StyleFingerprint;
 use super::generator::{
@@ -19,32 +24,60 @@ use super::sps::SemanticPhaseSpace;
 use super::tokenizer::{Vocabulary, EOS_ID, UNK_ID};
 
 // ---------------------------------------------------------------------------
-// AutocompleteHead — next token prediction
+// AutocompleteHead — quantum measurement prediction
 // ---------------------------------------------------------------------------
 
-/// Predicts the next token from reservoir state.
+/// Predicts the next token via quantum measurement (Born rule).
 ///
-/// Pipeline: ReservoirState → features → LinearReadout → softmax → Ω/Φ
+/// Pipeline: ReservoirState |ψ⟩ → ⟨ψ|t⟩ for each token t → |⟨ψ|t⟩|² → Φ/Ω
+/// No learned parameters — probabilities come directly from wave physics.
 #[derive(Clone, Debug)]
 pub struct AutocompleteHead {
-    pub readout: LinearReadout,
+    pub readout: ReadoutLayer,
     pub vocab_size: usize,
 }
 
 impl AutocompleteHead {
-    /// Create an untrained autocomplete head.
-    pub fn new(feature_dim: usize, vocab_size: usize) -> Self {
+    pub fn new(feature_dim: usize, vocab_size: usize, hidden_dim: usize) -> Self {
         Self {
-            readout: LinearReadout::new(feature_dim, vocab_size),
+            readout: ReadoutLayer::new(feature_dim, vocab_size, hidden_dim),
             vocab_size,
         }
     }
 
-    /// Predict the next token from reservoir state.
-    pub fn predict(&self, state: &ReservoirState, vocab: &Vocabulary) -> TokenPrediction {
-        let features = state.to_feature_vector();
-        let scores = self.readout.forward(&features);
-        let probs = softmax(&scores);
+    /// Compute token probabilities via quantum measurement (Born rule).
+    ///
+    /// |⟨ψ_merged|ψ_token⟩|² for each token in the vocabulary.
+    /// This is the physics-native readout — no learned parameters.
+    pub fn quantum_probs(&self, state: &ReservoirState, sps: &SemanticPhaseSpace) -> Vec<f64> {
+        let merged = &state.merged;
+        let dim = merged.dim;
+        let mut raw = Vec::with_capacity(self.vocab_size);
+
+        for tid in 0..self.vocab_size {
+            let tw = sps.token_to_wave(tid);
+            let mut inner = Complex64::new(0.0, 0.0);
+            let d = dim.min(tw.dim);
+            for k in 0..d {
+                inner += merged.amplitudes.data[k].conj() * tw.amplitudes.data[k];
+            }
+            raw.push(inner.norm_sqr());
+        }
+
+        // Normalize (Born rule)
+        let sum: f64 = raw.iter().sum();
+        if sum > 1e-10 {
+            for p in raw.iter_mut() { *p /= sum; }
+        } else {
+            let u = 1.0 / self.vocab_size as f64;
+            raw.iter_mut().for_each(|p| *p = u);
+        }
+        raw
+    }
+
+    /// Predict the next token from reservoir state via quantum measurement.
+    pub fn predict(&self, state: &ReservoirState, sps: &SemanticPhaseSpace, vocab: &Vocabulary) -> TokenPrediction {
+        let probs = self.quantum_probs(state, sps);
 
         let (token_id, &max_prob) = probs.iter().enumerate()
             .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
@@ -70,16 +103,15 @@ impl AutocompleteHead {
         }
     }
 
-    /// Predict top-n tokens with probabilities.
+    /// Predict top-n tokens via quantum measurement.
     pub fn predict_top_n(
         &self,
         state: &ReservoirState,
+        sps: &SemanticPhaseSpace,
         vocab: &Vocabulary,
         n: usize,
     ) -> Vec<TokenPrediction> {
-        let features = state.to_feature_vector();
-        let scores = self.readout.forward(&features);
-        let probs = softmax(&scores);
+        let probs = self.quantum_probs(state, sps);
         let omega = compute_omega(&probs);
         let phi = compute_phi(&probs);
 
@@ -105,14 +137,13 @@ impl AutocompleteHead {
             .collect()
     }
 
-    /// Train the autocomplete head from (feature_vector, target_token_id) pairs.
+    /// Train the readout (kept for backward compatibility / classification sharing).
     pub fn train(&mut self, features_batch: &[Vec<f64>], target_ids: &[usize]) {
         let n = features_batch.len();
         if n == 0 || target_ids.len() != n {
             return;
         }
 
-        // Convert target IDs to one-hot (smoothed) target vectors
         let targets: Vec<Vec<f64>> = target_ids.iter()
             .map(|&tid| {
                 let mut target = vec![0.001 / self.vocab_size as f64; self.vocab_size];
@@ -131,7 +162,8 @@ impl AutocompleteHead {
     }
 
     pub fn is_trained(&self) -> bool {
-        self.readout.trained
+        // Quantum measurement doesn't need training — always ready
+        true
     }
 }
 
@@ -139,33 +171,29 @@ impl AutocompleteHead {
 // SentenceGenerationHead — autoregressive generation with quality gate
 // ---------------------------------------------------------------------------
 
-/// Multi-token generation using autoregressive loop with Ω/Φ quality gate.
+/// Multi-token generation using autoregressive loop with Φ quality gate.
 ///
 /// Generates tokens one at a time, feeding each back through the reservoir.
-/// Automatically stops when Ω drops below threshold (quality gate).
+/// Uses quantum measurement for prediction.
 #[derive(Clone, Debug)]
 pub struct SentenceGenerationHead {
     pub autocomplete: AutocompleteHead,
-    /// Minimum Ω for continued generation (quality gate)
-    pub min_omega: f64,
+    /// Minimum Φ (collapse separation) for continued generation (quality gate)
+    pub min_phi: f64,
     /// Maximum tokens to generate
     pub max_tokens: usize,
 }
 
 impl SentenceGenerationHead {
-    /// Create a new sentence generation head.
-    pub fn new(feature_dim: usize, vocab_size: usize) -> Self {
+    pub fn new(feature_dim: usize, vocab_size: usize, hidden_dim: usize) -> Self {
         Self {
-            autocomplete: AutocompleteHead::new(feature_dim, vocab_size),
-            min_omega: 0.0,
+            autocomplete: AutocompleteHead::new(feature_dim, vocab_size, hidden_dim),
+            min_phi: 0.0,
             max_tokens: 30,
         }
     }
 
     /// Generate a sequence of tokens from a prompt.
-    ///
-    /// Uses the reservoir for context and the autocomplete head for prediction.
-    /// Stops on EOS, quality gate (Ω < min_omega), or max_tokens.
     pub fn generate(
         &self,
         prompt_ids: &[usize],
@@ -188,17 +216,15 @@ impl SentenceGenerationHead {
 
         for step in 0..max {
             let state = reservoir.current_state();
-            let pred = self.autocomplete.predict(&state, vocab);
+            let pred = self.autocomplete.predict(&state, sps, vocab);
 
-            // Stop conditions
             if pred.token_id == EOS_ID {
                 break;
             }
-            if pred.omega < self.min_omega && !predictions.is_empty() {
+            if pred.phi < self.min_phi && !predictions.is_empty() {
                 break;
             }
 
-            // Feed predicted token back through reservoir
             let token_wave = sps.token_to_wave(pred.token_id);
             let pos = prompt_ids.len() + step;
             reservoir.process_token(&token_wave, pos);
@@ -209,7 +235,7 @@ impl SentenceGenerationHead {
         }
 
         let prompt_text = prompt_ids.iter()
-            .filter(|&&id| id != 0 && id != 2 && id != 3) // skip PAD, BOS, EOS
+            .filter(|&&id| id != 0 && id != 2 && id != 3)
             .map(|&id| vocab.decode_id(id).to_string())
             .collect::<Vec<_>>()
             .join(" ");
@@ -228,7 +254,6 @@ impl SentenceGenerationHead {
         }
     }
 
-    /// Train the underlying autocomplete head.
     pub fn train(&mut self, features_batch: &[Vec<f64>], target_ids: &[usize]) {
         self.autocomplete.train(features_batch, target_ids);
     }
@@ -239,53 +264,67 @@ impl SentenceGenerationHead {
 }
 
 // ---------------------------------------------------------------------------
-// ClassificationHead — text classification
+// ClassificationHead — text classification with feature normalization
 // ---------------------------------------------------------------------------
 
 /// Result of a classification prediction.
 #[derive(Clone, Debug)]
 pub struct ClassificationResult {
-    /// Predicted class index
     pub class_id: usize,
-    /// Predicted class label
     pub class_label: String,
-    /// Confidence (probability of predicted class)
     pub confidence: f64,
-    /// Probability distribution over all classes
     pub probabilities: Vec<f64>,
-    /// All class labels with probabilities
     pub class_probs: Vec<(String, f64)>,
-    /// Omega (cohesion) of the prediction
     pub omega: f64,
-    /// Phi (clarity) of the prediction
     pub phi: f64,
 }
 
-/// Text classification head.
+/// Text classification head with feature normalization (z-score).
 ///
-/// Maps reservoir features to class probabilities via LinearReadout + softmax.
+/// Maps reservoir features to class probabilities via ReadoutLayer + softmax.
+/// Features are z-score normalized using training batch statistics.
 #[derive(Clone, Debug)]
 pub struct ClassificationHead {
-    pub readout: LinearReadout,
+    pub readout: ReadoutLayer,
     pub n_classes: usize,
     pub class_labels: Vec<String>,
+    /// Feature means for z-score normalization
+    pub feature_means: Vec<f64>,
+    /// Feature stds for z-score normalization
+    pub feature_stds: Vec<f64>,
 }
 
 impl ClassificationHead {
-    /// Create a new classification head.
-    pub fn new(feature_dim: usize, class_labels: Vec<String>) -> Self {
+    pub fn new(feature_dim: usize, class_labels: Vec<String>, hidden_dim: usize) -> Self {
         let n_classes = class_labels.len();
         Self {
-            readout: LinearReadout::new(feature_dim, n_classes),
+            readout: ReadoutLayer::new(feature_dim, n_classes, hidden_dim),
             n_classes,
             class_labels,
+            feature_means: Vec::new(),
+            feature_stds: Vec::new(),
         }
+    }
+
+    /// Normalize features using stored training statistics.
+    fn normalize(&self, features: &[f64]) -> Vec<f64> {
+        if self.feature_means.is_empty() {
+            return features.to_vec();
+        }
+        features.iter().enumerate()
+            .map(|(j, &v)| {
+                let m = self.feature_means.get(j).copied().unwrap_or(0.0);
+                let s = self.feature_stds.get(j).copied().unwrap_or(1.0);
+                (v - m) / s
+            })
+            .collect()
     }
 
     /// Classify a text from its reservoir state.
     pub fn predict(&self, state: &ReservoirState) -> ClassificationResult {
         let features = state.to_feature_vector();
-        let scores = self.readout.forward(&features);
+        let normalized = self.normalize(&features);
+        let scores = self.readout.forward(&normalized);
         let probs = softmax(&scores);
 
         let (class_id, &max_prob) = probs.iter().enumerate()
@@ -313,13 +352,41 @@ impl ClassificationHead {
         }
     }
 
-    /// Train the classification head from (features, class_id) pairs.
+    /// Train with z-score feature normalization.
     pub fn train(&mut self, features_batch: &[Vec<f64>], class_ids: &[usize]) {
         let n = features_batch.len();
         if n == 0 || class_ids.len() != n {
             return;
         }
 
+        // Compute normalization statistics
+        let fd = features_batch[0].len();
+        let nf = n as f64;
+        let mut means = vec![0.0; fd];
+        for feat in features_batch {
+            for (j, &v) in feat.iter().enumerate() {
+                if j < fd { means[j] += v; }
+            }
+        }
+        for v in means.iter_mut() { *v /= nf; }
+
+        let mut stds = vec![0.0; fd];
+        for feat in features_batch {
+            for (j, &v) in feat.iter().enumerate() {
+                if j < fd { stds[j] += (v - means[j]).powi(2); }
+            }
+        }
+        for v in stds.iter_mut() { *v = (*v / nf).sqrt().max(1e-6); }
+
+        self.feature_means = means;
+        self.feature_stds = stds;
+
+        // Normalize features
+        let normalized: Vec<Vec<f64>> = features_batch.iter()
+            .map(|f| self.normalize(f))
+            .collect();
+
+        // Build targets
         let targets: Vec<Vec<f64>> = class_ids.iter()
             .map(|&cid| {
                 let mut target = vec![0.0; self.n_classes];
@@ -330,11 +397,11 @@ impl ClassificationHead {
             })
             .collect();
 
-        self.readout.train(features_batch, &targets);
+        self.readout.train(&normalized, &targets);
     }
 
     pub fn is_trained(&self) -> bool {
-        self.readout.trained
+        self.readout.trained()
     }
 }
 
@@ -345,11 +412,8 @@ impl ClassificationHead {
 /// Result of anomaly detection.
 #[derive(Clone, Debug)]
 pub struct AnomalyResult {
-    /// Anomaly score (higher = more anomalous)
     pub score: f64,
-    /// Is this considered anomalous? (score > threshold)
     pub is_anomalous: bool,
-    /// Component scores
     pub omega_z: f64,
     pub phi_z: f64,
     pub coherence_z: f64,
@@ -357,19 +421,13 @@ pub struct AnomalyResult {
 }
 
 /// Anomaly detection head using StyleFingerprint comparison.
-///
-/// Computes anomaly score as the deviation of observed Ω/Φ/coherence/energy
-/// from expected values (established by the fingerprint).
 #[derive(Clone, Debug)]
 pub struct AnomalyDetectionHead {
-    /// Reference fingerprint (normal behavior)
     pub fingerprint: Option<StyleFingerprint>,
-    /// Anomaly threshold
     pub threshold: f64,
 }
 
 impl AnomalyDetectionHead {
-    /// Create a new anomaly detection head.
     pub fn new(threshold: f64) -> Self {
         Self {
             fingerprint: None,
@@ -377,26 +435,17 @@ impl AnomalyDetectionHead {
         }
     }
 
-    /// Set the reference fingerprint.
     pub fn set_fingerprint(&mut self, fp: StyleFingerprint) {
         self.fingerprint = Some(fp);
     }
 
-    /// Compute anomaly score for a reservoir state.
-    ///
-    /// Uses z-scores of Ω, Φ, coherence, and energy relative to the
-    /// fingerprint's statistics.
     pub fn score(&self, state: &ReservoirState, probs: &[f64]) -> AnomalyResult {
         let fp = match &self.fingerprint {
             Some(fp) => fp,
             None => {
                 return AnomalyResult {
-                    score: 0.0,
-                    is_anomalous: false,
-                    omega_z: 0.0,
-                    phi_z: 0.0,
-                    coherence_z: 0.0,
-                    energy_z: 0.0,
+                    score: 0.0, is_anomalous: false,
+                    omega_z: 0.0, phi_z: 0.0, coherence_z: 0.0, energy_z: 0.0,
                 };
             }
         };
@@ -404,44 +453,30 @@ impl AnomalyDetectionHead {
         let omega = compute_omega(probs);
         let phi = compute_phi(probs);
 
-        // Z-scores
         let omega_z = if fp.omega_stats.1 > 1e-10 {
             ((omega - fp.omega_stats.0) / fp.omega_stats.1).abs()
-        } else {
-            0.0
-        };
+        } else { 0.0 };
 
         let phi_z = if fp.phi_stats.1 > 1e-10 {
             ((phi - fp.phi_stats.0) / fp.phi_stats.1).abs()
-        } else {
-            0.0
-        };
+        } else { 0.0 };
 
         let coherence_z = if fp.coherence > 1e-10 {
             ((state.phase_coherence - fp.coherence) / fp.coherence.max(0.1)).abs()
-        } else {
-            0.0
-        };
+        } else { 0.0 };
 
         let norm_energy = state.resonance_energy.min(10.0) / 10.0;
         let expected_energy: f64 = fp.scale_energies.iter().sum::<f64>() / 3.0;
         let energy_z = if expected_energy > 1e-10 {
             ((norm_energy - expected_energy) / expected_energy.max(0.1)).abs()
-        } else {
-            0.0
-        };
+        } else { 0.0 };
 
-        // Combined score: max of z-scores (most anomalous dimension)
-        let score = omega_z.max(phi_z).max(coherence_z).max(energy_z);
-        let score = score.min(10.0); // cap at 10
+        let score = omega_z.max(phi_z).max(coherence_z).max(energy_z).min(10.0);
 
         AnomalyResult {
             score,
             is_anomalous: score > self.threshold,
-            omega_z,
-            phi_z,
-            coherence_z,
-            energy_z,
+            omega_z, phi_z, coherence_z, energy_z,
         }
     }
 
@@ -458,17 +493,8 @@ mod tests {
     fn test_autocomplete_head() {
         let feature_dim = 10;
         let vocab_size = 5;
-        let mut head = AutocompleteHead::new(feature_dim, vocab_size);
-
-        // Train with simple data
-        let features = vec![
-            vec![1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-            vec![0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-            vec![0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-        ];
-        let targets = vec![0, 1, 2];
-
-        head.train(&features, &targets);
+        let head = AutocompleteHead::new(feature_dim, vocab_size, 0);
+        // Quantum measurement is always ready
         assert!(head.is_trained());
     }
 
@@ -476,7 +502,7 @@ mod tests {
     fn test_classification_head() {
         let feature_dim = 10;
         let labels = vec!["positive".into(), "negative".into(), "neutral".into()];
-        let mut head = ClassificationHead::new(feature_dim, labels);
+        let mut head = ClassificationHead::new(feature_dim, labels, 0);
 
         let features = vec![
             vec![1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
@@ -487,5 +513,7 @@ mod tests {
 
         head.train(&features, &classes);
         assert!(head.is_trained());
+        assert_eq!(head.feature_means.len(), 10);
+        assert_eq!(head.feature_stds.len(), 10);
     }
 }

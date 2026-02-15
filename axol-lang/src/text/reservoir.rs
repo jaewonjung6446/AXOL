@@ -1,31 +1,24 @@
-//! Wave Resonance Reservoir (WRR) — Multi-scale wave resonance for context processing.
+//! Wave Resonance Reservoir (WRR) — Multi-scale, multi-node wave resonance.
 //!
-//! Replaces ContextWeaver (RNN-style) with a physics-based reservoir whose
-//! dynamics are entirely determined by physical constants (no learned parameters).
-//! Only the output readout layer is trained (via lstsq).
+//! Physics-based reservoir whose dynamics are entirely determined by physical
+//! constants (no learned parameters). Only the output readout layer is trained.
 //!
 //! Architecture:
-//!   Token → [SPS] → wave → [WRR 3-scale resonance] → ReservoirState
+//!   Token → [SPS] → wave → [WRR 3-scale × N-node resonance] → ReservoirState
 //!     Scale 1 (τ=2, Destructive)   — lexical level
 //!     Scale 2 (τ=5, Constructive)  — phrasal level
 //!     Scale 3 (τ=15, Conditional)  — clause level
 //!
-//! Each scale has damping = exp(-1/τ), phase_freq = 2π/τ — physical constants,
-//! zero learnable parameters.
+//! Each scale contains N nodes (default 4) with different phase frequency
+//! offsets for spectral diversity. Tokens are broadcast to all nodes via
+//! superposition. Through wave interference:
+//!   - Repeated/important patterns → constructive interference → amplitudes grow
+//!   - Random/noise patterns → destructive interference → amplitudes cancel
 //!
-//! ## Resonance Compaction (Phase-Multiplexed Wave Memory)
+//! Inter-node coupling (during compaction) creates correlation between nodes,
+//! enabling natural information exchange without explicit memory management.
 //!
-//! Each register periodically compacts its state via self-interference:
-//!   - Channels carrying related information (similar phases) merge
-//!     constructively → fewer but stronger channels
-//!   - Channels carrying redundant/noise information cancel destructively
-//!     → freed channels available for new tokens
-//!   - Compaction is triggered every τ tokens, aligned with natural decay
-//!
-//! This provides automatic memory garbage collection through physics:
-//! no learned forget gate needed (unlike LSTM/GRU/Mamba).
-//!
-//! Complexity: O(n × dim × 3) vs ContextWeaver O(n × dim²)
+//! Complexity: O(n × dim × num_scales × num_nodes)
 
 use num_complex::Complex64;
 
@@ -44,7 +37,7 @@ pub struct CompactionResult {
     pub saturation_before: f64,
     /// Saturation after compaction
     pub saturation_after: f64,
-    /// Number of channels that were pruned (fell below Ω threshold)
+    /// Number of channels that were pruned (fell below threshold)
     pub channels_pruned: usize,
     /// Number of channels that were merged (similar phases)
     pub channels_merged: usize,
@@ -57,13 +50,14 @@ pub struct CompactionResult {
 }
 
 // ---------------------------------------------------------------------------
-// ResonanceRegister — a single time-scale resonator
+// ResonanceRegister — a single time-scale resonator with multiple nodes
 // ---------------------------------------------------------------------------
 
 /// A single resonance register operating at a specific time scale.
 ///
-/// Physics-based: damping and phase frequency are derived from τ,
-/// no learnable parameters.
+/// Contains multiple nodes, each a wave state with a different phase frequency
+/// offset. Tokens are broadcast to all nodes via superposition.
+/// Inter-node coupling during compaction creates natural information exchange.
 #[derive(Clone, Debug)]
 pub struct ResonanceRegister {
     /// Dimension of the wave space
@@ -74,8 +68,10 @@ pub struct ResonanceRegister {
     pub damping: f64,
     /// Interference pattern for this scale
     pub pattern: InterferencePattern,
-    /// Current state wave
-    pub state: Wave,
+    /// Node states (multi-node superposition reservoir)
+    pub nodes: Vec<Wave>,
+    /// Number of nodes per register
+    pub num_nodes: usize,
     /// Phase frequency: 2π/τ — rate of phase rotation
     pub phase_freq: f64,
     /// Token counter for compaction trigger (compacts every τ tokens)
@@ -83,77 +79,100 @@ pub struct ResonanceRegister {
 }
 
 impl ResonanceRegister {
-    /// Create a new resonance register.
+    /// Create a new resonance register with multiple nodes.
     ///
     /// `dim`: wave dimension
     /// `tau`: characteristic time scale (larger = longer memory)
     /// `pattern`: interference pattern (determines how tokens combine)
-    pub fn new(dim: usize, tau: f64, pattern: InterferencePattern) -> Self {
+    /// `num_nodes`: number of parallel nodes (more = more capacity)
+    pub fn new(dim: usize, tau: f64, pattern: InterferencePattern, num_nodes: usize) -> Self {
+        let num_nodes = num_nodes.max(1);
+        let nodes = (0..num_nodes).map(|_| zero_wave(dim)).collect();
         Self {
             dim,
             tau,
             damping: (-1.0 / tau).exp(),
             pattern,
-            state: zero_wave(dim),
+            nodes,
+            num_nodes,
             phase_freq: 2.0 * std::f64::consts::PI / tau,
             token_count: 0,
         }
     }
 
-    /// Process a single token wave through this register.
+    /// Process a single token wave through all nodes.
     ///
-    /// Algorithm:
-    ///   1. Rotate token wave by scale-specific phase frequency
-    ///   2. Apply damping to existing state (physical decay)
-    ///   3. Compose damped state with rotated token (interference pattern)
-    ///   4. Apply Kerr nonlinearity (phase modulation by amplitude²)
+    /// Each node receives the same token but with a different phase frequency
+    /// offset, creating spectral diversity. Over many tokens:
+    ///   - Consistent patterns reinforce across nodes (constructive interference)
+    ///   - Random patterns cancel across nodes (destructive interference)
     pub fn resonate(&mut self, token_wave: &Wave, position: usize) {
-        // 1. Phase rotation: rotate token by scale-specific frequency × position
-        let rotated = phase_rotate(token_wave, self.phase_freq * position as f64);
+        for k in 0..self.num_nodes {
+            // Each node has a unique phase frequency offset for diversity
+            // Node 0: base freq, Node 1: 1.2× base, Node 2: 1.4× base, ...
+            let node_freq = self.phase_freq * (1.0 + 0.2 * k as f64);
+            let rotated = phase_rotate(token_wave, node_freq * position as f64);
 
-        // 2. Damping: decay existing state
-        let damped = damp_wave(&self.state, self.damping);
+            let composed = Wave::compose(&self.nodes[k], &rotated, &self.pattern)
+                .unwrap_or_else(|_| rotated.clone());
 
-        // 3. Compose: interference between damped state and rotated token
-        let composed = Wave::compose(&damped, &rotated, &self.pattern)
-            .unwrap_or_else(|_| rotated.clone());
-
-        // 4. Kerr nonlinearity: phase += κ × |amplitude|²
-        let kappa = 0.1;
-        let nonlinear = kerr_nonlinearity(&composed, kappa);
-
-        self.state = normalize_wave(&nonlinear);
+            let activated = atan_nonlinearity(&composed);
+            let kappa = 0.1;
+            self.nodes[k] = kerr_nonlinearity(&activated, kappa);
+        }
     }
 
-    /// Reset state to zero.
+    /// Aggregate all nodes into a single representative wave via superposition.
+    ///
+    /// The aggregated wave captures the coherent signal across all nodes.
+    /// Correlated patterns (appearing in multiple nodes) reinforce;
+    /// uncorrelated patterns average out.
+    pub fn aggregate(&self) -> Wave {
+        if self.num_nodes == 1 {
+            return self.nodes[0].clone();
+        }
+        let weight = 1.0 / self.num_nodes as f64;
+        let mut data = vec![Complex64::new(0.0, 0.0); self.dim];
+        for node in &self.nodes {
+            for (i, &amp) in node.amplitudes.data.iter().enumerate() {
+                if i < self.dim {
+                    data[i] += amp * weight;
+                }
+            }
+        }
+        Wave {
+            amplitudes: ComplexVec::new(data).normalized(),
+            t: 0.0,
+            density: None,
+            dim: self.dim,
+            metrics: CollapseMetrics::new(),
+        }
+    }
+
+    /// Reset all nodes to zero.
     pub fn reset(&mut self) {
-        self.state = zero_wave(self.dim);
+        for node in &mut self.nodes {
+            *node = zero_wave(self.dim);
+        }
         self.token_count = 0;
     }
 
-    /// Get the energy of the current state (sum of |amplitude|²).
+    /// Get the total energy across all nodes.
     pub fn energy(&self) -> f64 {
-        self.state.amplitudes.data.iter()
-            .map(|c| c.norm_sqr())
+        self.nodes.iter()
+            .map(|n| n.amplitudes.data.iter().map(|c| c.norm_sqr()).sum::<f64>())
             .sum()
     }
 
-    /// Measure saturation: effective dimensionality ratio via Shannon entropy.
-    ///
-    /// Returns a value in [0, 1]:
-    ///   - 0 = all probability mass in one channel (fully concentrated)
-    ///   - 1 = uniform distribution (fully saturated, no channel stands out)
-    ///
-    /// Uses gaze() (non-destructive read) to get the probability distribution,
-    /// then computes normalized Shannon entropy: H / log(dim).
+    /// Measure saturation of the aggregated state.
     pub fn saturation(&self) -> f64 {
-        let probs = self.state.gaze(); // non-destructive read
+        let agg = self.aggregate();
+        let probs = agg.gaze();
         let dim = probs.len();
         if dim <= 1 {
             return 0.0;
         }
 
-        // Shannon entropy: H = -Σ p_i log(p_i)
         let mut entropy = 0.0;
         for &p in &probs {
             if p > 1e-15 {
@@ -161,7 +180,6 @@ impl ResonanceRegister {
             }
         }
 
-        // Normalize by max entropy (uniform distribution)
         let max_entropy = (dim as f64).ln();
         if max_entropy < 1e-15 {
             return 0.0;
@@ -169,114 +187,27 @@ impl ResonanceRegister {
         (entropy / max_entropy).clamp(0.0, 1.0)
     }
 
-    /// Compact the register via self-interference.
+    /// Compact all nodes via self-interference, then couple nodes.
     ///
-    /// Phase-Multiplexed Wave Memory compaction:
-    ///   1. **Gaze**: read probability distribution non-destructively
-    ///   2. **Phase grouping**: channels with similar phases merge constructively
-    ///      (via Wave::compose with Constructive pattern)
-    ///   3. **Ω pruning**: channels where cohesion (Ω) is low are attenuated
-    ///   4. **Renormalize**: preserve unit norm
-    ///
-    /// Returns CompactionResult with before/after statistics.
+    /// Per-node compaction: phase grouping + pruning + renormalization.
+    /// Inter-node coupling: weak exchange between neighboring nodes,
+    /// creating correlation (correlated signals reinforce, noise cancels).
     pub fn compact(&mut self, scale_index: usize) -> CompactionResult {
         let energy_before = self.energy();
         let saturation_before = self.saturation();
 
-        let amps = &self.state.amplitudes.data;
-        let dim = self.dim;
+        let mut total_merged = 0;
+        let mut total_pruned = 0;
 
-        // ─── Phase grouping: cluster channels by phase similarity ───
-        // For each channel, compute phase. Channels within π/4 are "similar".
-        let phase_threshold = std::f64::consts::PI / 4.0;
-        let phases: Vec<f64> = amps.iter().map(|c| c.arg()).collect();
-        let magnitudes: Vec<f64> = amps.iter().map(|c| c.norm()).collect();
-        let mut merged_count = 0usize;
-        let mut visited = vec![false; dim];
-
-        // Greedy phase-merge: for each unvisited channel, find similar ones
-        // and merge them constructively (add magnitudes, average phases).
-        let mut new_amps: Vec<Complex64> = vec![Complex64::new(0.0, 0.0); dim];
-
-        for i in 0..dim {
-            if visited[i] || magnitudes[i] < 1e-12 {
-                if !visited[i] {
-                    new_amps[i] = amps[i];
-                }
-                visited[i] = true;
-                continue;
-            }
-
-            // Find all channels with similar phase to channel i
-            let mut group_mag = magnitudes[i];
-            let mut group_phase_x = magnitudes[i] * phases[i].cos();
-            let mut group_phase_y = magnitudes[i] * phases[i].sin();
-            let mut group_count = 1usize;
-            visited[i] = true;
-
-            for j in (i + 1)..dim {
-                if visited[j] || magnitudes[j] < 1e-12 {
-                    continue;
-                }
-                // Phase distance (circular)
-                let mut dp = (phases[i] - phases[j]).abs();
-                if dp > std::f64::consts::PI {
-                    dp = 2.0 * std::f64::consts::PI - dp;
-                }
-
-                if dp < phase_threshold {
-                    // Constructive merge: add magnitudes, weighted phase average
-                    group_mag += magnitudes[j];
-                    group_phase_x += magnitudes[j] * phases[j].cos();
-                    group_phase_y += magnitudes[j] * phases[j].sin();
-                    group_count += 1;
-                    visited[j] = true;
-                    // Mark j as absorbed — its energy goes to channel i
-                    new_amps[j] = Complex64::new(0.0, 0.0);
-                }
-            }
-
-            if group_count > 1 {
-                merged_count += group_count - 1;
-            }
-
-            // Merged channel gets combined magnitude + averaged phase
-            let avg_phase = group_phase_y.atan2(group_phase_x);
-            new_amps[i] = Complex64::from_polar(group_mag, avg_phase);
+        // Compact each node independently
+        for node in &mut self.nodes {
+            let (merged, pruned) = compact_single_wave(node);
+            total_merged += merged;
+            total_pruned += pruned;
         }
 
-        // ─── Ω pruning: attenuate low-cohesion channels ───
-        // Compute per-channel "local cohesion" as |amplitude|² relative to mean.
-        // Channels far below mean get attenuated — they contribute noise, not signal.
-        let max_energy = new_amps.iter().map(|c| c.norm_sqr())
-            .fold(0.0f64, f64::max);
-        let prune_threshold = max_energy * 0.001; // channels below 0.1% of max → prune
-        let mut pruned_count = 0usize;
-
-        for i in 0..dim {
-            let ch_energy = new_amps[i].norm_sqr();
-            if ch_energy > 0.0 && ch_energy < prune_threshold {
-                // Attenuate (don't zero completely — soft pruning)
-                new_amps[i] *= 0.1;
-                pruned_count += 1;
-            }
-        }
-
-        // ─── Renormalize ───
-        let norm: f64 = new_amps.iter().map(|c| c.norm_sqr()).sum::<f64>().sqrt();
-        if norm > 1e-15 {
-            for c in &mut new_amps {
-                *c /= norm;
-            }
-        }
-
-        self.state = Wave {
-            amplitudes: ComplexVec::new(new_amps),
-            t: self.state.t,
-            density: None,
-            dim: self.dim,
-            metrics: self.state.metrics.clone(),
-        };
+        // Inter-node coupling after compaction
+        self.couple_nodes();
 
         let energy_after = self.energy();
         let saturation_after = self.saturation();
@@ -284,24 +215,46 @@ impl ResonanceRegister {
         CompactionResult {
             saturation_before,
             saturation_after,
-            channels_pruned: pruned_count,
-            channels_merged: merged_count,
+            channels_pruned: total_pruned,
+            channels_merged: total_merged,
             energy_before,
             energy_after,
             scale_index,
         }
     }
+
+    /// Weak coupling between adjacent nodes (ring topology).
+    ///
+    /// Each node exchanges 5% of its amplitude with its neighbor.
+    /// Effect: correlated signals (present in multiple nodes) reinforce,
+    /// uncorrelated signals remain weak. Like coupled oscillators.
+    fn couple_nodes(&mut self) {
+        if self.num_nodes < 2 {
+            return;
+        }
+        let coupling = 0.05;
+        let old: Vec<Vec<Complex64>> = self.nodes.iter()
+            .map(|n| n.amplitudes.data.clone())
+            .collect();
+        for k in 0..self.num_nodes {
+            let next = (k + 1) % self.num_nodes;
+            for ch in 0..self.dim {
+                self.nodes[k].amplitudes.data[ch] =
+                    old[k][ch] * (1.0 - coupling) + old[next][ch] * coupling;
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
-// WaveResonanceReservoir — multi-scale resonance
+// WaveResonanceReservoir — multi-scale, multi-node resonance
 // ---------------------------------------------------------------------------
 
 /// Multi-scale Wave Resonance Reservoir.
 ///
-/// Contains multiple registers at different time scales, each capturing
-/// different linguistic levels (lexical, phrasal, clausal).
-/// All dynamics are physics-based — zero learnable parameters.
+/// Contains multiple registers at different time scales, each with multiple
+/// nodes for increased capacity. Tokens are broadcast to all nodes in all
+/// registers. Wave interference naturally prioritizes important patterns.
 #[derive(Clone, Debug)]
 pub struct WaveResonanceReservoir {
     /// Dimension of the wave space
@@ -319,6 +272,9 @@ const DEFAULT_SCALES: [(f64, usize); 3] = [
     (15.0, 4),  // τ=15, Conditional (clausal — slow, phase coupling for long-range)
 ];
 
+/// Default number of nodes per register.
+const DEFAULT_NUM_NODES: usize = 4;
+
 fn pattern_from_index(idx: usize) -> InterferencePattern {
     match idx {
         0 => InterferencePattern::Constructive,
@@ -331,11 +287,16 @@ fn pattern_from_index(idx: usize) -> InterferencePattern {
 }
 
 impl WaveResonanceReservoir {
-    /// Create a new reservoir with default 3-scale configuration.
+    /// Create a new reservoir with default 3-scale configuration and 4 nodes.
     pub fn new(dim: usize) -> Self {
+        Self::new_with_nodes(dim, DEFAULT_NUM_NODES)
+    }
+
+    /// Create a reservoir with custom number of nodes per register.
+    pub fn new_with_nodes(dim: usize, num_nodes: usize) -> Self {
         let registers = DEFAULT_SCALES.iter()
             .map(|&(tau, pat_idx)| {
-                ResonanceRegister::new(dim, tau, pattern_from_index(pat_idx))
+                ResonanceRegister::new(dim, tau, pattern_from_index(pat_idx), num_nodes)
             })
             .collect();
 
@@ -343,9 +304,9 @@ impl WaveResonanceReservoir {
     }
 
     /// Create a reservoir with custom scale configurations.
-    pub fn with_scales(dim: usize, scales: &[(f64, InterferencePattern)]) -> Self {
+    pub fn with_scales(dim: usize, scales: &[(f64, InterferencePattern)], num_nodes: usize) -> Self {
         let registers = scales.iter()
-            .map(|(tau, pat)| ResonanceRegister::new(dim, *tau, pat.clone()))
+            .map(|(tau, pat)| ResonanceRegister::new(dim, *tau, pat.clone(), num_nodes))
             .collect();
 
         Self { dim, registers, compaction_log: Vec::new() }
@@ -355,15 +316,12 @@ impl WaveResonanceReservoir {
     ///
     /// Returns the final ReservoirState capturing all multi-scale context.
     /// Includes automatic resonance compaction every τ tokens per register.
-    /// Complexity: O(n × dim × num_scales) where n = sequence length.
     pub fn process_sequence(&mut self, token_waves: &[Wave]) -> ReservoirState {
-        // Reset all registers and compaction log
         for reg in &mut self.registers {
             reg.reset();
         }
         self.compaction_log.clear();
 
-        // Feed each token through all registers with auto-compaction
         for (pos, token_wave) in token_waves.iter().enumerate() {
             self.process_token(token_wave, pos);
         }
@@ -390,15 +348,13 @@ impl WaveResonanceReservoir {
     /// Incrementally process a single token (for autoregressive use).
     ///
     /// After resonating, checks each register's token count against its τ.
-    /// When token_count reaches τ (rounded), triggers resonance compaction —
-    /// the physics-based memory garbage collection.
+    /// When token_count reaches τ, triggers compaction + inter-node coupling.
     pub fn process_token(&mut self, token_wave: &Wave, position: usize) {
         let num_regs = self.registers.len();
         for idx in 0..num_regs {
             self.registers[idx].resonate(token_wave, position);
             self.registers[idx].token_count += 1;
 
-            // Auto-compact every τ tokens (rounded to nearest integer, minimum 2)
             let compact_interval = (self.registers[idx].tau.round() as usize).max(2);
             if self.registers[idx].token_count % compact_interval == 0 {
                 let result = self.registers[idx].compact(idx);
@@ -408,18 +364,22 @@ impl WaveResonanceReservoir {
     }
 
     /// Get the current reservoir state without resetting.
+    ///
+    /// Aggregates per-register node waves into scale waves, and collects
+    /// all individual node waves for richer feature statistics.
     pub fn current_state(&self) -> ReservoirState {
+        // Aggregate per register → one wave per scale
         let scales: Vec<Wave> = self.registers.iter()
-            .map(|r| r.state.clone())
+            .map(|r| r.aggregate())
             .collect();
 
-        // Merge all scales via constructive interference
+        // Collect ALL individual node waves for μ/σ estimation
+        let node_waves: Vec<Wave> = self.registers.iter()
+            .flat_map(|r| r.nodes.clone())
+            .collect();
+
         let merged = merge_scales(&scales, self.dim);
-
-        // Compute phase coherence across scales
         let phase_coherence = compute_phase_coherence(&scales);
-
-        // Compute total resonance energy
         let resonance_energy = self.registers.iter()
             .map(|r| r.energy())
             .sum();
@@ -427,6 +387,7 @@ impl WaveResonanceReservoir {
         ReservoirState {
             merged,
             scales,
+            node_waves,
             phase_coherence,
             resonance_energy,
         }
@@ -452,68 +413,116 @@ impl WaveResonanceReservoir {
 
 /// Snapshot of the reservoir's multi-scale context.
 ///
-/// Contains both merged and per-scale information, plus
+/// Contains merged, per-scale, and per-node information, plus
 /// physics-derived quality signals (coherence, energy).
 #[derive(Clone, Debug)]
 pub struct ReservoirState {
     /// Merged multi-scale context wave
     pub merged: Wave,
-    /// Individual scale states
+    /// Aggregated scale states (one per register)
     pub scales: Vec<Wave>,
-    /// Phase coherence across scales (0..1): how aligned the scales are.
-    /// High coherence = scales agree = confident context.
-    /// Used as anomaly detection signal.
+    /// All individual node waves across all registers
+    /// (used for richer Gaussian statistics in feature extraction)
+    pub node_waves: Vec<Wave>,
+    /// Phase coherence across scales (0..1)
     pub phase_coherence: f64,
-    /// Total resonance energy across all scales.
-    /// Higher energy = stronger resonance = more informative context.
+    /// Total resonance energy across all scales
     pub resonance_energy: f64,
 }
 
 impl ReservoirState {
-    /// Compute the feature dimension for readout: 4*dim + 2.
-    /// [merged(dim) + scale_0(dim) + scale_1(dim) + scale_2(dim) + coherence(1) + energy(1)]
+    /// Compute the feature dimension for readout.
+    ///
+    /// Gaussian representation: each channel contributes (μ, σ, phase).
+    /// μ/σ are estimated from ALL node waves (richer statistics).
+    /// Pairs are computed between aggregated scale waves (compact).
+    /// Feature dim is independent of num_nodes.
     pub fn feature_dim(dim: usize, num_scales: usize) -> usize {
-        dim * (1 + num_scales) + 2
+        let per_channel = 3; // μ, σ, phase
+        let global = 2; // coherence, energy
+        let n_waves = 1 + num_scales;
+        let n_pairs = n_waves * (n_waves - 1) / 2;
+        let resonance = n_pairs * 3; // overlap_mean, high_overlap_ratio, phase_alignment
+        per_channel * dim + global + resonance
     }
 
     /// Extract the full feature vector for the readout layer.
     ///
-    /// Each scale (merged + scale0~2) is independently L2-normalized
-    /// to preserve relative magnitude differences between scales.
-    /// Scalar features (coherence, energy) are excluded from normalization.
+    /// Gaussian representation with multi-node statistics:
+    ///   - μ = mean magnitude across ALL node waves (richer central tendency)
+    ///   - σ = std of magnitudes across ALL node waves (captures inter-node variance)
+    ///   - phase = from merged wave (reference frame)
+    ///   - Gaussian overlap between aggregated scale waves
+    ///
+    /// With N nodes per register: μ/σ estimated from 1 + 3N waves instead of 4.
+    /// More samples → more robust statistics → better discrimination.
     pub fn to_feature_vector(&self) -> Vec<f64> {
         let dim = self.merged.dim;
         let num_scales = self.scales.len();
         let feat_dim = Self::feature_dim(dim, num_scales);
         let mut features = Vec::with_capacity(feat_dim);
 
-        // Helper: extract probability amplitudes and L2-normalize independently
-        let push_normalized_scale = |probs: &[f64], features: &mut Vec<f64>| {
-            let start = features.len();
-            for &p in probs {
-                features.push(p.sqrt());
-            }
-            let norm: f64 = features[start..].iter().map(|x| x * x).sum::<f64>().sqrt();
-            if norm > 1e-10 {
-                for v in &mut features[start..] {
-                    *v /= norm;
-                }
-            }
-        };
+        // ALL waves for μ/σ: merged + all individual node waves
+        let all_waves: Vec<&Wave> = std::iter::once(&self.merged)
+            .chain(self.node_waves.iter())
+            .collect();
+        let n_waves = all_waves.len();
 
-        // Merged wave: independently normalized
-        let merged_probs = self.merged.probabilities();
-        push_normalized_scale(&merged_probs, &mut features);
+        // Aggregated scale waves for pair interactions
+        let scale_waves: Vec<&Wave> = std::iter::once(&self.merged)
+            .chain(self.scales.iter())
+            .collect();
 
-        // Per-scale waves: each independently normalized
-        for scale in &self.scales {
-            let probs = scale.probabilities();
-            push_normalized_scale(&probs, &mut features);
+        // Per-channel Gaussian parameters
+        let mut sigmas = Vec::with_capacity(dim);
+        for k in 0..dim {
+            let mags: Vec<f64> = all_waves.iter()
+                .map(|w| w.amplitudes.data[k].norm())
+                .collect();
+
+            let mu = mags.iter().sum::<f64>() / n_waves as f64;
+            let variance = mags.iter()
+                .map(|&m| (m - mu).powi(2))
+                .sum::<f64>() / n_waves as f64;
+            let sigma = variance.sqrt().max(0.01);
+            let phase = self.merged.amplitudes.data[k].arg() / std::f64::consts::PI;
+
+            features.push(mu);
+            features.push(sigma);
+            features.push(phase);
+            sigmas.push(sigma);
         }
 
-        // Scalar features — NOT normalized (preserve raw values)
+        // Global statistics
         features.push(self.phase_coherence);
         features.push(self.resonance_energy.min(10.0) / 10.0);
+
+        // Gaussian overlap resonance between aggregated scale waves
+        for i in 0..scale_waves.len() {
+            for j in (i + 1)..scale_waves.len() {
+                let mut total_overlap = 0.0;
+                let mut high_overlap_count = 0usize;
+                let mut phase_alignment = 0.0;
+
+                for k in 0..dim {
+                    let m_i = scale_waves[i].amplitudes.data[k].norm();
+                    let m_j = scale_waves[j].amplitudes.data[k].norm();
+                    let sigma = sigmas[k];
+
+                    let overlap = (-(m_i - m_j).powi(2) / (4.0 * sigma * sigma)).exp();
+                    total_overlap += overlap;
+                    if overlap > 0.5 { high_overlap_count += 1; }
+
+                    let phase_diff = scale_waves[i].amplitudes.data[k].arg()
+                        - scale_waves[j].amplitudes.data[k].arg();
+                    phase_alignment += phase_diff.cos().abs();
+                }
+
+                features.push(total_overlap / dim as f64);
+                features.push(high_overlap_count as f64 / dim as f64);
+                features.push(phase_alignment / dim as f64);
+            }
+        }
 
         features
     }
@@ -542,14 +551,13 @@ fn zero_wave(dim: usize) -> Wave {
 fn phase_rotate(wave: &Wave, angle: f64) -> Wave {
     let data: Vec<Complex64> = wave.amplitudes.data.iter().enumerate()
         .map(|(i, &amp)| {
-            // Dimension-dependent frequency for spectral diversity
             let freq = 1.0 / (100.0_f64).powf(2.0 * (i as f64) / wave.dim as f64);
             let theta = angle * freq;
             amp * Complex64::from_polar(1.0, theta)
         })
         .collect();
     Wave {
-        amplitudes: ComplexVec::new(data).normalized(),
+        amplitudes: ComplexVec::new(data),
         t: wave.t,
         density: None,
         dim: wave.dim,
@@ -557,13 +565,17 @@ fn phase_rotate(wave: &Wave, angle: f64) -> Wave {
     }
 }
 
-/// Apply damping to a wave (multiply amplitudes by damping factor).
-fn damp_wave(wave: &Wave, damping: f64) -> Wave {
+/// Apply atan nonlinearity to wave magnitudes (preserves phase).
+fn atan_nonlinearity(wave: &Wave) -> Wave {
     let data: Vec<Complex64> = wave.amplitudes.data.iter()
-        .map(|&amp| amp * damping)
+        .map(|&amp| {
+            let mag = amp.norm();
+            let phase = amp.arg();
+            Complex64::from_polar(mag.atan(), phase)
+        })
         .collect();
     Wave {
-        amplitudes: ComplexVec::new(data).normalized(),
+        amplitudes: ComplexVec::new(data),
         t: wave.t,
         density: None,
         dim: wave.dim,
@@ -582,7 +594,7 @@ fn kerr_nonlinearity(wave: &Wave, kappa: f64) -> Wave {
         })
         .collect();
     Wave {
-        amplitudes: ComplexVec::new(data).normalized(),
+        amplitudes: ComplexVec::new(data),
         t: wave.t,
         density: None,
         dim: wave.dim,
@@ -590,15 +602,93 @@ fn kerr_nonlinearity(wave: &Wave, kappa: f64) -> Wave {
     }
 }
 
-/// Normalize a wave to unit norm.
-fn normalize_wave(wave: &Wave) -> Wave {
-    Wave {
-        amplitudes: wave.amplitudes.normalized(),
+/// Compact a single wave via phase grouping + pruning + renormalization.
+///
+/// Returns (channels_merged, channels_pruned).
+fn compact_single_wave(wave: &mut Wave) -> (usize, usize) {
+    let dim = wave.dim;
+    let amps = &wave.amplitudes.data;
+
+    let phase_threshold = std::f64::consts::PI / 4.0;
+    let phases: Vec<f64> = amps.iter().map(|c| c.arg()).collect();
+    let magnitudes: Vec<f64> = amps.iter().map(|c| c.norm()).collect();
+    let mut merged_count = 0usize;
+    let mut visited = vec![false; dim];
+    let mut new_amps: Vec<Complex64> = vec![Complex64::new(0.0, 0.0); dim];
+
+    for i in 0..dim {
+        if visited[i] || magnitudes[i] < 1e-12 {
+            if !visited[i] {
+                new_amps[i] = amps[i];
+            }
+            visited[i] = true;
+            continue;
+        }
+
+        let mut group_mag = magnitudes[i];
+        let mut group_phase_x = magnitudes[i] * phases[i].cos();
+        let mut group_phase_y = magnitudes[i] * phases[i].sin();
+        let mut group_count = 1usize;
+        visited[i] = true;
+
+        for j in (i + 1)..dim {
+            if visited[j] || magnitudes[j] < 1e-12 {
+                continue;
+            }
+            let mut dp = (phases[i] - phases[j]).abs();
+            if dp > std::f64::consts::PI {
+                dp = 2.0 * std::f64::consts::PI - dp;
+            }
+
+            if dp < phase_threshold {
+                group_mag += magnitudes[j];
+                group_phase_x += magnitudes[j] * phases[j].cos();
+                group_phase_y += magnitudes[j] * phases[j].sin();
+                group_count += 1;
+                visited[j] = true;
+                new_amps[j] = Complex64::new(0.0, 0.0);
+            }
+        }
+
+        if group_count > 1 {
+            merged_count += group_count - 1;
+        }
+
+        let avg_phase = group_phase_y.atan2(group_phase_x);
+        new_amps[i] = Complex64::from_polar(group_mag, avg_phase);
+    }
+
+    // Prune low-energy channels
+    let max_energy = new_amps.iter().map(|c| c.norm_sqr())
+        .fold(0.0f64, f64::max);
+    let prune_threshold = max_energy * 0.001;
+    let mut pruned_count = 0usize;
+
+    for i in 0..dim {
+        let ch_energy = new_amps[i].norm_sqr();
+        if ch_energy > 0.0 && ch_energy < prune_threshold {
+            new_amps[i] *= 0.1;
+            pruned_count += 1;
+        }
+    }
+
+    // Renormalize
+    let norm: f64 = new_amps.iter().map(|c| c.norm_sqr()).sum::<f64>().sqrt();
+    if norm > 1e-15 {
+        for c in &mut new_amps {
+            *c /= norm;
+        }
+    }
+
+    *wave = Wave {
+        amplitudes: ComplexVec::new(new_amps),
         t: wave.t,
         density: None,
         dim: wave.dim,
         metrics: wave.metrics.clone(),
-    }
+    };
+
+    (merged_count, pruned_count)
 }
 
 /// Merge multiple scale waves via weighted constructive interference.
@@ -610,7 +700,6 @@ fn merge_scales(scales: &[Wave], dim: usize) -> Wave {
         return scales[0].clone();
     }
 
-    // Weighted sum: equal weights for simplicity
     let weight = 1.0 / scales.len() as f64;
     let mut data = vec![Complex64::new(0.0, 0.0); dim];
 
@@ -632,10 +721,6 @@ fn merge_scales(scales: &[Wave], dim: usize) -> Wave {
 }
 
 /// Compute phase coherence across scales.
-///
-/// Measures how aligned the phase patterns are across different time scales.
-/// High coherence = consistent context interpretation across scales.
-/// Returns a value in [0, 1].
 fn compute_phase_coherence(scales: &[Wave]) -> f64 {
     if scales.len() < 2 {
         return 1.0;
@@ -669,9 +754,8 @@ mod tests {
     #[test]
     fn test_resonance_register_basic() {
         let dim = 16;
-        let mut reg = ResonanceRegister::new(dim, 5.0, InterferencePattern::Constructive);
+        let mut reg = ResonanceRegister::new(dim, 5.0, InterferencePattern::Constructive, 4);
 
-        // Feed a non-uniform wave
         let data: Vec<Complex64> = (0..dim)
             .map(|i| Complex64::from_polar(1.0 / (dim as f64).sqrt(), i as f64 * 0.5))
             .collect();
@@ -686,9 +770,10 @@ mod tests {
         reg.resonate(&token, 0);
         assert!(reg.energy() > 0.0);
 
-        // State should differ from zero
+        // Aggregated state should differ from zero
+        let agg = reg.aggregate();
         let zero = zero_wave(dim);
-        let diff: f64 = reg.state.probabilities().iter()
+        let diff: f64 = agg.probabilities().iter()
             .zip(zero.probabilities().iter())
             .map(|(a, b)| (a - b).abs())
             .sum();
@@ -701,7 +786,6 @@ mod tests {
         let mut reservoir = WaveResonanceReservoir::new(dim);
         assert_eq!(reservoir.num_scales(), 3);
 
-        // Process a short sequence
         let waves: Vec<Wave> = (0..5).map(|i| {
             let data: Vec<Complex64> = (0..dim)
                 .map(|j| Complex64::from_polar(
@@ -720,20 +804,17 @@ mod tests {
 
         let state = reservoir.process_sequence(&waves);
 
-        // Check merged wave
         assert_eq!(state.merged.dim, dim);
         let probs = state.merged.probabilities();
         let sum: f64 = probs.iter().sum();
         assert!((sum - 1.0).abs() < 1e-6, "probs sum = {}", sum);
 
-        // Check scales
         assert_eq!(state.scales.len(), 3);
+        // node_waves: 3 registers × 4 nodes = 12
+        assert_eq!(state.node_waves.len(), 12);
 
-        // Phase coherence should be between 0 and 1
         assert!(state.phase_coherence >= 0.0 && state.phase_coherence <= 1.0,
             "coherence = {}", state.phase_coherence);
-
-        // Energy should be positive
         assert!(state.resonance_energy > 0.0, "energy = {}", state.resonance_energy);
     }
 
@@ -749,22 +830,18 @@ mod tests {
         assert_eq!(features.len(), expected_dim,
             "feature dim: got {}, expected {}", features.len(), expected_dim);
 
-        // Per-scale normalization: 4 blocks each with norm ~1 + 2 scalars
-        // Total norm ≈ sqrt(4 + scalars²) ≈ 2.0
         let norm: f64 = features.iter().map(|x| x * x).sum::<f64>().sqrt();
-        assert!(norm > 1.0 && norm < 3.0, "norm = {}", norm);
+        assert!(norm > 0.05 && norm < 50.0, "norm = {}", norm);
     }
 
     #[test]
     fn test_saturation_measurement() {
         let dim = 16;
-        let mut reg = ResonanceRegister::new(dim, 5.0, InterferencePattern::Constructive);
+        let mut reg = ResonanceRegister::new(dim, 5.0, InterferencePattern::Constructive, 4);
 
-        // Zero wave (uniform) should have high saturation (all channels equal)
         let sat_initial = reg.saturation();
         assert!(sat_initial > 0.9, "uniform state should be near-saturated: {}", sat_initial);
 
-        // After processing tokens, saturation should drop (some channels stronger)
         for i in 0..10 {
             let data: Vec<Complex64> = (0..dim)
                 .map(|j| Complex64::from_polar(
@@ -783,7 +860,6 @@ mod tests {
         }
 
         let sat_after = reg.saturation();
-        // After processing, saturation should be less than initial (more structure)
         assert!(sat_after <= sat_initial,
             "saturation should not increase: before={}, after={}", sat_initial, sat_after);
     }
@@ -791,9 +867,8 @@ mod tests {
     #[test]
     fn test_compaction_reduces_saturation() {
         let dim = 32;
-        let mut reg = ResonanceRegister::new(dim, 5.0, InterferencePattern::Constructive);
+        let mut reg = ResonanceRegister::new(dim, 5.0, InterferencePattern::Constructive, 4);
 
-        // Saturate with many tokens
         for i in 0..20 {
             let data: Vec<Complex64> = (0..dim)
                 .map(|j| Complex64::from_polar(
@@ -814,13 +889,9 @@ mod tests {
         let sat_before = reg.saturation();
         let result = reg.compact(0);
 
-        // Compaction should have done something (merged or pruned)
-        // At least some channels should have been affected
         assert!(result.saturation_before == sat_before,
             "saturation_before should match: {} vs {}", result.saturation_before, sat_before);
         assert!(result.saturation_after <= 1.0, "saturation_after should be <= 1.0");
-
-        // Energy should be preserved approximately (renormalized)
         assert!(result.energy_after > 0.0, "energy should be positive after compaction");
 
         println!("Compaction: merged={}, pruned={}, sat {:.3}→{:.3}, energy {:.3}→{:.3}",
@@ -834,10 +905,6 @@ mod tests {
         let dim = 16;
         let mut reservoir = WaveResonanceReservoir::new(dim);
 
-        // Process enough tokens to trigger compaction on all scales
-        // τ=2 → compacts every 2 tokens
-        // τ=5 → compacts every 5 tokens
-        // τ=15 → compacts every 15 tokens
         let n_tokens = 30;
 
         for i in 0..n_tokens {
@@ -857,14 +924,9 @@ mod tests {
             reservoir.process_token(&token, i);
         }
 
-        // Should have compaction events
         assert!(!reservoir.compaction_log.is_empty(),
             "should have compaction events after {} tokens", n_tokens);
 
-        // τ=2 register compacts every 2 tokens → 15 compactions in 30 tokens
-        // τ=5 register compacts every 5 tokens → 6 compactions
-        // τ=15 register compacts every 15 tokens → 2 compactions
-        // Total ≈ 23
         let scale0_compactions = reservoir.compaction_log.iter()
             .filter(|r| r.scale_index == 0).count();
         let scale1_compactions = reservoir.compaction_log.iter()
@@ -889,7 +951,6 @@ mod tests {
         let dim = 16;
         let mut reservoir = WaveResonanceReservoir::new(dim);
 
-        // Process a distinctive sequence
         let waves: Vec<Wave> = (0..10).map(|i| {
             let data: Vec<Complex64> = (0..dim)
                 .map(|j| Complex64::from_polar(
@@ -908,19 +969,16 @@ mod tests {
 
         let state_with_compaction = reservoir.process_sequence(&waves);
 
-        // The state should still be valid and non-trivial after compaction
         let probs = state_with_compaction.merged.probabilities();
         let sum: f64 = probs.iter().sum();
         assert!((sum - 1.0).abs() < 1e-6, "probabilities should sum to 1: {}", sum);
 
-        // Feature vector should still be well-formed
         let features = state_with_compaction.to_feature_vector();
         let feat_dim = ReservoirState::feature_dim(dim, 3);
         assert_eq!(features.len(), feat_dim);
         let norm: f64 = features.iter().map(|x| x * x).sum::<f64>().sqrt();
-        assert!(norm > 1.0 && norm < 3.0, "features norm out of range: {}", norm);
+        assert!(norm > 0.05 && norm < 50.0, "features norm out of range: {}", norm);
 
-        // Energy should be positive
         assert!(state_with_compaction.resonance_energy > 0.0);
     }
 
@@ -952,5 +1010,34 @@ mod tests {
             .map(|(a, b)| (a - b).abs())
             .sum();
         assert!(diff > 0.001, "different sequences should give different states: diff={}", diff);
+    }
+
+    #[test]
+    fn test_multi_node_diversity() {
+        let dim = 16;
+        let mut reg = ResonanceRegister::new(dim, 5.0, InterferencePattern::Constructive, 4);
+
+        // Feed several tokens
+        for i in 0..5 {
+            let data: Vec<Complex64> = (0..dim)
+                .map(|j| Complex64::from_polar(1.0 / (dim as f64).sqrt(), (i + j) as f64 * 0.5))
+                .collect();
+            let token = Wave {
+                amplitudes: ComplexVec::new(data).normalized(),
+                t: 0.0,
+                density: None,
+                dim,
+                metrics: CollapseMetrics::new(),
+            };
+            reg.resonate(&token, i);
+        }
+
+        // Nodes should have different states (spectral diversity)
+        let probs0 = reg.nodes[0].probabilities();
+        let probs1 = reg.nodes[1].probabilities();
+        let diff: f64 = probs0.iter().zip(probs1.iter())
+            .map(|(a, b)| (a - b).abs())
+            .sum();
+        assert!(diff > 0.001, "different nodes should have different states: diff={}", diff);
     }
 }
