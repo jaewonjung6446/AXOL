@@ -224,6 +224,84 @@ fn bench_chat_accuracy_and_speed() {
     println!();
 
     // ══════════════════════════════════════════════════════════════════════
+    // 파동 기반 생성 벤치마크
+    // ══════════════════════════════════════════════════════════════════════
+
+    println!("======================================================================");
+    println!("  [생성]");
+    println!("======================================================================\n");
+
+    let gen_inputs: Vec<(&str, &str)> = vec![
+        ("안녕하세요", "greeting"),
+        ("강아지가 아파요", "animals"),
+        ("친구랑 싸웠어", "people"),
+        ("바다가 좋아", "nature"),
+        ("안녕히 가세요", "farewell"),
+        ("도와줘", "help"),
+        ("오늘 날씨 어때?", "weather"),
+        ("배고파", "food"),
+        ("기분이 좋아", "emotions"),
+        ("ㅁㄴㅇㄹ", "unknown"),
+    ];
+
+    println!("[의도별 생성]");
+    let mut gen_times = Vec::new();
+    let mut gen_count = 0;
+    let mut gen_quality_sum = 0.0;
+
+    for (input, expected) in &gen_inputs {
+        let t = Instant::now();
+        let result = chat.generate_response(input);
+        let elapsed = t.elapsed().as_secs_f64() * 1000.0;
+        gen_times.push(elapsed);
+
+        let tag = if result.is_generated { "생성" } else { "폴백" };
+        let q = result.generation_quality.unwrap_or(0.0);
+        if result.is_generated {
+            gen_count += 1;
+            gen_quality_sum += q;
+        }
+
+        println!("  [{:4}] {:20} → 의도={:10} 기대={:10} Φ={:.4} ({:.1}ms) '{}'",
+            tag, input, result.intent, expected, q, elapsed,
+            if result.response.len() > 40 {
+                format!("{}...", &result.response[..result.response.char_indices()
+                    .nth(40).map_or(result.response.len(), |(i, _)| i)])
+            } else {
+                result.response.clone()
+            });
+    }
+
+    let gen_avg_time = gen_times.iter().sum::<f64>() / gen_times.len() as f64;
+    let gen_avg_quality = if gen_count > 0 { gen_quality_sum / gen_count as f64 } else { 0.0 };
+
+    println!();
+    println!("[생성 통계]");
+    println!("  생성 성공:     {}/{}", gen_count, gen_inputs.len());
+    println!("  평균 Φ 품질:   {:.4}", gen_avg_quality);
+    println!("  평균 생성 시간: {:.2}ms", gen_avg_time);
+    println!();
+
+    // 생성 vs 풀선택 비교
+    println!("[생성 vs 풀선택 비교]");
+    for (input, _) in gen_inputs.iter().take(5) {
+        let t_pool = Instant::now();
+        let pool_result = chat.respond(input);
+        let pool_ms = t_pool.elapsed().as_secs_f64() * 1000.0;
+
+        let t_gen = Instant::now();
+        let gen_result = chat.generate_response(input);
+        let gen_ms = t_gen.elapsed().as_secs_f64() * 1000.0;
+
+        let gen_tag = if gen_result.is_generated { "생성" } else { "폴백" };
+        println!("  '{}': 풀={:.1}ms vs 생성={:.1}ms [{}]",
+            input, pool_ms, gen_ms, gen_tag);
+        println!("    풀: '{}'", pool_result.response);
+        println!("    생성: '{}'", gen_result.response);
+    }
+    println!();
+
+    // ══════════════════════════════════════════════════════════════════════
     // 메타 성장 벤치마크
     // ══════════════════════════════════════════════════════════════════════
 

@@ -8,6 +8,8 @@ use axol::text::chat::ChatEngine;
 
 use std::io::{self, BufRead, Write};
 
+const SAVE_PATH: &str = "wte_chat_state.json";
+
 fn main() {
     println!("=== WTE 한국어 대화 엔진 (메타 성장) ===");
     println!("엔진 빌드 중...");
@@ -41,10 +43,28 @@ fn main() {
     let total_entries: usize = chat.pools.iter().map(|p| p.entries.len()).sum();
     println!("  {} 응답 풀 ({} 응답) 준비 완료", chat.pools.len(), total_entries);
 
+    // 저장된 상태 불러오기
+    match chat.load(SAVE_PATH) {
+        Ok(()) => {
+            let s = chat.growth_stats();
+            let total: usize = chat.pools.iter().map(|p| p.entries.len()).sum();
+            println!("  학습 데이터 복원 완료! (쿼리 {}, 사이클 {}, 풀 {}, 응답 {})",
+                s.total_queries, s.total_cycles, chat.pools.len(), total);
+        }
+        Err(_) => {
+            println!("  (저장된 학습 데이터 없음 — 초기 상태)");
+        }
+    }
+
     println!("\n준비 완료! 메시지를 입력하세요.");
-    println!("  '종료' — 종료");
+    println!("  '종료' — 저장 후 종료");
+    println!("  '저장' — 학습 상태 수동 저장");
     println!("  '성장' — 성장 통계 + 풀 상태");
     println!("  '사이클' / '사이클 N' — 성장 사이클 수동 실행 (N회)");
+    println!("  '생성' — 생성 모드로 응답 (generate_response)");
+    println!("  '자동' — 자동 모드 토글 (respond_auto)");
+    println!("  '자동피드백' — 자동 피드백 토글 (확신도 기반 자가 학습)");
+    println!("  '피드백사이클' / '피드백사이클 N' — 자동피드백 + 성장 사이클 (N회)");
     println!("  응답 후: [+] 좋아요 / [-] 별로 / Enter: 계속\n");
 
     let stdin = io::stdin();
@@ -52,6 +72,7 @@ fn main() {
 
     let mut last_pool_id: Option<usize> = None;
     let mut last_response_id: Option<usize> = None;
+    let mut auto_mode = false;
 
     loop {
         print!("나> ");
@@ -66,8 +87,27 @@ fn main() {
             continue;
         }
         if input == "종료" || input == "quit" || input == "exit" {
+            // 자동 저장
+            match chat.save(SAVE_PATH) {
+                Ok(()) => println!("  학습 상태 저장 완료 ({})", SAVE_PATH),
+                Err(e) => println!("  저장 실패: {}", e),
+            }
             println!("안녕히 가세요!");
             break;
+        }
+
+        // 수동 저장
+        if input == "저장" || input == "save" {
+            match chat.save(SAVE_PATH) {
+                Ok(()) => {
+                    let s = chat.growth_stats();
+                    println!("  → 저장 완료! (쿼리 {}, 사이클 {}, 경험 {})",
+                        s.total_queries, s.total_cycles, chat.experience_count());
+                }
+                Err(e) => println!("  → 저장 실패: {}", e),
+            }
+            println!();
+            continue;
         }
 
         // 성장 통계 명령
@@ -81,6 +121,11 @@ fn main() {
             println!("  정리된 응답:   {}", stats.total_pruned);
             println!("  출현 풀 생성:  {}", stats.emergent_pools_created);
             println!("  클론 생성:     {}", stats.total_clones);
+            println!("  분류기 재학습: {}", stats.classifier_retrains);
+            println!("  경험 축적:     {}", chat.experience_count());
+            println!("  자동 피드백:   {} (임계값: {:.2})",
+                if chat.auto_feedback { "켜짐" } else { "꺼짐" },
+                chat.auto_feedback_threshold);
             println!("\n[풀 상태]");
             for (intent, size, avg_fit, emergent) in chat.pool_summary() {
                 let tag = if emergent { " [출현]" } else { "" };
@@ -103,7 +148,6 @@ fn main() {
         }
         if let Some(rest) = input.strip_prefix("사이클 ").or_else(|| input.strip_prefix("cycle ")) {
             if let Ok(n) = rest.trim().parse::<usize>() {
-                let before_cycles = chat.growth_stats().total_cycles;
                 let before_pruned = chat.growth_stats().total_pruned;
                 let before_emerged = chat.growth_stats().emergent_pools_created;
                 let before_clones = chat.growth_stats().total_clones;
@@ -121,6 +165,58 @@ fn main() {
             }
         }
 
+        // 자동 모드 토글
+        if input == "자동" || input == "auto" {
+            auto_mode = !auto_mode;
+            println!("  → 자동 모드: {}", if auto_mode { "켜짐" } else { "꺼짐" });
+            println!();
+            continue;
+        }
+
+        // 자동피드백 토글
+        if input == "자동피드백" || input == "autofb" {
+            chat.auto_feedback = !chat.auto_feedback;
+            println!("  → 자동 피드백: {} (임계값: {:.2})",
+                if chat.auto_feedback { "켜짐" } else { "꺼짐" },
+                chat.auto_feedback_threshold);
+            println!();
+            continue;
+        }
+
+        // 자동피드백 사이클 실행
+        if input == "피드백사이클" || input == "fbcycle" {
+            let (b, p) = chat.auto_feedback_cycle();
+            let s = chat.growth_stats();
+            println!("  → 자동피드백 사이클 1회 (총 사이클 {})", s.total_cycles);
+            println!("    boost: {} / penalize: {}", b, p);
+            println!();
+            continue;
+        }
+        if let Some(rest) = input.strip_prefix("피드백사이클 ").or_else(|| input.strip_prefix("fbcycle ")) {
+            if let Ok(n) = rest.trim().parse::<usize>() {
+                let before = chat.growth_stats().total_cycles;
+                let (b, p) = chat.auto_feedback_cycles(n);
+                let s = chat.growth_stats();
+                println!("  → 자동피드백 사이클 {}회 (총 사이클 {})", s.total_cycles - before, s.total_cycles);
+                println!("    총 boost: {} / penalize: {}", b, p);
+                println!();
+                continue;
+            }
+        }
+
+        // 생성 모드 응답
+        if let Some(rest) = input.strip_prefix("생성 ").or_else(|| input.strip_prefix("generate ")) {
+            let result = chat.generate_response(rest);
+            let tag = if result.is_generated { "[생성]" } else { "[폴백]" };
+            println!("봇> {} {}", tag, result.response);
+            println!("    [의도: {}, 확신도: {:.3}, 품질: {:?}]",
+                result.intent, result.confidence, result.generation_quality);
+            println!();
+            last_pool_id = Some(result.pool_id);
+            last_response_id = Some(result.response_id);
+            continue;
+        }
+
         // 피드백 처리
         if (input == "+" || input == "좋아요") && last_pool_id.is_some() {
             chat.feedback(last_pool_id.unwrap(), last_response_id.unwrap(), true);
@@ -135,10 +231,21 @@ fn main() {
             continue;
         }
 
-        let result = chat.respond(input);
-        println!("봇> {}", result.response);
-        println!("    [의도: {}, 확신도: {:.3}, 공명: {:.6}]",
-            result.intent, result.confidence, result.resonance);
+        let result = if auto_mode {
+            chat.respond_auto(input)
+        } else {
+            chat.respond(input)
+        };
+
+        let tag = if result.is_generated { " [생성]" } else { "" };
+        println!("봇>{} {}", tag, result.response);
+        if result.is_generated {
+            println!("    [의도: {}, 확신도: {:.3}, 품질: {:?}]",
+                result.intent, result.confidence, result.generation_quality);
+        } else {
+            println!("    [의도: {}, 확신도: {:.3}, 공명: {:.6}]",
+                result.intent, result.confidence, result.resonance);
+        }
         println!("    [+] 좋아요 / [-] 별로 / Enter: 계속");
         println!();
 

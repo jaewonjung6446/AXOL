@@ -1,0 +1,738 @@
+{
+  "pools": [
+    {
+      "intent": "animals",
+      "is_emergent": false,
+      "parent_intents": null,
+      "entries": [
+        {
+          "text": "동물 이야기 좋아해요! 어떤 동물에 관심 있으세요?",
+          "fitness": 1.7014040303942196e-22,
+          "select_count": 0,
+          "is_clone": false,
+          "generation": 0,
+          "gen_phi": 0.0,
+          "gen_uses": 0
+        },
+        {
+          "text": "강아지도 고양이도 다 귀엽죠! 반려동물 키우고 계세요?",
+          "fitness": 1.7014040303942196e-22,
+          "select_count": 0,
+          "is_clone": false,
+          "generation": 0,
+          "gen_phi": 0.0,
+          "gen_uses": 0
+        },
+        {
+          "text": "동물은 정말 매력적이에요. 어떤 동물 이야기를 해볼까요?",
+          "fitness": 1.7014040303942196e-22,
+          "select_count": 0,
+          "is_clone": false,
+          "generation": 0,
+          "gen_phi": 0.0,
+          "gen_uses": 0
+        }
+      ]
+    },
+    {
+      "intent": "emotions",
+      "is_emergent": false,
+      "parent_intents": null,
+      "entries": [
+        {
+          "text": "감정을 나눠주셔서 고마워요. 어떤 일이 있었는지 말해줄래요?",
+          "fitness": 1.7014040303942196e-22,
+          "select_count": 0,
+          "is_clone": false,
+          "generation": 0,
+          "gen_phi": 0.0,
+          "gen_uses": 0
+        },
+        {
+          "text": "행복한 순간을 함께 나눌 수 있어서 기뻐요!",
+          "fitness": 1.7014040303942196e-22,
+          "select_count": 0,
+          "is_clone": false,
+          "generation": 0,
+          "gen_phi": 0.0,
+          "gen_uses": 0
+        },
+        {
+          "text": "당신의 이야기를 듣고 있을게요. 편하게 말씀해 주세요.",
+          "fitness": 1.7014040303942196e-22,
+          "select_count": 0,
+          "is_clone": false,
+          "generation": 0,
+          "gen_phi": 0.0,
+          "gen_uses": 0
+        }
+      ]
+    },
+    {
+      "intent": "farewell",
+      "is_emergent": false,
+      "parent_intents": null,
+      "entries": [
+        {
+          "text": "안녕히 가세요! 좋은 하루 보내세요!",
+          "fitness": 1.7014040303942196e-22,
+          "select_count": 0,
+          "is_clone": false,
+          "generation": 0,
+          "gen_phi": 0.0,
+          "gen_uses": 0
+        },
+        {
+          "text": "또 만나요! 언제든 다시 찾아주세요.",
+          "fitness": 1.7014040303942196e-22,
+          "select_count": 0,
+          "is_clone": false,
+          "generation": 0,
+          "gen_phi": 0.0,
+          "gen_uses": 0
+        },
+        {
+          "text": "잘 가요! 다음에 또 이야기해요.",
+          "fitness": 1.7014040303942196e-22,
+          "select_count": 0,
+          "is_clone": false,
+          "generation": 0,
+          "gen_phi": 0.0,
+          "gen_uses": 0
+        }
+      ]
+    },
+    {
+      "intent": "food",
+      "is_emergent": false,
+      "parent_intents": null,
+      "entries": [
+        {
+          "text": "음식 이야기 하니까 저도 배고파지네요! 뭐가 먹고 싶으세요?",
+          "fitness": 1.7014040303942196e-22,
+          "select_count": 0,
+          "is_clone": false,
+          "generation": 0,
+          "gen_phi": 0.0,
+          "gen_uses": 0
+        },
+        {
+          "text": "한식, 중식, 일식, 양식 다 좋죠! 오늘은 뭐가 땡기세요?",
+          "fitness": 1.7014040303942196e-22,
+          "select_count": 0,
+          "is_clone": false,
+          "generation": 0,
+          "gen_phi": 0.0,
+          "gen_uses": 0
+        },
+        {
+          "text": "치킨은 언제 먹어도 맛있죠! 양념파? 후라이드파?",
+          "fitness": 1.7014040303942196e-22,
+          "select_count": 0,
+          "is_clone": false,
+          "generation": 0,
+          "gen_phi": 0.0,
+          "gen_uses": 0
+        }
+      ]
+    },
+    {
+      "intent": "greeting",
+      "is_emergent": false,
+      "parent_intents": null,
+      "entries": [
+        {
+          "text": "반가워요! 오늘도 좋은 하루 되세요.",
+          "fitness": 29.849999999999337,
+          "select_count": 0,
+          "is_clone": false,
+          "generation": 0,
+          "gen_phi": 0.0,
+          "gen_uses": 0
+        },
+        {
+          "text": "안녕하세요~ 오늘도 즐거운 대화 해봐요!",
+          "fitness": 29.849999999999337,
+          "select_count": 0,
+          "is_clone": false,
+          "generation": 0,
+          "gen_phi": 0.0,
+          "gen_uses": 0
+        },
+        {
+          "text": "반가워요! 오늘도 좋은 하루 되세요.",
+          "fitness": 29.849999999999337,
+          "select_count": 0,
+          "is_clone": true,
+          "generation": 1,
+          "gen_phi": 0.0,
+          "gen_uses": 0
+        },
+        {
+          "text": "반가워요! 오늘도 좋은 하루 되세요.",
+          "fitness": 29.849999999999337,
+          "select_count": 0,
+          "is_clone": true,
+          "generation": 1,
+          "gen_phi": 0.0,
+          "gen_uses": 0
+        },
+        {
+          "text": "안녕하세요~ 오늘도 즐거운 대화 해봐요!",
+          "fitness": 29.849999999999337,
+          "select_count": 0,
+          "is_clone": true,
+          "generation": 1,
+          "gen_phi": 0.0,
+          "gen_uses": 0
+        },
+        {
+          "text": "안녕하세요~ 오늘도 즐거운 대화 해봐요!",
+          "fitness": 29.849999999999337,
+          "select_count": 0,
+          "is_clone": true,
+          "generation": 1,
+          "gen_phi": 0.0,
+          "gen_uses": 0
+        },
+        {
+          "text": "반가워요! 오늘도 좋은 하루 되세요.",
+          "fitness": 29.849999999999337,
+          "select_count": 0,
+          "is_clone": true,
+          "generation": 1,
+          "gen_phi": 0.0,
+          "gen_uses": 0
+        },
+        {
+          "text": "반가워요! 오늘도 좋은 하루 되세요.",
+          "fitness": 29.849999999999337,
+          "select_count": 0,
+          "is_clone": true,
+          "generation": 1,
+          "gen_phi": 0.0,
+          "gen_uses": 0
+        },
+        {
+          "text": "안녕하세요~ 오늘도 즐거운 대화 해봐요!",
+          "fitness": 29.849999999999337,
+          "select_count": 0,
+          "is_clone": true,
+          "generation": 1,
+          "gen_phi": 0.0,
+          "gen_uses": 0
+        },
+        {
+          "text": "안녕하세요~ 오늘도 즐거운 대화 해봐요!",
+          "fitness": 29.849999999999337,
+          "select_count": 0,
+          "is_clone": true,
+          "generation": 1,
+          "gen_phi": 0.0,
+          "gen_uses": 0
+        },
+        {
+          "text": "반가워요! 오늘도 좋은 하루 되세요.",
+          "fitness": 29.849999999999337,
+          "select_count": 0,
+          "is_clone": true,
+          "generation": 1,
+          "gen_phi": 0.0,
+          "gen_uses": 0
+        },
+        {
+          "text": "반가워요! 오늘도 좋은 하루 되세요.",
+          "fitness": 29.849999999999337,
+          "select_count": 0,
+          "is_clone": true,
+          "generation": 1,
+          "gen_phi": 0.0,
+          "gen_uses": 0
+        },
+        {
+          "text": "안녕하세요~ 오늘도 즐거운 대화 해봐요!",
+          "fitness": 29.849999999999337,
+          "select_count": 0,
+          "is_clone": true,
+          "generation": 1,
+          "gen_phi": 0.0,
+          "gen_uses": 0
+        },
+        {
+          "text": "안녕하세요~ 오늘도 즐거운 대화 해봐요!",
+          "fitness": 29.849999999999337,
+          "select_count": 0,
+          "is_clone": true,
+          "generation": 1,
+          "gen_phi": 0.0,
+          "gen_uses": 0
+        },
+        {
+          "text": "반가워요! 오늘도 좋은 하루 되세요.",
+          "fitness": 29.849999999999337,
+          "select_count": 0,
+          "is_clone": true,
+          "generation": 1,
+          "gen_phi": 0.0,
+          "gen_uses": 0
+        },
+        {
+          "text": "반가워요! 오늘도 좋은 하루 되세요.",
+          "fitness": 29.849999999999337,
+          "select_count": 0,
+          "is_clone": true,
+          "generation": 1,
+          "gen_phi": 0.0,
+          "gen_uses": 0
+        },
+        {
+          "text": "안녕하세요~ 오늘도 즐거운 대화 해봐요!",
+          "fitness": 29.849999999999337,
+          "select_count": 0,
+          "is_clone": true,
+          "generation": 1,
+          "gen_phi": 0.0,
+          "gen_uses": 0
+        },
+        {
+          "text": "반가워요! 오늘도 좋은 하루 되세요.",
+          "fitness": 29.849999999999337,
+          "select_count": 0,
+          "is_clone": true,
+          "generation": 1,
+          "gen_phi": 0.0,
+          "gen_uses": 0
+        },
+        {
+          "text": "반가워요! 오늘도 좋은 하루 되세요.",
+          "fitness": 29.849999999999337,
+          "select_count": 4,
+          "is_clone": true,
+          "generation": 1,
+          "gen_phi": 0.0,
+          "gen_uses": 0
+        },
+        {
+          "text": "안녕하세요~ 오늘도 즐거운 대화 해봐요!",
+          "fitness": 29.849999999999337,
+          "select_count": 0,
+          "is_clone": true,
+          "generation": 1,
+          "gen_phi": 0.0,
+          "gen_uses": 0
+        },
+        {
+          "text": "안녕하세요~ 오늘도 즐거운 대화 해봐요!",
+          "fitness": 29.849999999999337,
+          "select_count": 0,
+          "is_clone": true,
+          "generation": 1,
+          "gen_phi": 0.0,
+          "gen_uses": 0
+        },
+        {
+          "text": "반가워요! 오늘도 좋은 하루 되세요.",
+          "fitness": 29.849999999999337,
+          "select_count": 1,
+          "is_clone": true,
+          "generation": 2,
+          "gen_phi": 0.0,
+          "gen_uses": 0
+        },
+        {
+          "text": "반가워요! 오늘도 좋은 하루 되세요.",
+          "fitness": 29.849999999999337,
+          "select_count": 0,
+          "is_clone": true,
+          "generation": 2,
+          "gen_phi": 0.0,
+          "gen_uses": 0
+        },
+        {
+          "text": "반가워요! 오늘도 좋은 하루 되세요.",
+          "fitness": 29.849999999999337,
+          "select_count": 0,
+          "is_clone": true,
+          "generation": 2,
+          "gen_phi": 0.0,
+          "gen_uses": 0
+        },
+        {
+          "text": "반가워요! 오늘도 좋은 하루 되세요.",
+          "fitness": 29.849999999999337,
+          "select_count": 0,
+          "is_clone": true,
+          "generation": 2,
+          "gen_phi": 0.0,
+          "gen_uses": 0
+        },
+        {
+          "text": "안녕하세요~ 오늘도 즐거운 대화 해봐요!",
+          "fitness": 29.849999999999337,
+          "select_count": 0,
+          "is_clone": true,
+          "generation": 2,
+          "gen_phi": 0.0,
+          "gen_uses": 0
+        },
+        {
+          "text": "안녕하세요~ 오늘도 즐거운 대화 해봐요!",
+          "fitness": 29.849999999999337,
+          "select_count": 0,
+          "is_clone": true,
+          "generation": 2,
+          "gen_phi": 0.0,
+          "gen_uses": 0
+        },
+        {
+          "text": "안녕하세요~ 오늘도 즐거운 대화 해봐요!",
+          "fitness": 29.849999999999337,
+          "select_count": 0,
+          "is_clone": true,
+          "generation": 2,
+          "gen_phi": 0.0,
+          "gen_uses": 0
+        },
+        {
+          "text": "안녕하세요~ 오늘도 즐거운 대화 해봐요!",
+          "fitness": 29.849999999999337,
+          "select_count": 0,
+          "is_clone": true,
+          "generation": 2,
+          "gen_phi": 0.0,
+          "gen_uses": 0
+        },
+        {
+          "text": "반가워요! 오늘도 좋은 하루 되세요.",
+          "fitness": 29.849999999999337,
+          "select_count": 0,
+          "is_clone": true,
+          "generation": 2,
+          "gen_phi": 0.0,
+          "gen_uses": 0
+        }
+      ]
+    },
+    {
+      "intent": "help",
+      "is_emergent": false,
+      "parent_intents": null,
+      "entries": [
+        {
+          "text": "도와드릴게요! 인사, 동물, 사람, 자연, 날씨, 음식, 감정 등 다양한 주제로 대화할 수 있어요.",
+          "fitness": 1.7014040303942196e-22,
+          "select_count": 0,
+          "is_clone": false,
+          "generation": 0,
+          "gen_phi": 0.0,
+          "gen_uses": 0
+        },
+        {
+          "text": "처음이시군요! 아무 주제나 편하게 말씀해 주세요.",
+          "fitness": 1.7014040303942196e-22,
+          "select_count": 0,
+          "is_clone": false,
+          "generation": 0,
+          "gen_phi": 0.0,
+          "gen_uses": 0
+        },
+        {
+          "text": "저는 대화 친구예요! 심심할 때, 궁금할 때 언제든 말 걸어주세요.",
+          "fitness": 1.7014040303942196e-22,
+          "select_count": 0,
+          "is_clone": false,
+          "generation": 0,
+          "gen_phi": 0.0,
+          "gen_uses": 0
+        }
+      ]
+    },
+    {
+      "intent": "nature",
+      "is_emergent": false,
+      "parent_intents": null,
+      "entries": [
+        {
+          "text": "자연은 정말 아름답죠! 어떤 자연 풍경을 좋아하세요?",
+          "fitness": 1.7014040303942196e-22,
+          "select_count": 0,
+          "is_clone": false,
+          "generation": 0,
+          "gen_phi": 0.0,
+          "gen_uses": 0
+        },
+        {
+          "text": "산도 바다도 다 좋아요. 자연 속에 있으면 마음이 편안해지죠.",
+          "fitness": 1.7014040303942196e-22,
+          "select_count": 0,
+          "is_clone": false,
+          "generation": 0,
+          "gen_phi": 0.0,
+          "gen_uses": 0
+        },
+        {
+          "text": "꽃과 나무는 우리에게 많은 것을 알려주죠. 어떤 꽃을 좋아하세요?",
+          "fitness": 1.7014040303942196e-22,
+          "select_count": 0,
+          "is_clone": false,
+          "generation": 0,
+          "gen_phi": 0.0,
+          "gen_uses": 0
+        }
+      ]
+    },
+    {
+      "intent": "people",
+      "is_emergent": false,
+      "parent_intents": null,
+      "entries": [
+        {
+          "text": "사람 관계는 참 복잡하죠. 어떤 상황인지 더 이야기해 줄래요?",
+          "fitness": 1.7014040303942196e-22,
+          "select_count": 0,
+          "is_clone": false,
+          "generation": 0,
+          "gen_phi": 0.0,
+          "gen_uses": 0
+        },
+        {
+          "text": "사람과 사람 사이에는 항상 이해와 노력이 필요해요.",
+          "fitness": 1.7014040303942196e-22,
+          "select_count": 0,
+          "is_clone": false,
+          "generation": 0,
+          "gen_phi": 0.0,
+          "gen_uses": 0
+        },
+        {
+          "text": "힘든 감정이 있다면 나눠주세요. 듣고 있을게요.",
+          "fitness": 1.7014040303942196e-22,
+          "select_count": 0,
+          "is_clone": false,
+          "generation": 0,
+          "gen_phi": 0.0,
+          "gen_uses": 0
+        }
+      ]
+    },
+    {
+      "intent": "unknown",
+      "is_emergent": false,
+      "parent_intents": null,
+      "entries": [
+        {
+          "text": "죄송해요, 잘 이해하지 못했어요. 다시 말씀해 주시겠어요?",
+          "fitness": 0.0,
+          "select_count": 0,
+          "is_clone": false,
+          "generation": 0,
+          "gen_phi": 0.0,
+          "gen_uses": 0
+        },
+        {
+          "text": "음, 무슨 뜻인지 잘 모르겠어요. 다른 방식으로 말해주실 수 있나요?",
+          "fitness": 1.7014040303942196e-22,
+          "select_count": 0,
+          "is_clone": false,
+          "generation": 0,
+          "gen_phi": 0.0,
+          "gen_uses": 0
+        },
+        {
+          "text": "잘 못 알아들었어요. 다시 한번 말해주세요!",
+          "fitness": 1.7014040303942196e-22,
+          "select_count": 0,
+          "is_clone": false,
+          "generation": 0,
+          "gen_phi": 0.0,
+          "gen_uses": 0
+        }
+      ]
+    },
+    {
+      "intent": "weather",
+      "is_emergent": false,
+      "parent_intents": null,
+      "entries": [
+        {
+          "text": "날씨 이야기를 좋아하시는군요! 요즘 날씨가 어떤가요?",
+          "fitness": 1.7014040303942196e-22,
+          "select_count": 0,
+          "is_clone": false,
+          "generation": 0,
+          "gen_phi": 0.0,
+          "gen_uses": 0
+        },
+        {
+          "text": "미세먼지 심한 날은 마스크 꼭 쓰세요! 건강이 제일 중요해요.",
+          "fitness": 1.7014040303942196e-22,
+          "select_count": 0,
+          "is_clone": false,
+          "generation": 0,
+          "gen_phi": 0.0,
+          "gen_uses": 0
+        },
+        {
+          "text": "날씨가 좋은 날에는 산책이 최고죠!",
+          "fitness": 1.7014040303942196e-22,
+          "select_count": 0,
+          "is_clone": false,
+          "generation": 0,
+          "gen_phi": 0.0,
+          "gen_uses": 0
+        }
+      ]
+    }
+  ],
+  "co_resonance_labels": [
+    "animals",
+    "emotions",
+    "farewell",
+    "food",
+    "greeting",
+    "help",
+    "nature",
+    "people",
+    "unknown",
+    "weather"
+  ],
+  "co_resonance_matrix": [
+    [
+      0.0,
+      2.618369755750133,
+      2.7172308724590923,
+      2.3759144573701083,
+      2.501634212743748,
+      2.591943142527647,
+      2.4417800198596717,
+      1.718065024291576,
+      2.6411151334221965,
+      2.471772769313813
+    ],
+    [
+      2.618369755750133,
+      0.0,
+      2.5691102970147477,
+      2.3628870980034637,
+      2.462422065683558,
+      2.535703257751085,
+      2.4417800198596717,
+      1.718065024291576,
+      2.4964054086275866,
+      2.45356954401478
+    ],
+    [
+      2.7172308724590923,
+      2.5691102970147477,
+      0.0,
+      2.3136276392680784,
+      2.425687432143933,
+      2.5032675220262557,
+      2.4333465634807325,
+      1.7114359473899956,
+      2.552439512920805,
+      2.4662634889166433
+    ],
+    [
+      2.3759144573701083,
+      2.3628870980034637,
+      2.3136276392680784,
+      0.0,
+      2.3081595621426487,
+      2.4421643585126582,
+      2.2255602834488304,
+      1.718065024291576,
+      2.4421643585126582,
+      2.3191369196652483
+    ],
+    [
+      2.501634212743748,
+      2.462422065683558,
+      2.425687432143933,
+      2.3081595621426487,
+      0.0,
+      2.5247273283325207,
+      2.3842716576998235,
+      1.718065024291576,
+      2.4684638909486223,
+      2.2994016026392194
+    ],
+    [
+      2.591943142527647,
+      2.535703257751085,
+      2.5032675220262557,
+      2.4421643585126582,
+      2.5247273283325207,
+      0.0,
+      2.361278025814004,
+      1.718065024291576,
+      2.718067904336738,
+      2.4676832621219305
+    ],
+    [
+      2.4417800198596717,
+      2.4417800198596717,
+      2.4333465634807325,
+      2.2255602834488304,
+      2.3842716576998235,
+      2.361278025814004,
+      0.0,
+      1.718065024291576,
+      2.3219801766905053,
+      2.3199703144341446
+    ],
+    [
+      1.718065024291576,
+      1.718065024291576,
+      1.7114359473899956,
+      1.718065024291576,
+      1.718065024291576,
+      1.718065024291576,
+      1.718065024291576,
+      0.0,
+      1.718065024291576,
+      1.7169452277871655
+    ],
+    [
+      2.6411151334221965,
+      2.4964054086275866,
+      2.552439512920805,
+      2.4421643585126582,
+      2.4684638909486223,
+      2.718067904336738,
+      2.3219801766905053,
+      1.718065024291576,
+      0.0,
+      2.4708584555884046
+    ],
+    [
+      2.471772769313813,
+      2.45356954401478,
+      2.4662634889166433,
+      2.3191369196652483,
+      2.2994016026392194,
+      2.4676832621219305,
+      2.3199703144341446,
+      1.7169452277871655,
+      2.4708584555884046,
+      0.0
+    ]
+  ],
+  "stats": {
+    "total_queries": 5,
+    "total_cycles": 10000,
+    "positive_feedbacks": 295733,
+    "negative_feedbacks": 10544,
+    "total_pruned": 109,
+    "emergent_pools_created": 0,
+    "total_clones": 28,
+    "classifier_retrains": 0,
+    "gen_boosts": 0
+  },
+  "experience": [],
+  "retrain_count": 0,
+  "query_count": 5,
+  "mutation_counter": 28,
+  "auto_feedback": false,
+  "auto_feedback_threshold": 0.15
+}
