@@ -12,7 +12,7 @@
 
 use super::tokenizer::{BpeTokenizer, Vocabulary, EOS_ID};
 use super::sps::SemanticPhaseSpace;
-use super::reservoir::{WaveResonanceReservoir, ReservoirState};
+use super::reservoir::{WaveResonanceReservoir, ReservoirState, make_slit_reservoir, interfere_states};
 use super::readout::{LinearReadout, MlpReadout, ReadoutLayer};
 use super::heads::{
     AutocompleteHead, SentenceGenerationHead, ClassificationHead,
@@ -730,6 +730,55 @@ impl WaveTextEngine {
         let token_waves = self.sps.tokens_to_waves(&ids);
         let mut reservoir = self.reservoir.clone();
         reservoir.process_sequence(&token_waves)
+    }
+
+    /// Deep reservoir processing with multi-slit interference.
+    ///
+    /// Multi-slit (K slits): same input processed through K different
+    /// reservoir configurations simultaneously, outputs combined via
+    /// wave interference (complex addition). Like a K-slit experiment.
+    ///
+    /// Depth (D passes): after interference, feed the result back into
+    /// the reservoir for self-interference refinement.
+    ///
+    /// Total complexity: O(n × K + D) — still linear.
+    /// depth=1, num_slits=1 is equivalent to `process_text`.
+    pub fn process_text_deep(&self, text: &str, depth: usize, num_slits: usize) -> ReservoirState {
+        let depth = depth.max(1);
+        let num_slits = num_slits.max(1);
+
+        let ids = self.bpe.encode(text);
+        let token_waves = self.sps.tokens_to_waves(&ids);
+
+        // Multi-slit: process through K different reservoir configs
+        let mut slit_states = Vec::with_capacity(num_slits);
+        for slit_idx in 0..num_slits {
+            let mut reservoir = if slit_idx == 0 {
+                self.reservoir.clone()
+            } else {
+                make_slit_reservoir(self.reservoir.dim, slit_idx, self.reservoir.num_nodes())
+            };
+            slit_states.push(reservoir.process_sequence(&token_waves));
+        }
+
+        // Interfere all slit outputs
+        let mut state = if slit_states.len() == 1 {
+            slit_states.into_iter().next().unwrap()
+        } else {
+            interfere_states(&slit_states, self.reservoir.dim)
+        };
+
+        // Depth: self-interference passes
+        for _ in 1..depth {
+            let mut virtual_tokens = Vec::with_capacity(1 + state.scales.len());
+            virtual_tokens.push(state.merged.clone());
+            virtual_tokens.extend(state.scales.iter().cloned());
+
+            let mut reservoir = self.reservoir.clone();
+            state = reservoir.process_sequence(&virtual_tokens);
+        }
+
+        state
     }
 }
 

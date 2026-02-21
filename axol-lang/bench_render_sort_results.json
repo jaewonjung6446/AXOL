@@ -1,0 +1,881 @@
+{
+  "metadata": {
+    "seed": 42,
+    "hardware_model": {
+      "gpu_bw_gbs": 500.0,
+      "cpu_bw_gbs": 50.0,
+      "pcie_bw_gbs": 25.0,
+      "gpu_merge_eff": 0.3,
+      "gpu_scatter_eff": 0.5,
+      "gpu_radix_eff": 0.6
+    }
+  },
+  "scenarios": [
+    {
+      "scenario": "particle_95",
+      "description": "Particle depth, 95% pre-sorted",
+      "n": 1000000,
+      "distribution_stats": {
+        "pre_sortedness": 0.9523899523899524,
+        "mean": 0.49999950000000204,
+        "std_dev": 0.28867513459458255,
+        "min": 0.0,
+        "max": 0.9999989867210388
+      },
+      "algorithms": [
+        {
+          "name": "std_sort",
+          "total_us": 17784.82,
+          "accuracy": 1.0,
+          "kendall_tau_pct": 100.0,
+          "is_exact": true,
+          "speedup_vs_std": 1.0
+        },
+        {
+          "name": "axol_pure",
+          "total_us": 6518.08,
+          "accuracy": 0.977418,
+          "kendall_tau_pct": 100.0,
+          "is_exact": false,
+          "speedup_vs_std": 2.7285366242819973
+        },
+        {
+          "name": "axol_hybrid",
+          "total_us": 7615.46,
+          "accuracy": 1.0,
+          "kendall_tau_pct": 100.0,
+          "is_exact": true,
+          "speedup_vs_std": 2.335357286362216
+        },
+        {
+          "name": "radix_4pass",
+          "total_us": 13488.06,
+          "accuracy": 1.0,
+          "kendall_tau_pct": 100.0,
+          "is_exact": true,
+          "speedup_vs_std": 1.318560267377221
+        },
+        {
+          "name": "insertion",
+          "total_us": 7063359.6,
+          "accuracy": 1.0,
+          "kendall_tau_pct": 100.0,
+          "is_exact": true,
+          "speedup_vs_std": 0.0025178981401428294
+        }
+      ],
+      "scatter_quality": {
+        "adj_order_pct": 98.87089887089887,
+        "adj_inversions": 11291,
+        "adj_total": 999999,
+        "mean_displacement": 0.022582,
+        "max_displacement": 1,
+        "within_1_pct": 100.0,
+        "within_2_pct": 100.0,
+        "within_10_pct": 100.0,
+        "concordance_pct": 99.99529988719729,
+        "mean_bucket_size": 1.3121258801084341,
+        "max_bucket_size": 2,
+        "singleton_bucket_pct": 52.424400000000006,
+        "collision_bucket_pct": 23.7878
+      }
+    },
+    {
+      "scenario": "particle_99",
+      "description": "Particle depth, 99% pre-sorted",
+      "n": 2000000,
+      "distribution_stats": {
+        "pre_sortedness": 0.9900954950477475,
+        "mean": 0.49999975000000046,
+        "std_dev": 0.2886751345947945,
+        "min": 0.0,
+        "max": 0.9999995231628418
+      },
+      "algorithms": [
+        {
+          "name": "std_sort",
+          "total_us": 40562.26666666666,
+          "accuracy": 1.0,
+          "kendall_tau_pct": 100.0,
+          "is_exact": true,
+          "speedup_vs_std": 1.0
+        },
+        {
+          "name": "axol_pure",
+          "total_us": 9734.266666666666,
+          "accuracy": 0.996138,
+          "kendall_tau_pct": 100.0,
+          "is_exact": false,
+          "speedup_vs_std": 4.166956593203391
+        },
+        {
+          "name": "axol_hybrid",
+          "total_us": 15077.233333333334,
+          "accuracy": 1.0,
+          "kendall_tau_pct": 100.0,
+          "is_exact": true,
+          "speedup_vs_std": 2.690299060172401
+        },
+        {
+          "name": "radix_4pass",
+          "total_us": 28527.6,
+          "accuracy": 1.0,
+          "kendall_tau_pct": 100.0,
+          "is_exact": true,
+          "speedup_vs_std": 1.4218604672901565
+        },
+        {
+          "name": "insertion",
+          "total_us": 6015777.6,
+          "accuracy": 1.0,
+          "kendall_tau_pct": 100.0,
+          "is_exact": true,
+          "speedup_vs_std": 0.0067426473124050776
+        }
+      ],
+      "scatter_quality": {
+        "adj_order_pct": 99.80689990344996,
+        "adj_inversions": 3862,
+        "adj_total": 1999999,
+        "mean_displacement": 0.003862,
+        "max_displacement": 1,
+        "within_1_pct": 100.0,
+        "within_2_pct": 100.0,
+        "within_10_pct": 100.0,
+        "concordance_pct": 99.99919999279993,
+        "mean_bucket_size": 1.24432819653915,
+        "max_bucket_size": 2,
+        "singleton_bucket_pct": 60.729299999999995,
+        "collision_bucket_pct": 19.63535
+      }
+    },
+    {
+      "scenario": "oit_5layer",
+      "description": "OIT 5-layer transparency",
+      "n": 100000,
+      "distribution_stats": {
+        "pre_sortedness": 0.8000080000800008,
+        "mean": 0.5000079204019904,
+        "std_dev": 0.2828468024318375,
+        "min": 0.09167986363172531,
+        "max": 0.9085372686386108
+      },
+      "algorithms": [
+        {
+          "name": "std_sort",
+          "total_us": 1677.36,
+          "accuracy": 1.0,
+          "kendall_tau_pct": 100.0,
+          "is_exact": true,
+          "speedup_vs_std": 1.0
+        },
+        {
+          "name": "axol_pure",
+          "total_us": 343.62,
+          "accuracy": 0.07218,
+          "kendall_tau_pct": 99.98839995359981,
+          "is_exact": false,
+          "speedup_vs_std": 4.881438798672952
+        },
+        {
+          "name": "axol_hybrid",
+          "total_us": 1103.735,
+          "accuracy": 1.0,
+          "kendall_tau_pct": 100.0,
+          "is_exact": true,
+          "speedup_vs_std": 1.51971261217593
+        },
+        {
+          "name": "radix_4pass",
+          "total_us": 942.4399999999999,
+          "accuracy": 1.0,
+          "kendall_tau_pct": 100.0,
+          "is_exact": true,
+          "speedup_vs_std": 1.7798056109672764
+        }
+      ],
+      "scatter_quality": {
+        "adj_order_pct": 53.55753557535575,
+        "adj_inversions": 46442,
+        "adj_total": 99999,
+        "mean_displacement": 8.00857,
+        "max_displacement": 49,
+        "within_1_pct": 17.349,
+        "within_2_pct": 26.027,
+        "within_10_pct": 70.186,
+        "concordance_pct": 97.10388176267715,
+        "mean_bucket_size": 14.434180138568129,
+        "max_bucket_size": 54,
+        "singleton_bucket_pct": 0.898,
+        "collision_bucket_pct": 6.03
+      }
+    },
+    {
+      "scenario": "oit_20layer",
+      "description": "OIT 20-layer transparency",
+      "n": 100000,
+      "distribution_stats": {
+        "pre_sortedness": 0.950009500095001,
+        "mean": 0.5000007002469152,
+        "std_dev": 0.2883149566195217,
+        "min": 0.023194599896669388,
+        "max": 0.9767286777496338
+      },
+      "algorithms": [
+        {
+          "name": "std_sort",
+          "total_us": 1788.195,
+          "accuracy": 1.0,
+          "kendall_tau_pct": 100.0,
+          "is_exact": true,
+          "speedup_vs_std": 1.0
+        },
+        {
+          "name": "axol_pure",
+          "total_us": 301.805,
+          "accuracy": 0.06353,
+          "kendall_tau_pct": 99.98559994239977,
+          "is_exact": false,
+          "speedup_vs_std": 5.925001242524146
+        },
+        {
+          "name": "axol_hybrid",
+          "total_us": 1164.7350000000001,
+          "accuracy": 1.0,
+          "kendall_tau_pct": 100.0,
+          "is_exact": true,
+          "speedup_vs_std": 1.5352805573800046
+        },
+        {
+          "name": "radix_4pass",
+          "total_us": 975.645,
+          "accuracy": 1.0,
+          "kendall_tau_pct": 100.0,
+          "is_exact": true,
+          "speedup_vs_std": 1.8328336638838922
+        }
+      ],
+      "scatter_quality": {
+        "adj_order_pct": 53.28453284532846,
+        "adj_inversions": 46715,
+        "adj_total": 99999,
+        "mean_displacement": 9.27308,
+        "max_displacement": 64,
+        "within_1_pct": 15.214,
+        "within_2_pct": 23.203,
+        "within_10_pct": 64.53,
+        "concordance_pct": 96.63356512415079,
+        "mean_bucket_size": 16.512549537648614,
+        "max_bucket_size": 65,
+        "singleton_bucket_pct": 0.766,
+        "collision_bucket_pct": 5.29
+      }
+    },
+    {
+      "scenario": "rayhit_heavy",
+      "description": "Ray hit distance, heavy tail (alpha=1.5)",
+      "n": 10000000,
+      "distribution_stats": {
+        "pre_sortedness": 0.500090850009085,
+        "mean": 0.600021249474229,
+        "std_dev": 0.26190558135048964,
+        "min": 0.000015624436855432577,
+        "max": 1.0
+      },
+      "algorithms": [
+        {
+          "name": "std_sort",
+          "total_us": 247414.30000000002,
+          "accuracy": 1.0,
+          "kendall_tau_pct": 100.0,
+          "is_exact": true,
+          "speedup_vs_std": 1.0
+        },
+        {
+          "name": "axol_pure",
+          "total_us": 417984.05,
+          "accuracy": 0.7897679,
+          "kendall_tau_pct": 100.0,
+          "is_exact": false,
+          "speedup_vs_std": 0.5919228257633277
+        },
+        {
+          "name": "axol_hybrid",
+          "total_us": 387751.89999999997,
+          "accuracy": 1.0,
+          "kendall_tau_pct": 100.0,
+          "is_exact": true,
+          "speedup_vs_std": 0.6380737270404092
+        },
+        {
+          "name": "radix_4pass",
+          "total_us": 129772.54999999999,
+          "accuracy": 1.0,
+          "kendall_tau_pct": 100.0,
+          "is_exact": true,
+          "speedup_vs_std": 1.9065226043566228
+        }
+      ],
+      "scatter_quality": {
+        "adj_order_pct": 89.4848289484829,
+        "adj_inversions": 1051517,
+        "adj_total": 9999999,
+        "mean_displacement": 0.549603,
+        "max_displacement": 10,
+        "within_1_pct": 88.98045,
+        "within_2_pct": 97.24587,
+        "within_10_pct": 100.0,
+        "concordance_pct": 99.88529977059954,
+        "mean_bucket_size": 1.6774608476444508,
+        "max_bucket_size": 11,
+        "singleton_bucket_pct": 33.06656,
+        "collision_bucket_pct": 26.547349999999998
+      }
+    },
+    {
+      "scenario": "rayhit_normal",
+      "description": "Ray hit distance, normal (alpha=2.0)",
+      "n": 10000000,
+      "distribution_stats": {
+        "pre_sortedness": 0.500075250007525,
+        "mean": 0.6666685665393953,
+        "std_dev": 0.2357444943337651,
+        "min": 0.0001300290459766984,
+        "max": 1.0
+      },
+      "algorithms": [
+        {
+          "name": "std_sort",
+          "total_us": 243228.35,
+          "accuracy": 1.0,
+          "kendall_tau_pct": 100.0,
+          "is_exact": true,
+          "speedup_vs_std": 1.0
+        },
+        {
+          "name": "axol_pure",
+          "total_us": 323928.0,
+          "accuracy": 0.7878674,
+          "kendall_tau_pct": 100.0,
+          "is_exact": false,
+          "speedup_vs_std": 0.7508716443160208
+        },
+        {
+          "name": "axol_hybrid",
+          "total_us": 382603.95,
+          "accuracy": 1.0,
+          "kendall_tau_pct": 100.0,
+          "is_exact": true,
+          "speedup_vs_std": 0.6357183453019761
+        },
+        {
+          "name": "radix_4pass",
+          "total_us": 134382.05,
+          "accuracy": 1.0,
+          "kendall_tau_pct": 100.0,
+          "is_exact": true,
+          "speedup_vs_std": 1.809976481233915
+        }
+      ],
+      "scatter_quality": {
+        "adj_order_pct": 89.3929989392999,
+        "adj_inversions": 1060700,
+        "adj_total": 9999999,
+        "mean_displacement": 0.6488122,
+        "max_displacement": 11,
+        "within_1_pct": 85.56099999999999,
+        "within_2_pct": 95.61913,
+        "within_10_pct": 99.99998,
+        "concordance_pct": 99.86309972619945,
+        "mean_bucket_size": 1.797405768306488,
+        "max_bucket_size": 13,
+        "singleton_bucket_pct": 28.97165,
+        "collision_bucket_pct": 26.66409
+      }
+    },
+    {
+      "scenario": "uniform_1m",
+      "description": "Uniform baseline 1M",
+      "n": 1000000,
+      "distribution_stats": {
+        "pre_sortedness": 0.4996594996594997,
+        "mean": 0.5000268809337616,
+        "std_dev": 0.28886089416642885,
+        "min": 2.1457672119140625e-6,
+        "max": 0.999998927116394
+      },
+      "algorithms": [
+        {
+          "name": "std_sort",
+          "total_us": 25532.76,
+          "accuracy": 1.0,
+          "kendall_tau_pct": 100.0,
+          "is_exact": true,
+          "speedup_vs_std": 1.0
+        },
+        {
+          "name": "axol_pure",
+          "total_us": 21032.44,
+          "accuracy": 0.654102,
+          "kendall_tau_pct": 100.0,
+          "is_exact": false,
+          "speedup_vs_std": 1.2139704190288907
+        },
+        {
+          "name": "axol_hybrid",
+          "total_us": 28669.14,
+          "accuracy": 1.0,
+          "kendall_tau_pct": 100.0,
+          "is_exact": true,
+          "speedup_vs_std": 0.8906008342070951
+        },
+        {
+          "name": "radix_4pass",
+          "total_us": 12730.920000000002,
+          "accuracy": 1.0,
+          "kendall_tau_pct": 100.0,
+          "is_exact": true,
+          "speedup_vs_std": 2.0055706893138905
+        }
+      ],
+      "scatter_quality": {
+        "adj_order_pct": 82.68258268258268,
+        "adj_inversions": 173174,
+        "adj_total": 999999,
+        "mean_displacement": 0.456065,
+        "max_displacement": 7,
+        "within_1_pct": 92.6542,
+        "within_2_pct": 98.7322,
+        "within_10_pct": 100.0,
+        "concordance_pct": 99.87789706952967,
+        "mean_bucket_size": 1.581775416362834,
+        "max_bucket_size": 9,
+        "singleton_bucket_pct": 36.817899999999995,
+        "collision_bucket_pct": 26.402199999999997
+      }
+    },
+    {
+      "scenario": "uniform_10m",
+      "description": "Uniform baseline 10M",
+      "n": 10000000,
+      "distribution_stats": {
+        "pre_sortedness": 0.500019150001915,
+        "mean": 0.4999554864261091,
+        "std_dev": 0.28867878838190836,
+        "min": 5.960464477539063e-8,
+        "max": 0.9999998211860657
+      },
+      "algorithms": [
+        {
+          "name": "std_sort",
+          "total_us": 249473.85,
+          "accuracy": 1.0,
+          "kendall_tau_pct": 100.0,
+          "is_exact": true,
+          "speedup_vs_std": 1.0
+        },
+        {
+          "name": "axol_pure",
+          "total_us": 348407.65,
+          "accuracy": 0.831938,
+          "kendall_tau_pct": 100.0,
+          "is_exact": false,
+          "speedup_vs_std": 0.7160401041710766
+        },
+        {
+          "name": "axol_hybrid",
+          "total_us": 371958.89999999997,
+          "accuracy": 1.0,
+          "kendall_tau_pct": 100.0,
+          "is_exact": true,
+          "speedup_vs_std": 0.6707027308662329
+        },
+        {
+          "name": "radix_4pass",
+          "total_us": 130823.69999999998,
+          "accuracy": 1.0,
+          "kendall_tau_pct": 100.0,
+          "is_exact": true,
+          "speedup_vs_std": 1.9069469064091602
+        }
+      ],
+      "scatter_quality": {
+        "adj_order_pct": 91.59874915987491,
+        "adj_inversions": 840125,
+        "adj_total": 9999999,
+        "mean_displacement": 0.5026762,
+        "max_displacement": 10,
+        "within_1_pct": 90.54140000000001,
+        "within_2_pct": 97.99376,
+        "within_10_pct": 100.0,
+        "concordance_pct": 99.90179980359962,
+        "mean_bucket_size": 1.6218293034389106,
+        "max_bucket_size": 12,
+        "singleton_bucket_pct": 35.11208,
+        "collision_bucket_pct": 26.54669
+      }
+    }
+  ],
+  "gpu_estimates": [
+    {
+      "scenario": "particle_95",
+      "n": 1000000,
+      "algorithms": [
+        {
+          "name": "std_sort",
+          "cpu_us": 17784.82,
+          "gpu_us": 5928.2733333333335,
+          "hetero_us": 5928.2733333333335
+        },
+        {
+          "name": "axol_pure",
+          "cpu_us": 6518.08,
+          "gpu_us": 1303.616,
+          "hetero_us": 1303.616
+        },
+        {
+          "name": "axol_hybrid",
+          "cpu_us": 7615.46,
+          "gpu_us": 1303.616,
+          "hetero_us": 2560.996
+        },
+        {
+          "name": "radix_4pass",
+          "cpu_us": 13488.06,
+          "gpu_us": 2248.0099999999998,
+          "hetero_us": 2248.0099999999998
+        },
+        {
+          "name": "insertion",
+          "cpu_us": 7063359.6,
+          "gpu_us": 7063359.6,
+          "hetero_us": 7063359.6
+        }
+      ]
+    },
+    {
+      "scenario": "particle_99",
+      "n": 2000000,
+      "algorithms": [
+        {
+          "name": "std_sort",
+          "cpu_us": 40562.26666666666,
+          "gpu_us": 13520.755555555554,
+          "hetero_us": 13520.755555555554
+        },
+        {
+          "name": "axol_pure",
+          "cpu_us": 9734.266666666666,
+          "gpu_us": 1946.8533333333332,
+          "hetero_us": 1946.8533333333332
+        },
+        {
+          "name": "axol_hybrid",
+          "cpu_us": 15077.233333333334,
+          "gpu_us": 1946.8533333333332,
+          "hetero_us": 7609.820000000001
+        },
+        {
+          "name": "radix_4pass",
+          "cpu_us": 28527.6,
+          "gpu_us": 4754.599999999999,
+          "hetero_us": 4754.599999999999
+        },
+        {
+          "name": "insertion",
+          "cpu_us": 6015777.6,
+          "gpu_us": 6015777.6,
+          "hetero_us": 6015777.6
+        }
+      ]
+    },
+    {
+      "scenario": "oit_5layer",
+      "n": 100000,
+      "algorithms": [
+        {
+          "name": "std_sort",
+          "cpu_us": 1677.36,
+          "gpu_us": 559.12,
+          "hetero_us": 559.12
+        },
+        {
+          "name": "axol_pure",
+          "cpu_us": 343.62,
+          "gpu_us": 68.724,
+          "hetero_us": 68.724
+        },
+        {
+          "name": "axol_hybrid",
+          "cpu_us": 1103.735,
+          "gpu_us": 68.724,
+          "hetero_us": 844.8389999999999
+        },
+        {
+          "name": "radix_4pass",
+          "cpu_us": 942.4399999999999,
+          "gpu_us": 157.07333333333332,
+          "hetero_us": 157.07333333333332
+        }
+      ]
+    },
+    {
+      "scenario": "oit_20layer",
+      "n": 100000,
+      "algorithms": [
+        {
+          "name": "std_sort",
+          "cpu_us": 1788.195,
+          "gpu_us": 596.0649999999999,
+          "hetero_us": 596.0649999999999
+        },
+        {
+          "name": "axol_pure",
+          "cpu_us": 301.805,
+          "gpu_us": 60.361000000000004,
+          "hetero_us": 60.361000000000004
+        },
+        {
+          "name": "axol_hybrid",
+          "cpu_us": 1164.7350000000001,
+          "gpu_us": 60.361000000000004,
+          "hetero_us": 939.291
+        },
+        {
+          "name": "radix_4pass",
+          "cpu_us": 975.645,
+          "gpu_us": 162.6075,
+          "hetero_us": 162.6075
+        }
+      ]
+    },
+    {
+      "scenario": "rayhit_heavy",
+      "n": 10000000,
+      "algorithms": [
+        {
+          "name": "std_sort",
+          "cpu_us": 247414.30000000002,
+          "gpu_us": 82471.43333333333,
+          "hetero_us": 82471.43333333333
+        },
+        {
+          "name": "axol_pure",
+          "cpu_us": 417984.05,
+          "gpu_us": 83596.81,
+          "hetero_us": 83596.81
+        },
+        {
+          "name": "axol_hybrid",
+          "cpu_us": 387751.89999999997,
+          "gpu_us": 83596.81,
+          "hetero_us": 54964.659999999974
+        },
+        {
+          "name": "radix_4pass",
+          "cpu_us": 129772.54999999999,
+          "gpu_us": 21628.75833333333,
+          "hetero_us": 21628.75833333333
+        }
+      ]
+    },
+    {
+      "scenario": "rayhit_normal",
+      "n": 10000000,
+      "algorithms": [
+        {
+          "name": "std_sort",
+          "cpu_us": 243228.35,
+          "gpu_us": 81076.11666666667,
+          "hetero_us": 81076.11666666667
+        },
+        {
+          "name": "axol_pure",
+          "cpu_us": 323928.0,
+          "gpu_us": 64785.6,
+          "hetero_us": 64785.6
+        },
+        {
+          "name": "axol_hybrid",
+          "cpu_us": 382603.95,
+          "gpu_us": 64785.6,
+          "hetero_us": 125061.55000000002
+        },
+        {
+          "name": "radix_4pass",
+          "cpu_us": 134382.05,
+          "gpu_us": 22397.00833333333,
+          "hetero_us": 22397.00833333333
+        }
+      ]
+    },
+    {
+      "scenario": "uniform_1m",
+      "n": 1000000,
+      "algorithms": [
+        {
+          "name": "std_sort",
+          "cpu_us": 25532.76,
+          "gpu_us": 8510.92,
+          "hetero_us": 8510.92
+        },
+        {
+          "name": "axol_pure",
+          "cpu_us": 21032.44,
+          "gpu_us": 4206.487999999999,
+          "hetero_us": 4206.487999999999
+        },
+        {
+          "name": "axol_hybrid",
+          "cpu_us": 28669.14,
+          "gpu_us": 4206.487999999999,
+          "hetero_us": 12003.188
+        },
+        {
+          "name": "radix_4pass",
+          "cpu_us": 12730.920000000002,
+          "gpu_us": 2121.82,
+          "hetero_us": 2121.82
+        }
+      ]
+    },
+    {
+      "scenario": "uniform_10m",
+      "n": 10000000,
+      "algorithms": [
+        {
+          "name": "std_sort",
+          "cpu_us": 249473.85,
+          "gpu_us": 83157.95,
+          "hetero_us": 83157.95
+        },
+        {
+          "name": "axol_pure",
+          "cpu_us": 348407.65,
+          "gpu_us": 69681.53,
+          "hetero_us": 69681.53
+        },
+        {
+          "name": "axol_hybrid",
+          "cpu_us": 371958.89999999997,
+          "gpu_us": 69681.53,
+          "hetero_us": 94832.77999999994
+        },
+        {
+          "name": "radix_4pass",
+          "cpu_us": 130823.69999999998,
+          "gpu_us": 21803.949999999997,
+          "hetero_us": 21803.949999999997
+        }
+      ]
+    }
+  ],
+  "fairness_summary": {
+    "best_cpu_per_scenario": [
+      {
+        "scenario": "particle_95",
+        "winner": "axol_hybrid",
+        "time_us": 7615.46
+      },
+      {
+        "scenario": "particle_99",
+        "winner": "axol_hybrid",
+        "time_us": 15077.233333333334
+      },
+      {
+        "scenario": "oit_5layer",
+        "winner": "radix_4pass",
+        "time_us": 942.4399999999999
+      },
+      {
+        "scenario": "oit_20layer",
+        "winner": "radix_4pass",
+        "time_us": 975.645
+      },
+      {
+        "scenario": "rayhit_heavy",
+        "winner": "radix_4pass",
+        "time_us": 129772.54999999999
+      },
+      {
+        "scenario": "rayhit_normal",
+        "winner": "radix_4pass",
+        "time_us": 134382.05
+      },
+      {
+        "scenario": "uniform_1m",
+        "winner": "radix_4pass",
+        "time_us": 12730.920000000002
+      },
+      {
+        "scenario": "uniform_10m",
+        "winner": "radix_4pass",
+        "time_us": 130823.69999999998
+      }
+    ],
+    "best_gpu_per_scenario": [
+      {
+        "scenario": "particle_95",
+        "winner": "radix_4pass",
+        "time_us": 2248.0099999999998
+      },
+      {
+        "scenario": "particle_99",
+        "winner": "radix_4pass",
+        "time_us": 4754.599999999999
+      },
+      {
+        "scenario": "oit_5layer",
+        "winner": "radix_4pass",
+        "time_us": 157.07333333333332
+      },
+      {
+        "scenario": "oit_20layer",
+        "winner": "radix_4pass",
+        "time_us": 162.6075
+      },
+      {
+        "scenario": "rayhit_heavy",
+        "winner": "radix_4pass",
+        "time_us": 21628.75833333333
+      },
+      {
+        "scenario": "rayhit_normal",
+        "winner": "radix_4pass",
+        "time_us": 22397.00833333333
+      },
+      {
+        "scenario": "uniform_1m",
+        "winner": "radix_4pass",
+        "time_us": 2121.82
+      },
+      {
+        "scenario": "uniform_10m",
+        "winner": "radix_4pass",
+        "time_us": 21803.949999999997
+      }
+    ],
+    "axol_advantages": [
+      "CPU particle_95: aXOL Hybrid wins (7615.5us)",
+      "CPU particle_99: aXOL Hybrid wins (15077.2us)",
+      "aXOL Hybrid CPU wins: 2/8 scenarios",
+      "aXOL Hybrid GPU wins: 0/8 scenarios"
+    ],
+    "axol_disadvantages": [
+      "CPU oit_5layer: radix_4pass wins (942.4us), aXOL Hybrid 1.2x slower (1103.7us)",
+      "CPU oit_20layer: radix_4pass wins (975.6us), aXOL Hybrid 1.2x slower (1164.7us)",
+      "CPU rayhit_heavy: radix_4pass wins (129772.5us), aXOL Hybrid 3.0x slower (387751.9us)",
+      "CPU rayhit_normal: radix_4pass wins (134382.0us), aXOL Hybrid 2.8x slower (382604.0us)",
+      "CPU uniform_1m: radix_4pass wins (12730.9us), aXOL Hybrid 2.3x slower (28669.1us)",
+      "CPU uniform_10m: radix_4pass wins (130823.7us), aXOL Hybrid 2.8x slower (371958.9us)",
+      "GPU particle_95: radix_4pass wins (2248.0us), aXOL Hybrid 1.1x slower (2561.0us)",
+      "GPU particle_99: radix_4pass wins (4754.6us), aXOL Hybrid 1.6x slower (7609.8us)",
+      "GPU oit_5layer: radix_4pass wins (157.1us), aXOL Hybrid 5.4x slower (844.8us)",
+      "GPU oit_20layer: radix_4pass wins (162.6us), aXOL Hybrid 5.8x slower (939.3us)",
+      "GPU rayhit_heavy: radix_4pass wins (21628.8us), aXOL Hybrid 2.5x slower (54964.7us)",
+      "GPU rayhit_normal: radix_4pass wins (22397.0us), aXOL Hybrid 5.6x slower (125061.6us)",
+      "GPU uniform_1m: radix_4pass wins (2121.8us), aXOL Hybrid 5.7x slower (12003.2us)",
+      "GPU uniform_10m: radix_4pass wins (21803.9us), aXOL Hybrid 4.3x slower (94832.8us)"
+    ]
+  }
+}

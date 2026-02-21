@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>WTE 6족 보행 — 인공 본능 데모</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0d1117;color:#c9d1d9;font-family:'Consolas','D2Coding',monospace;overflow:hidden}
+canvas{display:block;margin:0 auto}
+.hud{display:flex;justify-content:center;gap:16px;padding:8px;font-size:13px}
+.m{background:#161b22;border:1px solid #30363d;border-radius:6px;padding:6px 14px}
+.m b{color:#58a6ff}
+.ctrl{text-align:center;padding:6px}
+.ctrl button{background:#21262d;border:1px solid #30363d;color:#c9d1d9;
+  padding:4px 14px;border-radius:4px;cursor:pointer;margin:0 3px;font-family:inherit}
+.ctrl button:hover{background:#30363d}
+.ctrl button.act{background:#1f6feb;border-color:#1f6feb}
+#timeline{width:500px;vertical-align:middle;cursor:pointer}
+h1{text-align:center;font-size:16px;padding:10px;color:#58a6ff}
+.event-banner{position:absolute;top:80px;left:50%;transform:translateX(-50%);
+  background:#da3633;color:#fff;padding:8px 24px;border-radius:8px;font-size:18px;
+  font-weight:bold;opacity:0;transition:opacity 0.3s;pointer-events:none}
+.event-banner.show{opacity:1}
+</style>
+</head>
+<body>
+<h1>WTE 6족 보행 시뮬레이션 — 인공 본능 (Artificial Instinct)</h1>
+<canvas id="c"></canvas>
+<div class="hud">
+ <span class="m" id="mSpeed">속도: <b>0.000</b> m/s</span>
+ <span class="m" id="mPool">풀: <b>20</b></span>
+ <span class="m" id="mLegs">다리: <b>6</b>/6</span>
+ <span class="m" id="mStep">Step: <b>0</b></span>
+ <span class="m" id="mFit">적합도: <b>0.000</b></span>
+</div>
+<div class="ctrl">
+ <button id="bPlay" onclick="toggle()">⏸</button>
+ <button onclick="ss(1)" id="b1">1x</button>
+ <button onclick="ss(2)" id="b2" class="act">2x</button>
+ <button onclick="ss(4)" id="b4">4x</button>
+ <button onclick="ss(8)" id="b8">8x</button>
+ <input type="range" id="timeline" min="0" max="1000" value="0">
+</div>
+<div class="event-banner" id="banner"></div>
+
+<script>
+const F=[{"s":0,"x":0.00,"v":0.0000,"p":[0.000,0.500,0.500,0.000,0.000,0.500],"a":0.400,"f":2.000,"ac":[true,true,true,true,true,true],"ps":20,"fi":0.0000,"e":"start"},{"s":200,"x":0.46,"v":0.2278,"p":[0.000,0.500,0.500,0.000,0.000,0.500],"a":0.400,"f":2.000,"ac":[true,true,true,true,true,true],"ps":20,"fi":0.3189,"e":""},{"s":400,"x":0.83,"v":0.3000,"p":[0.000,0.500,0.170,0.670,0.330,0.830],"a":0.350,"f":1.500,"ac":[true,true,true,true,true,true],"ps":20,"fi":0.3189,"e":""},{"s":600,"x":1.30,"v":0.3868,"p":[0.000,0.500,0.330,0.830,0.670,0.170],"a":0.380,"f":1.800,"ac":[true,true,true,true,true,true],"ps":20,"fi":0.3315,"e":""},{"s":800,"x":1.74,"v":0.4139,"p":[0.000,0.000,0.000,0.000,0.000,0.000],"a":0.300,"f":2.000,"ac":[true,true,true,true,true,true],"ps":20,"fi":0.3315,"e":""},{"s":1000,"x":2.29,"v":0.4820,"p":[0.567,0.547,0.095,0.974,0.416,0.543],"a":0.472,"f":1.823,"ac":[true,true,true,true,true,true],"ps":20,"fi":0.3850,"e":""},{"s":1200,"x":2.74,"v":0.4669,"p":[0.154,0.356,0.941,0.379,0.848,0.221],"a":0.310,"f":2.702,"ac":[true,true,true,true,true,true],"ps":20,"fi":0.3850,"e":""},{"s":1400,"x":3.00,"v":0.3621,"p":[0.397,0.612,0.459,0.545,0.972,0.243],"a":0.331,"f":1.146,"ac":[true,true,true,true,true,true],"ps":20,"fi":0.3850,"e":""},{"s":1600,"x":3.55,"v":0.4561,"p":[0.870,0.373,0.240,0.083,0.535,0.543],"a":0.334,"f":2.772,"ac":[true,true,true,true,true,true],"ps":20,"fi":0.3850,"e":""},{"s":1800,"x":3.81,"v":0.3573,"p":[0.445,0.472,0.704,0.975,0.795,0.350],"a":0.227,"f":1.071,"ac":[true,true,true,true,true,true],"ps":20,"fi":0.3850,"e":""},{"s":2000,"x":4.05,"v":0.2972,"p":[0.212,0.285,0.522,0.709,0.260,0.406],"a":0.358,"f":1.068,"ac":[true,true,true,true,true,true],"ps":20,"fi":0.3850,"e":""},{"s":2200,"x":4.59,"v":0.4223,"p":[0.898,0.613,0.279,0.444,0.617,0.919],"a":0.471,"f":2.237,"ac":[true,true,true,true,true,true],"ps":20,"fi":0.3850,"e":""},{"s":2400,"x":5.00,"v":0.4115,"p":[0.756,0.296,0.548,0.660,0.652,0.507],"a":0.394,"f":1.449,"ac":[true,true,true,true,true,true],"ps":20,"fi":0.3850,"e":""},{"s":2600,"x":5.41,"v":0.4125,"p":[0.775,0.314,0.101,0.866,0.734,0.190],"a":0.226,"f":2.974,"ac":[true,true,true,true,true,true],"ps":20,"fi":0.3850,"e":""},{"s":2800,"x":5.85,"v":0.4246,"p":[0.429,0.453,0.851,0.250,0.889,0.170],"a":0.303,"f":2.189,"ac":[true,true,true,true,true,true],"ps":20,"fi":0.3850,"e":""},{"s":3000,"x":6.23,"v":0.4064,"p":[0.346,0.660,0.489,0.776,0.308,0.811],"a":0.409,"f":2.219,"ac":[true,true,true,true,true,true],"ps":20,"fi":0.3850,"e":""},{"s":3200,"x":6.59,"v":0.3809,"p":[0.244,0.167,0.142,0.615,0.413,0.403],"a":0.398,"f":1.156,"ac":[true,true,true,true,true,true],"ps":20,"fi":0.3850,"e":""},{"s":3400,"x":7.29,"v":0.5404,"p":[0.449,0.310,0.049,0.964,0.678,0.659],"a":0.498,"f":2.352,"ac":[true,true,true,true,true,true],"ps":20,"fi":0.4900,"e":""},{"s":3600,"x":7.60,"v":0.4253,"p":[0.444,0.021,0.819,0.222,0.126,0.247],"a":0.265,"f":1.025,"ac":[true,true,true,true,true,true],"ps":20,"fi":0.4900,"e":""},{"s":3800,"x":7.78,"v":0.3006,"p":[0.869,0.174,0.571,0.049,0.109,0.931],"a":0.222,"f":1.365,"ac":[true,true,true,true,true,true],"ps":20,"fi":0.4900,"e":""},{"s":4000,"x":8.03,"v":0.2777,"p":[0.389,0.448,0.968,0.519,0.129,0.893],"a":0.293,"f":1.488,"ac":[true,true,true,true,true,true],"ps":20,"fi":0.4900,"e":""},{"s":4200,"x":8.71,"v":0.4775,"p":[0.449,0.310,0.049,0.964,0.678,0.659],"a":0.498,"f":2.352,"ac":[true,true,true,true,true,true],"ps":21,"fi":0.5197,"e":""},{"s":4400,"x":9.48,"v":0.6253,"p":[0.449,0.310,0.049,0.964,0.678,0.659],"a":0.498,"f":2.352,"ac":[true,true,true,true,true,true],"ps":21,"fi":0.6211,"e":""},{"s":4600,"x":10.25,"v":0.6986,"p":[0.449,0.310,0.049,0.964,0.678,0.659],"a":0.498,"f":2.352,"ac":[true,true,true,true,true,true],"ps":21,"fi":0.6814,"e":"adapted"},{"s":4600,"x":10.25,"v":0.6986,"p":[0.449,0.310,0.049,0.964,0.678,0.659],"a":0.498,"f":2.352,"ac":[true,true,true,true,true,true],"ps":21,"fi":0.6814,"e":""},{"s":4800,"x":11.04,"v":0.7410,"p":[0.449,0.310,0.049,0.964,0.678,0.659],"a":0.498,"f":2.352,"ac":[true,true,true,true,true,true],"ps":22,"fi":0.6644,"e":""},{"s":5000,"x":11.82,"v":0.7618,"p":[0.449,0.310,0.049,0.964,0.678,0.659],"a":0.498,"f":2.352,"ac":[true,true,true,true,true,true],"ps":22,"fi":0.7117,"e":""},{"s":5200,"x":12.59,"v":0.7678,"p":[0.000,0.000,0.000,0.000,0.000,0.000],"a":0.300,"f":2.000,"ac":[true,true,true,true,true,true],"ps":22,"fi":0.7365,"e":""},{"s":5400,"x":13.07,"v":0.6247,"p":[0.567,0.547,0.095,0.974,0.416,0.543],"a":0.472,"f":1.823,"ac":[true,true,true,true,true,true],"ps":23,"fi":0.6776,"e":""},{"s":5600,"x":13.68,"v":0.6146,"p":[0.449,0.310,0.049,0.964,0.678,0.659],"a":0.498,"f":2.352,"ac":[true,true,true,true,true,true],"ps":23,"fi":0.6776,"e":""},{"s":5800,"x":14.39,"v":0.6651,"p":[0.449,0.310,0.049,0.964,0.678,0.659],"a":0.498,"f":2.352,"ac":[true,true,true,true,true,true],"ps":23,"fi":0.6928,"e":""},{"s":6000,"x":15.19,"v":0.7291,"p":[0.449,0.310,0.049,0.964,0.678,0.659],"a":0.498,"f":2.352,"ac":[true,true,true,true,true,true],"ps":24,"fi":0.6743,"e":""},{"s":6200,"x":15.98,"v":0.7587,"p":[0.449,0.310,0.049,0.964,0.678,0.659],"a":0.498,"f":2.352,"ac":[true,true,true,true,true,true],"ps":24,"fi":0.7199,"e":""},{"s":6400,"x":16.76,"v":0.7724,"p":[0.449,0.310,0.049,0.964,0.678,0.659],"a":0.498,"f":2.352,"ac":[true,true,true,true,true,true],"ps":24,"fi":0.7463,"e":""},{"s":6600,"x":17.55,"v":0.7812,"p":[0.449,0.310,0.049,0.964,0.678,0.659],"a":0.498,"f":2.352,"ac":[true,true,true,true,true,true],"ps":25,"fi":0.7027,"e":""},{"s":6800,"x":18.33,"v":0.7820,"p":[0.449,0.310,0.049,0.964,0.678,0.659],"a":0.498,"f":2.352,"ac":[true,true,true,true,true,true],"ps":25,"fi":0.7348,"e":""},{"s":7000,"x":19.12,"v":0.7830,"p":[0.000,0.500,0.330,0.830,0.670,0.170],"a":0.380,"f":1.800,"ac":[true,true,true,true,true,true],"ps":25,"fi":0.7545,"e":""},{"s":7200,"x":19.71,"v":0.6854,"p":[0.449,0.310,0.049,0.964,0.678,0.659],"a":0.498,"f":2.352,"ac":[true,true,true,true,true,true],"ps":25,"fi":0.6941,"e":""},{"s":7400,"x":20.42,"v":0.7012,"p":[0.449,0.310,0.049,0.964,0.678,0.659],"a":0.498,"f":2.352,"ac":[true,true,true,true,true,true],"ps":25,"fi":0.7032,"e":""},{"s":7600,"x":21.19,"v":0.7359,"p":[0.449,0.310,0.049,0.964,0.678,0.659],"a":0.498,"f":2.352,"ac":[true,true,true,true,true,true],"ps":25,"fi":0.7302,"e":""},{"s":7800,"x":21.96,"v":0.7502,"p":[0.449,0.310,0.049,0.964,0.678,0.659],"a":0.498,"f":2.352,"ac":[true,true,true,true,true,true],"ps":25,"fi":0.6844,"e":""},{"s":8000,"x":22.73,"v":0.7628,"p":[0.449,0.310,0.049,0.964,0.678,0.659],"a":0.498,"f":2.352,"ac":[true,true,true,true,true,true],"ps":25,"fi":0.7208,"e":""},{"s":8200,"x":23.51,"v":0.7684,"p":[0.449,0.310,0.049,0.964,0.678,0.659],"a":0.498,"f":2.352,"ac":[true,true,true,true,true,true],"ps":25,"fi":0.7421,"e":""},{"s":8400,"x":24.29,"v":0.7738,"p":[0.449,0.310,0.049,0.964,0.678,0.659],"a":0.498,"f":2.352,"ac":[true,true,true,true,true,true],"ps":25,"fi":0.6964,"e":""},{"s":8600,"x":25.07,"v":0.7788,"p":[0.449,0.310,0.049,0.964,0.678,0.659],"a":0.498,"f":2.352,"ac":[true,true,true,true,true,true],"ps":25,"fi":0.7314,"e":""},{"s":8800,"x":25.85,"v":0.7770,"p":[0.449,0.310,0.049,0.964,0.678,0.659],"a":0.498,"f":2.352,"ac":[true,true,true,true,true,true],"ps":25,"fi":0.7489,"e":""},{"s":9000,"x":26.63,"v":0.7794,"p":[0.449,0.310,0.049,0.964,0.678,0.659],"a":0.498,"f":2.352,"ac":[true,true,true,true,true,true],"ps":25,"fi":0.7011,"e":""},{"s":9200,"x":27.42,"v":0.7837,"p":[0.449,0.310,0.049,0.964,0.678,0.659],"a":0.498,"f":2.352,"ac":[true,true,true,true,true,true],"ps":25,"fi":0.7358,"e":""},{"s":9400,"x":28.20,"v":0.7850,"p":[0.000,0.000,0.000,0.000,0.000,0.000],"a":0.300,"f":2.000,"ac":[true,true,true,true,true,true],"ps":25,"fi":0.7560,"e":""},{"s":9600,"x":28.69,"v":0.6345,"p":[0.449,0.310,0.049,0.964,0.678,0.659],"a":0.498,"f":2.352,"ac":[true,true,true,true,true,true],"ps":25,"fi":0.6955,"e":""},{"s":9800,"x":29.44,"v":0.6964,"p":[0.346,0.660,0.489,0.776,0.308,0.811],"a":0.409,"f":2.219,"ac":[true,true,true,true,true,true],"ps":25,"fi":0.7206,"e":""},{"s":10000,"x":29.95,"v":0.6016,"p":[0.449,0.310,0.049,0.964,0.678,0.659],"a":0.498,"f":2.352,"ac":[true,true,true,true,true,true],"ps":25,"fi":0.7206,"e":""},{"s":10200,"x":30.66,"v":0.6555,"p":[0.449,0.310,0.049,0.964,0.678,0.659],"a":0.498,"f":2.352,"ac":[true,true,true,true,true,true],"ps":25,"fi":0.6588,"e":""},{"s":10400,"x":31.43,"v":0.7108,"p":[0.449,0.310,0.049,0.964,0.678,0.659],"a":0.498,"f":2.352,"ac":[true,true,true,true,true,true],"ps":25,"fi":0.7017,"e":""},{"s":10600,"x":32.20,"v":0.7443,"p":[0.447,0.310,0.049,0.964,0.678,0.659],"a":0.471,"f":2.339,"ac":[true,true,true,true,true,true],"ps":25,"fi":0.7322,"e":""},{"s":10800,"x":32.94,"v":0.7415,"p":[0.449,0.310,0.049,0.964,0.678,0.659],"a":0.498,"f":2.352,"ac":[true,true,true,true,true,true],"ps":25,"fi":0.6736,"e":""},{"s":11000,"x":33.71,"v":0.7565,"p":[0.449,0.310,0.049,0.964,0.678,0.659],"a":0.498,"f":2.352,"ac":[true,true,true,true,true,true],"ps":25,"fi":0.7127,"e":""},{"s":11200,"x":34.50,"v":0.7720,"p":[0.449,0.310,0.049,0.964,0.678,0.659],"a":0.498,"f":2.352,"ac":[true,true,true,true,true,true],"ps":25,"fi":0.7426,"e":""},{"s":11400,"x":35.28,"v":0.7773,"p":[0.449,0.310,0.049,0.964,0.678,0.659],"a":0.498,"f":2.352,"ac":[true,true,true,true,true,true],"ps":25,"fi":0.6980,"e":""},{"s":11600,"x":36.08,"v":0.7854,"p":[0.449,0.310,0.049,0.964,0.678,0.659],"a":0.498,"f":2.352,"ac":[true,true,true,true,true,true],"ps":25,"fi":0.7362,"e":""},{"s":11800,"x":36.87,"v":0.7882,"p":[0.449,0.310,0.049,0.964,0.678,0.659],"a":0.498,"f":2.352,"ac":[true,true,true,true,true,true],"ps":25,"fi":0.7581,"e":""},{"s":12000,"x":37.65,"v":0.7840,"p":[0.449,0.310,0.049,0.964,0.678,0.659],"a":0.498,"f":2.352,"ac":[true,true,true,true,true,true],"ps":25,"fi":0.7054,"e":""},{"s":12000,"x":37.65,"v":0.0000,"p":[0.449,0.310,0.049,0.964,0.678,0.659],"a":0.498,"f":2.352,"ac":[true,true,false,true,true,true],"ps":25,"fi":0.0353,"e":"damage_L2"},{"s":12200,"x":38.06,"v":0.2034,"p":[0.000,0.500,0.500,0.000,0.000,0.500],"a":0.400,"f":2.000,"ac":[true,true,false,true,true,true],"ps":25,"fi":0.2862,"e":""},{"s":12400,"x":38.32,"v":0.2323,"p":[0.000,0.500,0.170,0.670,0.330,0.830],"a":0.350,"f":1.500,"ac":[true,true,false,true,true,true],"ps":25,"fi":0.2862,"e":""},{"s":12600,"x":38.62,"v":0.2668,"p":[0.000,0.500,0.330,0.830,0.670,0.170],"a":0.380,"f":1.800,"ac":[true,true,false,true,true,true],"ps":25,"fi":0.2862,"e":""},{"s":12800,"x":39.00,"v":0.3257,"p":[0.000,0.000,0.000,0.000,0.000,0.000],"a":0.300,"f":2.000,"ac":[true,true,false,true,true,true],"ps":25,"fi":0.2862,"e":""},{"s":13000,"x":39.37,"v":0.3444,"p":[0.567,0.547,0.095,0.974,0.416,0.543],"a":0.472,"f":1.823,"ac":[true,true,false,true,true,true],"ps":25,"fi":0.2862,"e":""},{"s":13200,"x":39.75,"v":0.3644,"p":[0.154,0.356,0.941,0.379,0.848,0.221],"a":0.310,"f":2.702,"ac":[true,true,false,true,true,true],"ps":25,"fi":0.2862,"e":""},{"s":13400,"x":40.00,"v":0.3060,"p":[0.397,0.612,0.459,0.545,0.972,0.243],"a":0.331,"f":1.146,"ac":[true,true,false,true,true,true],"ps":25,"fi":0.2862,"e":""},{"s":13600,"x":40.37,"v":0.3388,"p":[0.870,0.373,0.240,0.083,0.535,0.543],"a":0.334,"f":2.772,"ac":[true,true,false,true,true,true],"ps":25,"fi":0.2862,"e":""},{"s":13800,"x":40.55,"v":0.2589,"p":[0.445,0.472,0.704,0.975,0.795,0.350],"a":0.227,"f":1.071,"ac":[true,true,false,true,true,true],"ps":25,"fi":0.2862,"e":""},{"s":14000,"x":40.70,"v":0.2040,"p":[0.212,0.285,0.522,0.709,0.260,0.406],"a":0.358,"f":1.068,"ac":[true,true,false,true,true,true],"ps":25,"fi":0.2862,"e":""},{"s":14200,"x":41.16,"v":0.3335,"p":[0.898,0.613,0.279,0.444,0.617,0.919],"a":0.471,"f":2.237,"ac":[true,true,false,true,true,true],"ps":25,"fi":0.3258,"e":""},{"s":14400,"x":41.53,"v":0.3527,"p":[0.756,0.296,0.548,0.660,0.652,0.507],"a":0.394,"f":1.449,"ac":[true,true,false,true,true,true],"ps":25,"fi":0.3258,"e":""},{"s":14600,"x":41.81,"v":0.3154,"p":[0.775,0.314,0.101,0.866,0.734,0.190],"a":0.226,"f":2.974,"ac":[true,true,false,true,true,true],"ps":25,"fi":0.3258,"e":""},{"s":14800,"x":42.09,"v":0.2983,"p":[0.429,0.453,0.851,0.250,0.889,0.170],"a":0.303,"f":2.189,"ac":[true,true,false,true,true,true],"ps":25,"fi":0.3258,"e":""},{"s":15000,"x":42.38,"v":0.2953,"p":[0.346,0.660,0.489,0.776,0.308,0.811],"a":0.409,"f":2.219,"ac":[true,true,false,true,true,true],"ps":25,"fi":0.3258,"e":""},{"s":15200,"x":42.85,"v":0.3799,"p":[0.898,0.613,0.279,0.444,0.617,0.919],"a":0.471,"f":2.237,"ac":[true,true,false,true,true,true],"ps":25,"fi":0.3508,"e":""},{"s":15400,"x":43.37,"v":0.4525,"p":[0.898,0.613,0.279,0.444,0.617,0.919],"a":0.471,"f":2.237,"ac":[true,true,false,true,true,true],"ps":25,"fi":0.4205,"e":""},{"s":15600,"x":43.88,"v":0.4806,"p":[0.898,0.613,0.279,0.444,0.617,0.919],"a":0.471,"f":2.237,"ac":[true,true,false,true,true,true],"ps":25,"fi":0.4558,"e":"adapted"},{"s":15600,"x":43.88,"v":0.4806,"p":[0.898,0.613,0.279,0.444,0.617,0.919],"a":0.471,"f":2.237,"ac":[true,true,false,true,true,true],"ps":25,"fi":0.4558,"e":""},{"s":15800,"x":44.38,"v":0.4895,"p":[0.898,0.613,0.279,0.444,0.617,0.919],"a":0.471,"f":2.237,"ac":[true,true,false,true,true,true],"ps":25,"fi":0.4350,"e":""},{"s":16000,"x":44.89,"v":0.4999,"p":[0.898,0.613,0.279,0.444,0.617,0.919],"a":0.471,"f":2.237,"ac":[true,true,false,true,true,true],"ps":25,"fi":0.4651,"e":""},{"s":16200,"x":45.42,"v":0.5123,"p":[0.898,0.613,0.279,0.444,0.617,0.919],"a":0.471,"f":2.237,"ac":[true,true,false,true,true,true],"ps":25,"fi":0.4889,"e":""},{"s":16400,"x":45.93,"v":0.5147,"p":[0.898,0.613,0.279,0.444,0.617,0.919],"a":0.471,"f":2.237,"ac":[true,true,false,true,true,true],"ps":25,"fi":0.4602,"e":""},{"s":16600,"x":46.43,"v":0.5062,"p":[0.898,0.613,0.279,0.444,0.617,0.919],"a":0.471,"f":2.237,"ac":[true,true,false,true,true,true],"ps":25,"fi":0.4752,"e":""},{"s":16800,"x":46.94,"v":0.5055,"p":[0.898,0.613,0.279,0.444,0.617,0.919],"a":0.471,"f":2.237,"ac":[true,true,false,true,true,true],"ps":25,"fi":0.4871,"e":""},{"s":17000,"x":47.46,"v":0.5151,"p":[0.898,0.613,0.279,0.444,0.617,0.919],"a":0.471,"f":2.237,"ac":[true,true,false,true,true,true],"ps":25,"fi":0.4619,"e":""},{"s":17200,"x":47.98,"v":0.5168,"p":[0.898,0.613,0.279,0.444,0.617,0.919],"a":0.471,"f":2.237,"ac":[true,true,false,true,true,true],"ps":25,"fi":0.4846,"e":""},{"s":17400,"x":48.48,"v":0.5089,"p":[0.898,0.613,0.279,0.444,0.617,0.919],"a":0.471,"f":2.237,"ac":[true,true,false,true,true,true],"ps":25,"fi":0.4912,"e":""},{"s":17600,"x":48.98,"v":0.5054,"p":[0.898,0.613,0.279,0.444,0.617,0.919],"a":0.471,"f":2.237,"ac":[true,true,false,true,true,true],"ps":25,"fi":0.4558,"e":""},{"s":17800,"x":49.50,"v":0.5124,"p":[0.898,0.613,0.279,0.444,0.617,0.919],"a":0.471,"f":2.237,"ac":[true,true,false,true,true,true],"ps":25,"fi":0.4812,"e":""},{"s":18000,"x":50.03,"v":0.5190,"p":[0.898,0.613,0.279,0.444,0.617,0.919],"a":0.471,"f":2.237,"ac":[true,true,false,true,true,true],"ps":25,"fi":0.4989,"e":""},{"s":18200,"x":50.53,"v":0.5117,"p":[0.898,0.613,0.279,0.444,0.617,0.919],"a":0.471,"f":2.237,"ac":[true,true,false,true,true,true],"ps":25,"fi":0.4611,"e":""},{"s":18400,"x":51.03,"v":0.5039,"p":[0.449,0.310,0.049,0.964,0.646,0.659],"a":0.481,"f":2.292,"ac":[true,true,false,true,true,true],"ps":25,"fi":0.4751,"e":""},{"s":18600,"x":51.54,"v":0.5089,"p":[0.898,0.613,0.279,0.444,0.617,0.919],"a":0.471,"f":2.237,"ac":[true,true,false,true,true,true],"ps":25,"fi":0.4751,"e":""},{"s":18800,"x":52.06,"v":0.5146,"p":[0.898,0.613,0.279,0.444,0.617,0.919],"a":0.471,"f":2.237,"ac":[true,true,false,true,true,true],"ps":25,"fi":0.4537,"e":""},{"s":19000,"x":52.56,"v":0.5088,"p":[0.898,0.613,0.279,0.444,0.617,0.919],"a":0.471,"f":2.237,"ac":[true,true,false,true,true,true],"ps":25,"fi":0.4734,"e":""},{"s":19200,"x":53.06,"v":0.5044,"p":[0.898,0.613,0.279,0.444,0.617,0.919],"a":0.471,"f":2.237,"ac":[true,true,false,true,true,true],"ps":25,"fi":0.4840,"e":""},{"s":19400,"x":53.58,"v":0.5112,"p":[0.898,0.613,0.279,0.444,0.617,0.919],"a":0.471,"f":2.237,"ac":[true,true,false,true,true,true],"ps":25,"fi":0.4578,"e":""},{"s":19600,"x":54.11,"v":0.5172,"p":[0.898,0.613,0.279,0.444,0.617,0.919],"a":0.471,"f":2.237,"ac":[true,true,false,true,true,true],"ps":25,"fi":0.4840,"e":""},{"s":19800,"x":54.62,"v":0.5139,"p":[0.898,0.613,0.279,0.444,0.617,0.919],"a":0.471,"f":2.237,"ac":[true,true,false,true,true,true],"ps":25,"fi":0.4946,"e":""},{"s":20000,"x":55.11,"v":0.5064,"p":[0.898,0.613,0.279,0.444,0.617,0.919],"a":0.471,"f":2.237,"ac":[true,true,false,true,true,true],"ps":25,"fi":0.4566,"e":""},{"s":20200,"x":55.63,"v":0.5086,"p":[0.898,0.613,0.279,0.444,0.617,0.919],"a":0.471,"f":2.237,"ac":[true,true,false,true,true,true],"ps":25,"fi":0.4783,"e":""},{"s":20400,"x":56.15,"v":0.5170,"p":[0.898,0.613,0.279,0.444,0.617,0.919],"a":0.471,"f":2.237,"ac":[true,true,false,true,true,true],"ps":25,"fi":0.4971,"e":""},{"s":20600,"x":56.66,"v":0.5142,"p":[0.898,0.613,0.279,0.444,0.617,0.919],"a":0.471,"f":2.237,"ac":[true,true,false,true,true,true],"ps":25,"fi":0.4626,"e":""},{"s":20800,"x":57.16,"v":0.5059,"p":[0.898,0.613,0.279,0.444,0.617,0.919],"a":0.471,"f":2.237,"ac":[true,true,false,true,true,true],"ps":25,"fi":0.4766,"e":""},{"s":21000,"x":57.67,"v":0.5073,"p":[0.379,0.310,0.049,0.964,0.678,0.659],"a":0.487,"f":2.427,"ac":[true,true,false,true,true,true],"ps":25,"fi":0.4894,"e":""},{"s":21000,"x":57.67,"v":0.0000,"p":[0.379,0.310,0.049,0.964,0.678,0.659],"a":0.487,"f":2.427,"ac":[true,true,false,true,true,false],"ps":25,"fi":0.0245,"e":"damage_R3"},{"s":21200,"x":58.03,"v":0.1785,"p":[0.000,0.500,0.500,0.000,0.000,0.500],"a":0.400,"f":2.000,"ac":[true,true,false,true,true,false],"ps":25,"fi":0.2518,"e":""},{"s":21400,"x":58.21,"v":0.1828,"p":[0.000,0.500,0.170,0.670,0.330,0.830],"a":0.350,"f":1.500,"ac":[true,true,false,true,true,false],"ps":25,"fi":0.2518,"e":""},{"s":21600,"x":58.43,"v":0.1982,"p":[0.000,0.500,0.330,0.830,0.670,0.170],"a":0.380,"f":1.800,"ac":[true,true,false,true,true,false],"ps":25,"fi":0.2518,"e":""},{"s":21800,"x":58.73,"v":0.2529,"p":[0.000,0.000,0.000,0.000,0.000,0.000],"a":0.300,"f":2.000,"ac":[true,true,false,true,true,false],"ps":25,"fi":0.2518,"e":""},{"s":22000,"x":58.96,"v":0.2413,"p":[0.567,0.547,0.095,0.974,0.416,0.543],"a":0.472,"f":1.823,"ac":[true,true,false,true,true,false],"ps":25,"fi":0.2518,"e":""},{"s":22200,"x":59.22,"v":0.2472,"p":[0.154,0.356,0.941,0.379,0.848,0.221],"a":0.310,"f":2.702,"ac":[true,true,false,true,true,false],"ps":25,"fi":0.2518,"e":""},{"s":22400,"x":59.37,"v":0.1985,"p":[0.397,0.612,0.459,0.545,0.972,0.243],"a":0.331,"f":1.146,"ac":[true,true,false,true,true,false],"ps":25,"fi":0.2518,"e":""},{"s":22600,"x":59.50,"v":0.1673,"p":[0.870,0.373,0.240,0.083,0.535,0.543],"a":0.334,"f":2.772,"ac":[true,true,false,true,true,false],"ps":25,"fi":0.2518,"e":""},{"s":22800,"x":59.59,"v":0.1257,"p":[0.445,0.472,0.704,0.975,0.795,0.350],"a":0.227,"f":1.071,"ac":[true,true,false,true,true,false],"ps":25,"fi":0.2518,"e":""},{"s":23000,"x":59.70,"v":0.1218,"p":[0.212,0.285,0.522,0.709,0.260,0.406],"a":0.358,"f":1.068,"ac":[true,true,false,true,true,false],"ps":25,"fi":0.2518,"e":""},{"s":23200,"x":60.06,"v":0.2371,"p":[0.898,0.613,0.279,0.444,0.617,0.919],"a":0.471,"f":2.237,"ac":[true,true,false,true,true,false],"ps":25,"fi":0.2541,"e":""},{"s":23400,"x":60.33,"v":0.2561,"p":[0.756,0.296,0.548,0.660,0.652,0.507],"a":0.394,"f":1.449,"ac":[true,true,false,true,true,false],"ps":25,"fi":0.2541,"e":""},{"s":23600,"x":60.55,"v":0.2369,"p":[0.775,0.314,0.101,0.866,0.734,0.190],"a":0.226,"f":2.974,"ac":[true,true,false,true,true,false],"ps":25,"fi":0.2541,"e":""},{"s":23800,"x":60.74,"v":0.2111,"p":[0.429,0.453,0.851,0.250,0.889,0.170],"a":0.303,"f":2.189,"ac":[true,true,false,true,true,false],"ps":25,"fi":0.2541,"e":""},{"s":24000,"x":60.92,"v":0.1966,"p":[0.346,0.660,0.489,0.776,0.308,0.811],"a":0.409,"f":2.219,"ac":[true,true,false,true,true,false],"ps":25,"fi":0.2541,"e":""},{"s":24200,"x":61.27,"v":0.2736,"p":[0.898,0.613,0.279,0.444,0.617,0.919],"a":0.471,"f":2.237,"ac":[true,true,false,true,true,false],"ps":21,"fi":0.2693,"e":""},{"s":24400,"x":61.69,"v":0.3461,"p":[0.449,0.310,0.049,0.964,0.646,0.659],"a":0.481,"f":2.292,"ac":[true,true,false,true,true,false],"ps":21,"fi":0.3290,"e":""},{"s":24600,"x":61.96,"v":0.3104,"p":[0.898,0.613,0.279,0.444,0.617,0.919],"a":0.471,"f":2.237,"ac":[true,true,false,true,true,false],"ps":21,"fi":0.3290,"e":"adapted"},{"s":24600,"x":61.96,"v":0.3104,"p":[0.898,0.613,0.279,0.444,0.617,0.919],"a":0.471,"f":2.237,"ac":[true,true,false,true,true,false],"ps":21,"fi":0.3290,"e":""},{"s":24800,"x":62.34,"v":0.3456,"p":[0.898,0.613,0.279,0.444,0.617,0.919],"a":0.471,"f":2.237,"ac":[true,true,false,true,true,false],"ps":22,"fi":0.3218,"e":""},{"s":25000,"x":62.76,"v":0.3801,"p":[0.898,0.613,0.279,0.444,0.617,0.919],"a":0.471,"f":2.237,"ac":[true,true,false,true,true,false],"ps":22,"fi":0.3589,"e":""},{"s":25200,"x":63.18,"v":0.3995,"p":[0.898,0.613,0.279,0.444,0.617,0.919],"a":0.471,"f":2.237,"ac":[true,true,false,true,true,false],"ps":22,"fi":0.3829,"e":""},{"s":25400,"x":63.58,"v":0.4015,"p":[0.898,0.613,0.279,0.444,0.617,0.919],"a":0.471,"f":2.237,"ac":[true,true,false,true,true,false],"ps":23,"fi":0.3599,"e":""},{"s":25600,"x":63.97,"v":0.3978,"p":[0.898,0.613,0.279,0.444,0.617,0.919],"a":0.471,"f":2.237,"ac":[true,true,false,true,true,false],"ps":23,"fi":0.3736,"e":""},{"s":25800,"x":64.38,"v":0.4037,"p":[0.898,0.613,0.279,0.444,0.617,0.919],"a":0.471,"f":2.237,"ac":[true,true,false,true,true,false],"ps":23,"fi":0.3880,"e":""},{"s":26000,"x":64.80,"v":0.4127,"p":[0.898,0.613,0.279,0.444,0.617,0.919],"a":0.471,"f":2.237,"ac":[true,true,false,true,true,false],"ps":24,"fi":0.3694,"e":""},{"s":26200,"x":65.21,"v":0.4096,"p":[0.898,0.613,0.279,0.444,0.617,0.919],"a":0.471,"f":2.237,"ac":[true,true,false,true,true,false],"ps":24,"fi":0.3842,"e":""},{"s":26400,"x":65.60,"v":0.4006,"p":[0.898,0.613,0.279,0.444,0.617,0.919],"a":0.471,"f":2.237,"ac":[true,true,false,true,true,false],"ps":24,"fi":0.3872,"e":""},{"s":26600,"x":66.01,"v":0.4038,"p":[0.898,0.613,0.279,0.444,0.617,0.919],"a":0.471,"f":2.237,"ac":[true,true,false,true,true,false],"ps":25,"fi":0.3635,"e":""},{"s":26800,"x":66.43,"v":0.4124,"p":[0.898,0.613,0.279,0.444,0.617,0.919],"a":0.471,"f":2.237,"ac":[true,true,false,true,true,false],"ps":25,"fi":0.3865,"e":""},{"s":27000,"x":66.84,"v":0.4111,"p":[0.898,0.613,0.279,0.444,0.617,0.919],"a":0.471,"f":2.237,"ac":[true,true,false,true,true,false],"ps":25,"fi":0.3958,"e":""},{"s":27200,"x":67.24,"v":0.4034,"p":[0.397,0.612,0.459,0.545,0.972,0.243],"a":0.331,"f":1.146,"ac":[true,true,false,true,true,false],"ps":25,"fi":0.3641,"e":""},{"s":27400,"x":67.39,"v":0.2804,"p":[0.898,0.613,0.279,0.444,0.617,0.919],"a":0.471,"f":2.237,"ac":[true,true,false,true,true,false],"ps":25,"fi":0.3641,"e":""},{"s":27600,"x":67.74,"v":0.3147,"p":[0.898,0.613,0.279,0.444,0.617,0.919],"a":0.471,"f":2.237,"ac":[true,true,false,true,true,false],"ps":25,"fi":0.3580,"e":""},{"s":27800,"x":68.16,"v":0.3675,"p":[0.898,0.613,0.279,0.444,0.617,0.919],"a":0.471,"f":2.237,"ac":[true,true,false,true,true,false],"ps":25,"fi":0.3523,"e":""},{"s":28000,"x":68.57,"v":0.3853,"p":[0.000,0.000,0.000,0.000,0.000,0.000],"a":0.300,"f":2.000,"ac":[true,true,false,true,true,false],"ps":25,"fi":0.3727,"e":""},{"s":28200,"x":68.86,"v":0.3382,"p":[0.898,0.613,0.279,0.444,0.617,0.919],"a":0.471,"f":2.237,"ac":[true,true,false,true,true,false],"ps":25,"fi":0.3727,"e":""},{"s":28400,"x":69.26,"v":0.3700,"p":[0.898,0.613,0.279,0.444,0.617,0.919],"a":0.471,"f":2.237,"ac":[true,true,false,true,true,false],"ps":25,"fi":0.3536,"e":""},{"s":28600,"x":69.67,"v":0.3901,"p":[0.898,0.613,0.279,0.444,0.617,0.919],"a":0.471,"f":2.237,"ac":[true,true,false,true,true,false],"ps":25,"fi":0.3762,"e":""},{"s":28800,"x":70.09,"v":0.4057,"p":[0.898,0.613,0.279,0.444,0.617,0.919],"a":0.471,"f":2.237,"ac":[true,true,false,true,true,false],"ps":25,"fi":0.3943,"e":""},{"s":29000,"x":70.50,"v":0.4062,"p":[0.898,0.613,0.279,0.444,0.617,0.919],"a":0.471,"f":2.237,"ac":[true,true,false,true,true,false],"ps":25,"fi":0.3673,"e":""},{"s":29000,"x":70.50,"v":0.0000,"p":[0.898,0.613,0.279,0.444,0.617,0.919],"a":0.471,"f":2.237,"ac":[true,false,false,true,true,false],"ps":25,"fi":0.0184,"e":"damage_R1"},{"s":29200,"x":70.80,"v":0.1529,"p":[0.000,0.500,0.500,0.000,0.000,0.500],"a":0.400,"f":2.000,"ac":[true,false,false,true,true,false],"ps":25,"fi":0.2159,"e":""},{"s":29400,"x":70.91,"v":0.1278,"p":[0.000,0.500,0.170,0.670,0.330,0.830],"a":0.350,"f":1.500,"ac":[true,false,false,true,true,false],"ps":25,"fi":0.2159,"e":""},{"s":29600,"x":70.99,"v":0.1082,"p":[0.000,0.500,0.330,0.830,0.670,0.170],"a":0.380,"f":1.800,"ac":[true,false,false,true,true,false],"ps":25,"fi":0.2159,"e":""},{"s":29800,"x":71.19,"v":0.1528,"p":[0.000,0.000,0.000,0.000,0.000,0.000],"a":0.300,"f":2.000,"ac":[true,false,false,true,true,false],"ps":25,"fi":0.2159,"e":""},{"s":30000,"x":71.31,"v":0.1337,"p":[0.567,0.547,0.095,0.974,0.416,0.543],"a":0.472,"f":1.823,"ac":[true,false,false,true,true,false],"ps":25,"fi":0.2159,"e":""},{"s":30200,"x":71.36,"v":0.0915,"p":[0.154,0.356,0.941,0.379,0.848,0.221],"a":0.310,"f":2.702,"ac":[true,false,false,true,true,false],"ps":25,"fi":0.2159,"e":""},{"s":30400,"x":71.39,"v":0.0641,"p":[0.397,0.612,0.459,0.545,0.972,0.243],"a":0.331,"f":1.146,"ac":[true,false,false,true,true,false],"ps":25,"fi":0.2159,"e":""},{"s":30600,"x":71.45,"v":0.0633,"p":[0.870,0.373,0.240,0.083,0.535,0.543],"a":0.334,"f":2.772,"ac":[true,false,false,true,true,false],"ps":25,"fi":0.2159,"e":""},{"s":30800,"x":71.48,"v":0.0459,"p":[0.445,0.472,0.704,0.975,0.795,0.350],"a":0.227,"f":1.071,"ac":[true,false,false,true,true,false],"ps":25,"fi":0.2159,"e":""},{"s":31000,"x":71.50,"v":0.0301,"p":[0.212,0.285,0.522,0.709,0.260,0.406],"a":0.358,"f":1.068,"ac":[true,false,false,true,true,false],"ps":25,"fi":0.2159,"e":""},{"s":31200,"x":71.75,"v":0.1408,"p":[0.000,0.500,0.500,0.000,0.000,0.500],"a":0.400,"f":2.000,"ac":[true,false,false,true,true,false],"ps":25,"fi":0.2117,"e":""},{"s":31400,"x":72.05,"v":0.2200,"p":[0.000,0.500,0.500,0.000,0.000,0.500],"a":0.400,"f":2.000,"ac":[true,false,false,true,true,false],"ps":25,"fi":0.2467,"e":""},{"s":31600,"x":72.35,"v":0.2600,"p":[0.379,0.310,0.049,0.964,0.678,0.659],"a":0.487,"f":2.427,"ac":[true,false,false,true,true,false],"ps":25,"fi":0.2680,"e":"adapted"},{"s":31600,"x":72.35,"v":0.2600,"p":[0.379,0.310,0.049,0.964,0.678,0.659],"a":0.487,"f":2.427,"ac":[true,false,false,true,true,false],"ps":25,"fi":0.2680,"e":""},{"s":31800,"x":72.46,"v":0.1882,"p":[0.000,0.500,0.500,0.000,0.000,0.500],"a":0.400,"f":2.000,"ac":[true,false,false,true,true,false],"ps":25,"fi":0.2466,"e":""},{"s":32000,"x":72.69,"v":0.2044,"p":[0.000,0.500,0.500,0.000,0.000,0.500],"a":0.400,"f":2.000,"ac":[true,false,false,true,true,false],"ps":25,"fi":0.2362,"e":""},{"s":32200,"x":72.98,"v":0.2515,"p":[0.000,0.500,0.500,0.000,0.000,0.500],"a":0.400,"f":2.000,"ac":[true,false,false,true,true,false],"ps":25,"fi":0.2612,"e":""},{"s":32400,"x":73.28,"v":0.2757,"p":[0.000,0.500,0.500,0.000,0.000,0.500],"a":0.400,"f":2.000,"ac":[true,false,false,true,true,false],"ps":25,"fi":0.2546,"e":""},{"s":32600,"x":73.58,"v":0.2879,"p":[0.000,0.500,0.500,0.000,0.000,0.500],"a":0.400,"f":2.000,"ac":[true,false,false,true,true,false],"ps":25,"fi":0.2727,"e":""},{"s":32800,"x":73.88,"v":0.2939,"p":[0.000,0.500,0.500,0.000,0.000,0.500],"a":0.400,"f":2.000,"ac":[true,false,false,true,true,false],"ps":25,"fi":0.2836,"e":""},{"s":33000,"x":74.18,"v":0.2970,"p":[0.000,0.500,0.500,0.000,0.000,0.500],"a":0.400,"f":2.000,"ac":[true,false,false,true,true,false],"ps":25,"fi":0.2670,"e":""},{"s":33200,"x":74.48,"v":0.2985,"p":[0.000,0.500,0.500,0.000,0.000,0.500],"a":0.400,"f":2.000,"ac":[true,false,false,true,true,false],"ps":25,"fi":0.2802,"e":""},{"s":33400,"x":74.78,"v":0.2992,"p":[0.000,0.500,0.500,0.000,0.000,0.500],"a":0.400,"f":2.000,"ac":[true,false,false,true,true,false],"ps":25,"fi":0.2881,"e":""},{"s":33600,"x":75.08,"v":0.2996,"p":[0.000,0.500,0.500,0.000,0.000,0.500],"a":0.400,"f":2.000,"ac":[true,false,false,true,true,false],"ps":25,"fi":0.2694,"e":""},{"s":33800,"x":75.38,"v":0.2998,"p":[0.000,0.500,0.500,0.000,0.000,0.500],"a":0.400,"f":2.000,"ac":[true,false,false,true,true,false],"ps":25,"fi":0.2817,"e":""},{"s":34000,"x":75.68,"v":0.2999,"p":[0.000,0.500,0.500,0.000,0.000,0.500],"a":0.400,"f":2.000,"ac":[true,false,false,true,true,false],"ps":25,"fi":0.2890,"e":""},{"s":34200,"x":75.98,"v":0.3000,"p":[0.000,0.500,0.500,0.000,0.000,0.500],"a":0.400,"f":2.000,"ac":[true,false,false,true,true,false],"ps":25,"fi":0.2699,"e":""},{"s":34400,"x":76.28,"v":0.3000,"p":[0.000,0.500,0.500,0.000,0.000,0.500],"a":0.400,"f":2.000,"ac":[true,false,false,true,true,false],"ps":25,"fi":0.2820,"e":""},{"s":34600,"x":76.58,"v":0.3000,"p":[0.000,0.500,0.500,0.000,0.000,0.500],"a":0.400,"f":2.000,"ac":[true,false,false,true,true,false],"ps":25,"fi":0.2892,"e":""},{"s":34800,"x":76.88,"v":0.3000,"p":[0.000,0.500,0.500,0.000,0.000,0.500],"a":0.400,"f":2.000,"ac":[true,false,false,true,true,false],"ps":25,"fi":0.2700,"e":""},{"s":35000,"x":77.18,"v":0.3000,"p":[0.000,0.500,0.500,0.000,0.000,0.500],"a":0.400,"f":2.000,"ac":[true,false,false,true,true,false],"ps":25,"fi":0.2820,"e":""}];
+const cv=document.getElementById('c');
+const cx=cv.getContext('2d');
+const W=960,H=540;
+cv.width=W;cv.height=H;
+
+let fi=0,playing=true,spd=2,lt=0,acc=0,bannerT=0;
+
+// 3D → 2D 사영 (비스듬한 탑다운 뷰)
+const CX=W/2,CY=300;
+function p3(x,y,z){return [CX+x*0.9+y*0.35, CY+y*0.55-z*0.85];}
+
+// 몸체/다리 기하학 — L=좌측(y<0), R=우측(y>0)
+const BZ=50;
+const HIPS=[[45,-24],[45,24],[0,-26],[0,26],[-45,-24],[-45,24]];
+const LABELS=['L1','R1','L2','R2','L3','R3'];
+
+function draw(f,t){
+  cx.clearRect(0,0,W,H);
+
+  // 지면 그리드
+  cx.strokeStyle='#1a1f27';cx.lineWidth=1;
+  const goff=(f.x*30)%30;
+  for(let i=-8;i<16;i++){
+    const gx=i*30-goff;
+    const [x1,y1]=p3(gx-120,-180,0);
+    const [x2,y2]=p3(gx-120,180,0);
+    cx.beginPath();cx.moveTo(x1,y1);cx.lineTo(x2,y2);cx.stroke();
+  }
+  for(let j=-6;j<7;j++){
+    const gy=j*30;
+    const [x1,y1]=p3(-350,gy,0);
+    const [x2,y2]=p3(350,gy,0);
+    cx.beginPath();cx.moveTo(x1,y1);cx.lineTo(x2,y2);cx.stroke();
+  }
+
+  // 몸체 그림자 (지면 위)
+  cx.fillStyle='rgba(0,0,0,0.25)';
+  cx.beginPath();
+  const shv=[[60,-24],[60,24],[-60,24],[-60,-24]];
+  const [s0x,s0y]=p3(shv[0][0],shv[0][1],0);
+  cx.moveTo(s0x,s0y);
+  for(let i=1;i<4;i++){const [sx,sy]=p3(shv[i][0],shv[i][1],0);cx.lineTo(sx,sy);}
+  cx.closePath();cx.fill();
+
+  // 보행 위상
+  const phase=(t/1000*f.f)%1.0;
+
+  // 다리 — 뒷다리부터 (깊이 정렬)
+  const order=[4,5,2,3,0,1];
+  for(const i of order){
+    const hx=HIPS[i][0],hy=HIPS[i][1];
+    const dir=hy>0?1:-1;
+    const hip=p3(hx,hy,BZ);
+
+    if(!f.ac[i]){
+      const stump=p3(hx,hy+dir*14,BZ-8);
+      cx.strokeStyle='#da3633';cx.lineWidth=3;
+      cx.beginPath();cx.moveTo(hip[0],hip[1]);cx.lineTo(stump[0],stump[1]);cx.stroke();
+      cx.beginPath();
+      cx.moveTo(stump[0]-6,stump[1]-6);cx.lineTo(stump[0]+6,stump[1]+6);
+      cx.moveTo(stump[0]+6,stump[1]-6);cx.lineTo(stump[0]-6,stump[1]+6);
+      cx.stroke();
+      cx.fillStyle='#6e1c1c';cx.font='9px monospace';
+      cx.fillText(LABELS[i],stump[0]-6,stump[1]-8);
+      continue;
+    }
+
+    const eff=(phase+f.p[i])%1.0;
+    const stance=eff<0.5;
+    const swing=Math.sin(eff*Math.PI*2);
+
+    let fx,fy,fz;
+    if(stance){
+      fx=hx+swing*12; fy=hy+dir*55; fz=0;
+    }else{
+      const lift=Math.sin((eff-0.5)*2*Math.PI);
+      fx=hx+swing*12; fy=hy+dir*48; fz=Math.max(0,lift*22);
+    }
+
+    const kx=(hx+fx)/2;
+    const ky=(hy+fy)/2+dir*10;
+    const kz=BZ*0.42+fz*0.3;
+    const knee=p3(kx,ky,kz);
+    const foot=p3(fx,fy,fz);
+
+    if(!stance&&fz>2){
+      const fs=p3(fx,fy,0);
+      cx.fillStyle='rgba(0,0,0,0.12)';
+      cx.beginPath();cx.arc(fs[0],fs[1],3,0,Math.PI*2);cx.fill();
+    }
+
+    const lc=stance?'#3fb950':'#d29922';
+    cx.strokeStyle=lc;cx.lineWidth=stance?4:3;
+    cx.beginPath();cx.moveTo(hip[0],hip[1]);cx.lineTo(knee[0],knee[1]);cx.lineTo(foot[0],foot[1]);cx.stroke();
+    cx.fillStyle=lc;
+    cx.beginPath();cx.arc(foot[0],foot[1],stance?5:3,0,Math.PI*2);cx.fill();
+  }
+
+  // 몸체 3D 박스 — 오른쪽 측면
+  cx.fillStyle='#174ea0';cx.beginPath();
+  const rv=[[60,22,BZ+10],[-60,22,BZ+10],[-60,22,BZ-8],[60,22,BZ-8]];
+  let [rx,ry]=p3(rv[0][0],rv[0][1],rv[0][2]);cx.moveTo(rx,ry);
+  for(let i=1;i<4;i++){[rx,ry]=p3(rv[i][0],rv[i][1],rv[i][2]);cx.lineTo(rx,ry);}
+  cx.closePath();cx.fill();cx.strokeStyle='#2a6cd4';cx.lineWidth=1;cx.stroke();
+
+  // 정면
+  cx.fillStyle='#1a5cc7';cx.beginPath();
+  const fv=[[60,-22,BZ+10],[60,22,BZ+10],[60,22,BZ-8],[60,-22,BZ-8]];
+  let [ffx,ffy]=p3(fv[0][0],fv[0][1],fv[0][2]);cx.moveTo(ffx,ffy);
+  for(let i=1;i<4;i++){[ffx,ffy]=p3(fv[i][0],fv[i][1],fv[i][2]);cx.lineTo(ffx,ffy);}
+  cx.closePath();cx.fill();cx.strokeStyle='#2a6cd4';cx.lineWidth=1;cx.stroke();
+
+  // 윗면
+  cx.fillStyle='#1f6feb';cx.beginPath();
+  const ttv=[[60,-22,BZ+10],[60,22,BZ+10],[-60,22,BZ+10],[-60,-22,BZ+10]];
+  let [tx,ty]=p3(ttv[0][0],ttv[0][1],ttv[0][2]);cx.moveTo(tx,ty);
+  for(let i=1;i<4;i++){[tx,ty]=p3(ttv[i][0],ttv[i][1],ttv[i][2]);cx.lineTo(tx,ty);}
+  cx.closePath();cx.fill();cx.strokeStyle='#58a6ff';cx.lineWidth=2;cx.stroke();
+
+  // 방향 화살표
+  cx.fillStyle='#58a6ff';
+  const [a1x,a1y]=p3(72,0,BZ+12);
+  const [a2x,a2y]=p3(56,-9,BZ+12);
+  const [a3x,a3y]=p3(56,9,BZ+12);
+  cx.beginPath();cx.moveTo(a1x,a1y);cx.lineTo(a2x,a2y);cx.lineTo(a3x,a3y);cx.fill();
+
+  // 다리 라벨
+  cx.fillStyle='#8b949e';cx.font='10px monospace';
+  for(let i=0;i<6;i++){
+    if(!f.ac[i]) continue;
+    const lp=p3(HIPS[i][0],HIPS[i][1]*0.5,BZ+18);
+    cx.fillText(LABELS[i],lp[0]-7,lp[1]);
+  }
+
+  // 속도 바
+  cx.fillStyle='#161b22';cx.fillRect(20,H-50,300,14);
+  const speedW=Math.min(f.v/0.8*300,300);
+  const barC=f.v>0.3?'#3fb950':f.v>0.1?'#d29922':'#da3633';
+  cx.fillStyle=barC;cx.fillRect(20,H-50,Math.max(0,speedW),14);
+  cx.fillStyle='#8b949e';cx.font='12px monospace';
+  cx.fillText(f.v.toFixed(3)+' m/s',328,H-38);
+
+  cx.fillStyle='#484f58';cx.font='10px monospace';
+  cx.fillText('Frame '+fi+'/'+F.length,W-130,H-10);
+}
+
+function updHud(f){
+  document.getElementById('mSpeed').innerHTML='속도: <b>'+f.v.toFixed(3)+'</b> m/s';
+  document.getElementById('mPool').innerHTML='풀: <b>'+f.ps+'</b>';
+  const nl=f.ac.filter(a=>a).length;
+  document.getElementById('mLegs').innerHTML='다리: <b>'+nl+'</b>/6';
+  document.getElementById('mStep').innerHTML='Step: <b>'+f.s+'</b>';
+  document.getElementById('mFit').innerHTML='적합도: <b>'+f.fi.toFixed(4)+'</b>';
+}
+
+function showBanner(msg){
+  const b=document.getElementById('banner');
+  b.textContent=msg;b.classList.add('show');
+  bannerT=Date.now();
+  setTimeout(()=>b.classList.remove('show'),2000);
+}
+
+function anim(t){
+  if(!lt)lt=t;
+  const dt=t-lt;lt=t;
+
+  if(playing){
+    acc+=dt*spd;
+    while(acc>150&&fi<F.length-1){
+      acc-=150;
+      fi++;
+      const f=F[fi];
+      if(f.e==='adapted')showBanner('★ 적응 완료!');
+      // 다리 손실 감지
+      if(fi>0){
+        for(let i=0;i<6;i++){
+          if(F[fi-1].ac[i]&&!f.ac[i]){
+            const names=['L1(전좌)','R1(전우)','L2(중좌)','R2(중우)','L3(후좌)','R3(후우)'];
+            showBanner('⚠ 다리 '+names[i]+' 손실!');
+          }
+        }
+      }
+      document.getElementById('timeline').value=Math.floor(fi/(F.length-1)*1000);
+    }
+  }
+
+  if(F.length>0){
+    draw(F[fi],t);
+    updHud(F[fi]);
+  }
+  requestAnimationFrame(anim);
+}
+
+function toggle(){
+  playing=!playing;
+  document.getElementById('bPlay').textContent=playing?'⏸':'▶';
+}
+function ss(s){
+  spd=s;
+  ['b1','b2','b4','b8'].forEach(id=>document.getElementById(id).classList.remove('act'));
+  document.getElementById('b'+s).classList.add('act');
+}
+document.getElementById('timeline').addEventListener('input',e=>{
+  fi=Math.floor(e.target.value/1000*(F.length-1));
+  playing=false;
+  document.getElementById('bPlay').textContent='▶';
+});
+
+requestAnimationFrame(anim);
+</script>
+</body>
+</html>

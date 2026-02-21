@@ -18,6 +18,7 @@ use super::engine::WaveTextEngine;
 use super::reservoir::ReservoirState;
 use super::data::{DialogueIntent, chat_classification_data};
 use super::tokenizer::EOS_ID;
+use std::collections::HashMap;
 
 // ---------------------------------------------------------------------------
 // GrowthConfig
@@ -44,6 +45,17 @@ pub struct GrowthConfig {
     // Intent vector: exponential weighting from classifier probability distribution.
     // score = cosine * sqrt(fitness) * exp(intent_weight * intent_prob)
     pub intent_weight: f64,
+    // Deep reservoir: number of passes for richer representations.
+    // depth=1 is standard (O(n)), depth=k adds k-1 refinement passes (O(n+k)).
+    pub depth: usize,
+    // Multi-slit: number of parallel reservoir configs for interference.
+    // num_slits=1 is standard, num_slits=K processes through K different physics.
+    pub num_slits: usize,
+    // Resonance map: quantization parameters for O(1) wave lookup.
+    // resonance_dims: number of feature dimensions used for hashing.
+    // resonance_bands: number of quantization bands per dimension.
+    pub resonance_dims: usize,
+    pub resonance_bands: usize,
     // Cycle
     pub cycle_interval: usize,
     pub seed: u64,
@@ -66,6 +78,10 @@ impl Default for GrowthConfig {
             max_clones_per_response: 2,
             max_pool_size: 30,
             intent_weight: 20.0,
+            depth: 2,
+            num_slits: 1,
+            resonance_dims: 8,
+            resonance_bands: 4,
             cycle_interval: 10,
             seed: 42,
         }
@@ -234,6 +250,381 @@ fn cosine_similarity(a: &[f64], b: &[f64]) -> f64 {
 }
 
 // ---------------------------------------------------------------------------
+// ResonanceMap — O(1) wave-signature lookup
+// ---------------------------------------------------------------------------
+
+/// 공명 맵: 2단계 사전 구축 공명으로 O(1) 탐색.
+///
+/// 물리적 공명 원리 — 소리굽쇠를 치면 같은 주파수의 소리굽쇠가 알아서 울린다.
+/// 모든 소리굽쇠를 하나씩 확인하지 않는다.
+///
+/// 사전 계산으로 동시성을 시간 밖으로 밀어낸 구조:
+///   구축 (오프라인): O(P×E×D) — 풀별 공명 관계 + 파동 서명 양자화
+///   탐색 (런타임):  O(1)     — 의도 공명 또는 파동 서명으로 즉시 조회
+///
+/// 2단계 구조:
+///   Level 1 (의도 공명): 분류기 = 파동 기반 양자화기.
+///     입력 파동이 저수지를 통과하면 어떤 주파수 대역(의도)에서 공명하는지 즉시 결정.
+///     intent → pool_idx → pool_best[pool_idx] → O(1)
+///   Level 2 (파동 공명): Fisher 판별 기반 특징 양자화.
+///     분류기가 확신 없을 때 또는 출현 풀용 폴백.
+///     quantize(features) → wave_map → O(1)
+pub struct ResonanceMap {
+    /// Level 1: 의도명 → pool 인덱스.
+    intent_to_pool: HashMap<String, usize>,
+    /// 풀별 최고 적합도 엔트리 인덱스 (정상파 피크).
+    pub pool_best: Vec<usize>,
+    /// Level 2: 양자화된 파동 서명 → (pool_idx, entry_idx).
+    wave_map: HashMap<u64, (usize, usize)>,
+    /// 양자화 매개변수.
+    selected_dims: Vec<usize>,
+    dim_ranges: Vec<(f64, f64)>,
+    num_bands: usize,
+    /// 재구축 필요 여부.
+    pub dirty: bool,
+}
+
+impl ResonanceMap {
+    fn empty() -> Self {
+        Self {
+            intent_to_pool: HashMap::new(),
+            pool_best: Vec::new(),
+            wave_map: HashMap::new(),
+            selected_dims: Vec::new(),
+            dim_ranges: Vec::new(),
+            num_bands: 4,
+            dirty: false,
+        }
+    }
+
+    /// 풀 데이터로부터 공명 맵 구축.
+    ///
+    /// Level 1: 의도→풀 매핑 + 풀별 최고 적합도 엔트리 (정상파 피크)
+    /// Level 2: Fisher 판별 기반 파동 양자화 맵 (폴백용)
+    fn build(pools: &[ResponsePool], num_dims: usize, num_bands: usize) -> Self {
+        if pools.is_empty() {
+            return Self::empty();
+        }
+
+        // ── Level 1: 의도 → 풀 매핑 + 풀별 최고 적합도 엔트리 ──
+        let mut intent_to_pool: HashMap<String, usize> = HashMap::new();
+        let mut pool_best: Vec<usize> = Vec::with_capacity(pools.len());
+
+        for (pi, pool) in pools.iter().enumerate() {
+            intent_to_pool.insert(pool.intent.clone(), pi);
+            // 출현 풀: 부모 의도도 매핑 (이미 있으면 덮어쓰지 않음)
+            if pool.is_emergent {
+                if let Some((ref pa, ref pb)) = pool.parent_intents {
+                    intent_to_pool.entry(pa.clone()).or_insert(pi);
+                    intent_to_pool.entry(pb.clone()).or_insert(pi);
+                }
+            }
+            // 최고 적합도 엔트리
+            let best_idx = pool.entries.iter().enumerate()
+                .max_by(|(_, a), (_, b)| {
+                    a.fitness.partial_cmp(&b.fitness)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+                .map(|(i, _)| i)
+                .unwrap_or(0);
+            pool_best.push(best_idx);
+        }
+
+        // ── Level 2: Fisher 판별 기반 파동 양자화 맵 ──
+        let mut all_entries: Vec<(&[f64], f64, usize, usize)> = Vec::new();
+        for (pi, pool) in pools.iter().enumerate() {
+            for (ei, entry) in pool.entries.iter().enumerate() {
+                all_entries.push((&entry.features, entry.fitness, pi, ei));
+            }
+        }
+
+        if all_entries.is_empty() {
+            return Self {
+                intent_to_pool, pool_best,
+                wave_map: HashMap::new(),
+                selected_dims: Vec::new(),
+                dim_ranges: Vec::new(),
+                num_bands,
+                dirty: false,
+            };
+        }
+
+        let feat_dim = all_entries[0].0.len();
+        let actual_dims = num_dims.min(feat_dim);
+
+        if actual_dims == 0 {
+            return Self {
+                intent_to_pool, pool_best,
+                wave_map: HashMap::new(),
+                selected_dims: Vec::new(),
+                dim_ranges: Vec::new(),
+                num_bands,
+                dirty: false,
+            };
+        }
+
+        // Fisher 판별 기준으로 상위 K 차원 선택
+        let n = all_entries.len() as f64;
+        let pool_means: Vec<Vec<f64>> = pools.iter().map(|pool| {
+            if pool.entries.is_empty() {
+                vec![0.0; feat_dim]
+            } else {
+                let pn = pool.entries.len() as f64;
+                (0..feat_dim).map(|d| {
+                    pool.entries.iter().map(|e| e.features[d]).sum::<f64>() / pn
+                }).collect()
+            }
+        }).collect();
+        let grand_mean: Vec<f64> = (0..feat_dim).map(|d| {
+            all_entries.iter().map(|e| e.0[d]).sum::<f64>() / n
+        }).collect();
+
+        let mut fisher: Vec<(usize, f64)> = (0..feat_dim).map(|d| {
+            let sb: f64 = pools.iter().enumerate()
+                .map(|(pi, pool)| {
+                    pool.entries.len() as f64 * (pool_means[pi][d] - grand_mean[d]).powi(2)
+                })
+                .sum::<f64>() / n;
+            let sw: f64 = pools.iter().enumerate()
+                .map(|(pi, pool)| {
+                    pool.entries.iter()
+                        .map(|e| (e.features[d] - pool_means[pi][d]).powi(2))
+                        .sum::<f64>()
+                })
+                .sum::<f64>() / n;
+            let ratio = if sw > 1e-10 { sb / sw } else { 0.0 };
+            (d, ratio)
+        }).collect();
+        fisher.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        let selected_dims: Vec<usize> = fisher.iter()
+            .take(actual_dims).map(|&(d, _)| d).collect();
+
+        let dim_ranges: Vec<(f64, f64)> = selected_dims.iter().map(|&d| {
+            let min = all_entries.iter().map(|e| e.0[d]).fold(f64::MAX, f64::min);
+            let max = all_entries.iter().map(|e| e.0[d]).fold(f64::MIN, f64::max);
+            (min, max)
+        }).collect();
+
+        // 각 엔트리를 양자화하여 버킷에 배치
+        let mut bucket_entries: HashMap<u64, Vec<(f64, usize, usize)>> = HashMap::new();
+        for &(features, fitness, pi, ei) in &all_entries {
+            let key = resonance_quantize(features, &selected_dims, &dim_ranges, num_bands);
+            bucket_entries.entry(key).or_default().push((fitness, pi, ei));
+        }
+
+        let mut wave_map: HashMap<u64, (usize, usize)> = HashMap::new();
+        for (key, bucket) in &bucket_entries {
+            let best = bucket.iter()
+                .max_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal))
+                .unwrap();
+            wave_map.insert(*key, (best.1, best.2));
+        }
+
+        // 빈 버킷을 가장 가까운 점유 버킷으로 채움
+        let total_buckets = (num_bands as u64).pow(actual_dims as u32);
+        let occupied: Vec<u64> = wave_map.keys().copied().collect();
+        if !occupied.is_empty() && total_buckets <= 100_000 {
+            for key in 0..total_buckets {
+                if !wave_map.contains_key(&key) {
+                    let nearest = resonance_nearest_key(
+                        key, &occupied, actual_dims, num_bands,
+                    );
+                    if let Some(&entry) = wave_map.get(&nearest) {
+                        wave_map.insert(key, entry);
+                    }
+                }
+            }
+        }
+
+        Self {
+            intent_to_pool, pool_best,
+            wave_map, selected_dims, dim_ranges, num_bands,
+            dirty: false,
+        }
+    }
+
+    /// O(1) 의도 기반 공명 탐색 (Level 1).
+    /// 분류기의 최상위 의도 → 해당 풀의 최고 적합도 엔트리.
+    fn lookup_by_intent(&self, intent: &str) -> Option<(usize, usize)> {
+        let &pool_idx = self.intent_to_pool.get(intent)?;
+        let entry_idx = self.pool_best.get(pool_idx).copied()?;
+        Some((pool_idx, entry_idx))
+    }
+
+    /// O(1) 파동 기반 공명 탐색 (Level 2, 폴백).
+    fn lookup_by_wave(&self, features: &[f64]) -> Option<(usize, usize)> {
+        if self.wave_map.is_empty() {
+            return None;
+        }
+        let key = resonance_quantize(
+            features, &self.selected_dims, &self.dim_ranges, self.num_bands,
+        );
+        self.wave_map.get(&key).copied()
+    }
+}
+
+/// 특징 벡터를 양자화된 키로 변환.
+fn resonance_quantize(
+    features: &[f64],
+    selected_dims: &[usize],
+    dim_ranges: &[(f64, f64)],
+    num_bands: usize,
+) -> u64 {
+    let mut key: u64 = 0;
+    for (i, &dim) in selected_dims.iter().enumerate() {
+        let val = features.get(dim).copied().unwrap_or(0.0);
+        let (min, max) = dim_ranges[i];
+        let range = max - min;
+        let band = if range > 1e-10 {
+            let norm = ((val - min) / range).clamp(0.0, 1.0);
+            (norm * num_bands as f64).min(num_bands as f64 - 1.0) as u64
+        } else {
+            0
+        };
+        key = key * num_bands as u64 + band;
+    }
+    key
+}
+
+/// 키를 대역 좌표로 디코딩.
+fn resonance_decode_key(key: u64, dims: usize, bands: usize) -> Vec<u64> {
+    let mut coords = vec![0u64; dims];
+    let mut k = key;
+    for i in (0..dims).rev() {
+        coords[i] = k % bands as u64;
+        k /= bands as u64;
+    }
+    coords
+}
+
+/// 가장 가까운 점유 키 찾기 (L1 거리).
+fn resonance_nearest_key(target: u64, occupied: &[u64], dims: usize, bands: usize) -> u64 {
+    let tc = resonance_decode_key(target, dims, bands);
+    let mut best = occupied[0];
+    let mut best_dist = u64::MAX;
+    for &k in occupied {
+        let kc = resonance_decode_key(k, dims, bands);
+        let dist: u64 = tc.iter().zip(kc.iter())
+            .map(|(&a, &b)| (a as i64 - b as i64).unsigned_abs())
+            .sum();
+        if dist < best_dist {
+            best_dist = dist;
+            best = k;
+        }
+    }
+    best
+}
+
+// ---------------------------------------------------------------------------
+// SemanticProjection — 파동 → 의미 축 투영
+// ---------------------------------------------------------------------------
+
+/// 의미 투영: 파동 공간에서 의미 축을 추출하여 의도를 판별.
+///
+/// 물리 비유: 프리즘이 백색광을 스펙트럼으로 분해하듯,
+/// 의미 투영은 혼합된 파동 특징을 의도별 의미 축으로 분해한다.
+///
+/// 핵심 차이 (기존 파동 클러스터링 vs 의미 투영):
+///   기존: 응답 파동의 중심과 입력 파동을 비교 → 도메인 불일치 (9.2%)
+///   의미 투영: 훈련 입력 파동의 중심에서 의미 축 추출 → 같은 도메인 (입력↔입력)
+///
+/// 구축 (오프라인):
+///   1. 훈련 입력을 파동 인코딩 → 풀별 그룹화
+///   2. 풀별 중심 계산 (입력 공간에서!)
+///   3. 전체 평균 제거 → 공통 파동 성분 소거
+///   4. 정규화 → 단위 의미 축
+///
+/// 분류 (런타임):
+///   입력 파동 → 중심 이동 → 각 의미 축에 투영 → argmax → 의도
+///   O(P × D) — 키워드 불필요, 순수 파동 기반
+pub struct SemanticProjection {
+    /// 훈련 입력의 파동 특징 + 풀 인덱스 (k-NN용).
+    training_data: Vec<(Vec<f64>, usize)>,
+    /// 풀 수.
+    num_pools: usize,
+    /// k-NN의 k값.
+    k: usize,
+}
+
+impl SemanticProjection {
+    fn empty() -> Self {
+        Self {
+            training_data: Vec::new(),
+            num_pools: 0,
+            k: 5,
+        }
+    }
+
+    /// 훈련 데이터로부터 의미 공간 구축 (k-NN).
+    ///
+    /// 핵심: 중심(centroid)은 정보를 평균화하여 잃는다.
+    /// k-NN은 모든 훈련 샘플을 보존하고, 국소 구조를 사용.
+    ///
+    /// 물리 비유: 중심은 "하나의 대표 주파수"로 요약하는 것 (정보 손실).
+    /// k-NN은 "모든 주파수 스펙트럼"을 보존하고,
+    /// 새 파동이 어떤 기존 파동들과 가장 공명하는지를 직접 측정.
+    fn build(engine: &WaveTextEngine, pools: &[ResponsePool], depth: usize, num_slits: usize) -> Self {
+        let (labeled, class_labels) = chat_classification_data();
+
+        if pools.is_empty() || labeled.is_empty() {
+            return Self::empty();
+        }
+
+        let num_pools = pools.len();
+
+        // 클래스 라벨 → 풀 인덱스 매핑
+        let label_to_pool: HashMap<&str, usize> = pools.iter().enumerate()
+            .map(|(i, p)| (p.intent.as_str(), i))
+            .collect();
+
+        // 모든 훈련 입력의 파동 특징을 저장 (k-NN 참조 집합)
+        let mut training_data: Vec<(Vec<f64>, usize)> = Vec::new();
+        for &(input, class_id) in &labeled {
+            if class_id < class_labels.len() {
+                if let Some(&pool_idx) = label_to_pool.get(class_labels[class_id].as_str()) {
+                    let state = engine.process_text_deep(input, depth, num_slits);
+                    let features = state.to_feature_vector();
+                    training_data.push((features, pool_idx));
+                }
+            }
+        }
+
+        Self { training_data, num_pools, k: 7 }
+    }
+
+    /// k-NN 분류: 입력 파동과 가장 공명하는 k개 훈련 샘플의 가중 투표.
+    /// 반환: (풀별 투표 점수, 최적 풀 인덱스).
+    fn classify(&self, features: &[f64]) -> (Vec<f64>, usize) {
+        if self.training_data.is_empty() {
+            return (Vec::new(), 0);
+        }
+
+        // 모든 훈련 샘플과의 코사인 유사도 계산
+        let mut sims: Vec<(f64, usize)> = self.training_data.iter()
+            .map(|(tf, pool_idx)| {
+                (cosine_similarity(features, tf), *pool_idx)
+            })
+            .collect();
+        sims.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+
+        // k-NN 가중 투표: 유사도가 높을수록 강한 투표
+        let mut votes = vec![0.0; self.num_pools];
+        for &(sim, pool_idx) in sims.iter().take(self.k) {
+            if pool_idx < votes.len() {
+                votes[pool_idx] += sim;
+            }
+        }
+
+        let best = votes.iter().enumerate()
+            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+            .map(|(i, _)| i)
+            .unwrap_or(0);
+
+        (votes, best)
+    }
+}
+
+// ---------------------------------------------------------------------------
 // GenerationConfig — wave-based text generation settings
 // ---------------------------------------------------------------------------
 
@@ -316,6 +707,10 @@ pub struct ChatEngine {
     // Auto-feedback: system self-judges responses by confidence
     pub auto_feedback: bool,
     pub auto_feedback_threshold: f64,
+    // Resonance map: O(1) wave-signature lookup
+    resonance_map: ResonanceMap,
+    // Semantic projection: 파동 → 의미 축 투영 (키워드 불필요)
+    semantic: SemanticProjection,
     // Internal
     query_count: usize,
     mutation_counter: u64,
@@ -334,6 +729,10 @@ impl ChatEngine {
         config: GrowthConfig,
     ) -> Self {
         let initial_fitness = config.initial_fitness;
+        let depth = config.depth;
+        let num_slits = config.num_slits;
+        let res_dims = config.resonance_dims;
+        let res_bands = config.resonance_bands;
         let mut pool_map: std::collections::BTreeMap<String, ResponsePool> =
             std::collections::BTreeMap::new();
 
@@ -348,7 +747,7 @@ impl ChatEngine {
             });
             for resp_str in &intent.responses {
                 let s = resp_str.to_string();
-                let state = engine.process_text(&s);
+                let state = engine.process_text_deep(&s, depth, num_slits);
                 let feat = state.to_feature_vector();
                 entry.entries.push(ResponseEntry {
                     text: s,
@@ -367,6 +766,8 @@ impl ChatEngine {
         let pools: Vec<ResponsePool> = pool_map.into_values().collect();
         let labels: Vec<String> = pools.iter().map(|p| p.intent.clone()).collect();
         let co_resonance = CoResonanceMatrix::new(labels);
+        let resonance_map = ResonanceMap::build(&pools, res_dims, res_bands);
+        let semantic = SemanticProjection::build(&engine, &pools, depth, num_slits);
 
         Self {
             engine,
@@ -385,120 +786,100 @@ impl ChatEngine {
             last_gen_pool_id: None,
             auto_feedback: false,
             auto_feedback_threshold: 0.15,
+            resonance_map,
+            semantic,
             query_count: 0,
             mutation_counter: 0,
         }
     }
 
-    /// Respond to user input — vector-weighted search across all pools.
+    /// 공명 맵 재구축.
+    fn build_resonance_map(&mut self) {
+        self.resonance_map = ResonanceMap::build(
+            &self.pools,
+            self.growth.resonance_dims,
+            self.growth.resonance_bands,
+        );
+    }
+
+    /// Respond to user input — 의미 투영 + 공명 맵 O(1) 탐색.
     ///
-    /// Intent is a continuous probability vector from the classifier.
-    /// Score = cosine_sim(input, response) * sqrt(fitness) * exp(W * intent_prob).
-    /// No discrete gate — all pools are searched with continuous weighting.
+    /// 프리즘 원리: 입력 파동을 의미 축에 투영하여 의도를 판별.
+    /// 키워드 패턴 불필요 — 파동 구조에서 의미를 직접 추출.
     pub fn respond(&mut self, input: &str) -> ChatResponse {
-        let input_state = self.engine.process_text(input);
+        // 공명 맵 재구축 (dirty 시)
+        if self.resonance_map.dirty {
+            self.build_resonance_map();
+        }
+
+        let input_state = self.engine.process_text_deep(input, self.growth.depth, self.growth.num_slits);
         let input_features = input_state.to_feature_vector();
 
         self.stats.total_queries += 1;
         self.query_count += 1;
 
-        // Intent as continuous vector: classifier probability distribution
-        let intent_probs: Vec<(String, f64)> = if let Some(result) = self.engine.classify(input) {
-            result.class_probs.clone()
-        } else {
-            Vec::new()
-        };
-
-        let top_confidence = intent_probs.first().map(|(_, p)| *p).unwrap_or(0.0);
-        let intent_weight = self.growth.intent_weight;
-
-        // Single-pass weighted search across ALL pools
-        let mut best_response = String::new();
-        let mut best_intent = String::from("unknown");
-        let mut best_score: f64 = f64::NEG_INFINITY;
-        let mut best_pool_id: usize = 0;
-        let mut best_resp_id: usize = 0;
-
-        let mut pool_max_scores: Vec<(usize, f64)> = Vec::new();
-
-        for (pool_idx, pool) in self.pools.iter().enumerate() {
-            // Continuous intent probability for this pool
-            let intent_prob = if pool.is_emergent {
-                // Emergent pools: max of parent intent probabilities
-                pool.parent_intents.as_ref().map_or(0.0, |(pa, pb)| {
-                    let p_a = intent_probs.iter().find(|(l, _)| l == pa).map(|(_, p)| *p).unwrap_or(0.0);
-                    let p_b = intent_probs.iter().find(|(l, _)| l == pb).map(|(_, p)| *p).unwrap_or(0.0);
-                    p_a.max(p_b)
-                })
+        // ── 분류기 + 공명 맵: 학습된 파동 양자화 → O(1) 탐색 ──
+        let (top_intent_name, top_confidence, intent_probs) =
+            if let Some(result) = self.engine.classify(input) {
+                let name = result.class_label.clone();
+                let conf = result.confidence;
+                let probs = result.class_probs.clone();
+                (name, conf, probs)
             } else {
-                intent_probs.iter()
-                    .find(|(l, _)| l == &pool.intent)
-                    .map(|(_, p)| *p)
-                    .unwrap_or(0.0)
+                (String::new(), 0.0, Vec::new())
             };
 
-            let mut pool_max: f64 = f64::NEG_INFINITY;
+        let (best_pool_id, best_resp_id) = self.resonance_map
+            .lookup_by_intent(&top_intent_name)
+            .or_else(|| self.resonance_map.lookup_by_wave(&input_features))
+            .unwrap_or((0, 0));
 
-            for (entry_idx, entry) in pool.entries.iter().enumerate() {
-                let cosine = cosine_similarity(&input_features, &entry.features);
-                let score = cosine * entry.fitness.sqrt() * (intent_weight * intent_prob).exp();
+        // 결과 추출
+        let (best_response, best_intent, resonance) =
+            if best_pool_id < self.pools.len()
+                && best_resp_id < self.pools[best_pool_id].entries.len()
+            {
+                let entry = &self.pools[best_pool_id].entries[best_resp_id];
+                let r = cosine_similarity(&input_features, &entry.features);
+                (entry.text.clone(), self.pools[best_pool_id].intent.clone(), r)
+            } else {
+                (String::new(), String::from("unknown"), 0.0)
+            };
 
-                if cosine > pool_max { pool_max = cosine; }
-
-                if score > best_score {
-                    best_score = score;
-                    best_response = entry.text.clone();
-                    best_intent = pool.intent.clone();
-                    best_pool_id = pool_idx;
-                    best_resp_id = entry_idx;
-                }
-            }
-            if pool_max > f64::NEG_INFINITY {
-                pool_max_scores.push((pool_idx, pool_max));
-            }
-        }
-
-        // Update select_count
+        // 선택 카운트 갱신
         if best_pool_id < self.pools.len()
             && best_resp_id < self.pools[best_pool_id].entries.len()
         {
             self.pools[best_pool_id].entries[best_resp_id].select_count += 1;
         }
 
-        // Co-resonance update: pairs with both scores >= 0.3
+        // 공명 기록: 의미 확률이 높은 의도 간 co-resonance
         let co_threshold = 0.3;
-        for i in 0..pool_max_scores.len() {
-            for j in (i + 1)..pool_max_scores.len() {
-                let (idx_a, score_a) = pool_max_scores[i];
-                let (idx_b, score_b) = pool_max_scores[j];
-                if score_a >= co_threshold && score_b >= co_threshold {
-                    let intent_a = self.pools[idx_a].intent.clone();
-                    let intent_b = self.pools[idx_b].intent.clone();
-                    let value = score_a.min(score_b);
-                    self.co_resonance.record(&intent_a, &intent_b, value);
-                }
+        for (intent, prob) in &intent_probs {
+            if *prob >= co_threshold && intent != &best_intent {
+                self.co_resonance.record(&best_intent, intent, *prob);
             }
         }
 
-        // Auto growth cycle
+        // 자동 성장 사이클
         if self.query_count % self.growth.cycle_interval == 0 {
             self.growth_cycle();
         }
 
-        // Self-learning state
+        // 자기학습 상태
         self.last_input = Some(input.to_string());
         self.last_class_id = self.engine.classifier.as_ref()
             .and_then(|c| c.class_labels.iter().position(|l| l == &best_intent));
 
-        // Auto-feedback: high-confidence responses get automatic positive feedback
+        // 자동 피드백
         if self.auto_feedback && top_confidence >= self.auto_feedback_threshold {
             if best_pool_id < self.pools.len()
                 && best_resp_id < self.pools[best_pool_id].entries.len()
             {
                 self.pools[best_pool_id].entries[best_resp_id].fitness += self.growth.positive_boost;
                 self.stats.positive_feedbacks += 1;
+                self.resonance_map.dirty = true;
 
-                // Also accumulate self-learning experience
                 if self.self_learning.enabled {
                     if let (Some(ref inp), Some(cid)) = (&self.last_input, self.last_class_id) {
                         self.experience.push((inp.clone(), cid));
@@ -512,7 +893,7 @@ impl ChatEngine {
             response: best_response,
             intent: best_intent,
             confidence: top_confidence,
-            resonance: best_score,
+            resonance,
             pool_id: best_pool_id,
             response_id: best_resp_id,
             is_generated: false,
@@ -530,6 +911,8 @@ impl ChatEngine {
         if response_id >= pool.entries.len() {
             return;
         }
+
+        self.resonance_map.dirty = true;
 
         if positive {
             pool.entries[response_id].fitness += self.growth.positive_boost;
@@ -576,7 +959,7 @@ impl ChatEngine {
             return;
         }
 
-        let state = self.engine.process_text(generated_text);
+        let state = self.engine.process_text_deep(generated_text, self.growth.depth, self.growth.num_slits);
         let features = state.to_feature_vector();
         pool.entries.push(ResponseEntry {
             text: generated_text.to_string(),
@@ -590,6 +973,7 @@ impl ChatEngine {
             gen_uses: 1,
         });
         self.stats.gen_boosts += 1;
+        self.resonance_map.dirty = true;
     }
 
     /// Provide correct intent when the system was wrong (Level 4 self-learning).
@@ -724,6 +1108,7 @@ impl ChatEngine {
         self.prune_low_fitness();
         self.check_emergence();
         self.replicate_high_fitness();
+        self.resonance_map.dirty = true;
     }
 
     /// Stabilization: run N growth cycles with self-learning disabled.
@@ -1009,7 +1394,7 @@ impl ChatEngine {
     ///   6. Fallback to seed response if generation fails
     pub fn generate_response(&mut self, input: &str) -> ChatResponse {
         let input_ids = self.engine.bpe.encode(input);
-        let input_state = self.engine.process_text(input);
+        let input_state = self.engine.process_text_deep(input, self.growth.depth, self.growth.num_slits);
         let input_features = input_state.to_feature_vector();
 
         // Vector-based seed selection: top-3 from different pools
@@ -1232,7 +1617,7 @@ impl ChatEngine {
         // Rebuild pools with recomputed wave/features
         self.pools = data.pools.into_iter().map(|sp| {
             let entries = sp.entries.into_iter().map(|se| {
-                let state = self.engine.process_text(&se.text);
+                let state = self.engine.process_text_deep(&se.text, self.growth.depth, self.growth.num_slits);
                 let features = state.to_feature_vector();
                 ResponseEntry {
                     text: se.text,
@@ -1287,6 +1672,12 @@ impl ChatEngine {
         if !self.experience.is_empty() && self.self_learning.enabled {
             self.retrain_from_experience();
         }
+
+        // 공명 맵 + 의미 투영 재구축
+        self.build_resonance_map();
+        self.semantic = SemanticProjection::build(
+            &self.engine, &self.pools, self.growth.depth, self.growth.num_slits,
+        );
 
         Ok(())
     }

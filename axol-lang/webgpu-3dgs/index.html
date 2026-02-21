@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>AXOL vs Radix Sort — WebGPU 3DGS Demo</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:#0a0a12; overflow:hidden; font-family:'Segoe UI',system-ui,sans-serif; color:#eee; }
+canvas { width:100vw; height:100vh; display:block; }
+
+#ui {
+  position:fixed; top:16px; left:16px;
+  background:rgba(10,10,20,0.85); border:1px solid rgba(255,255,255,0.1);
+  border-radius:12px; padding:16px 20px; min-width:260px;
+  backdrop-filter:blur(10px); z-index:10;
+}
+#ui h1 { font-size:15px; font-weight:700; margin-bottom:10px; color:#fff; }
+#ui h1 span { color:#F0AD4E; }
+
+.row { display:flex; align-items:center; margin:6px 0; gap:8px; }
+.label { font-size:11px; color:#999; min-width:70px; }
+.value { font-size:13px; font-weight:600; }
+
+.btn-group { display:flex; gap:4px; flex-wrap:wrap; }
+.btn {
+  padding:5px 12px; border:1px solid rgba(255,255,255,0.15); border-radius:6px;
+  background:rgba(255,255,255,0.05); color:#ccc; font-size:11px; cursor:pointer;
+  transition:all 0.2s;
+}
+.btn:hover { background:rgba(255,255,255,0.12); }
+.btn.active { background:#F0AD4E; color:#000; border-color:#F0AD4E; font-weight:600; }
+.btn.active-radix { background:#E74C3C; color:#fff; border-color:#E74C3C; font-weight:600; }
+.btn.active-none { background:#666; color:#fff; border-color:#666; font-weight:600; }
+
+#fps { font-size:28px; font-weight:700; color:#5CB85C; }
+#frameTime { font-size:16px; color:#F0AD4E; }
+#quality { font-size:11px; color:#888; margin-top:8px; line-height:1.5; }
+
+#fallback {
+  display:none; position:fixed; inset:0; background:#0a0a12;
+  justify-content:center; align-items:center; flex-direction:column; gap:16px; z-index:100;
+  font-size:18px; color:#E74C3C;
+}
+</style>
+</head>
+<body>
+
+<canvas id="canvas"></canvas>
+
+<div id="ui">
+  <h1><span>AXOL</span> vs Radix — 3DGS Sort Demo</h1>
+
+  <div class="row">
+    <span class="label">Sort</span>
+    <div class="btn-group" id="sortBtns">
+      <button class="btn active-none" data-sort="none">No Sort</button>
+      <button class="btn active" data-sort="axol">AXOL Scatter</button>
+      <button class="btn" data-sort="radix">Radix Sort</button>
+    </div>
+  </div>
+
+  <div class="row">
+    <span class="label">Splats</span>
+    <div class="btn-group" id="countBtns">
+      <button class="btn" data-count="50000">50K</button>
+      <button class="btn active" data-count="200000">200K</button>
+      <button class="btn" data-count="500000">500K</button>
+    </div>
+  </div>
+
+  <div class="row" style="margin-top:12px;">
+    <span class="label">FPS</span>
+    <span class="value" id="fps">--</span>
+  </div>
+  <div class="row">
+    <span class="label">Frame</span>
+    <span class="value" id="frameTime">-- ms</span>
+  </div>
+
+  <div id="quality"></div>
+</div>
+
+<div id="fallback">
+  <p>WebGPU is not supported.<br>Use Chrome 113+ or Edge 113+.</p>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

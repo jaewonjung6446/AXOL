@@ -1,0 +1,11 @@
+D:\Unity\Izakoza\AXOL\axol-lang\target\release\deps\py_literal-dfb26205201c17dd.d: C:\Users\jaewo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\py_literal-0.4.0\src\lib.rs C:\Users\jaewo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\py_literal-0.4.0\src\format.rs C:\Users\jaewo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\py_literal-0.4.0\src\parse_macros.rs C:\Users\jaewo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\py_literal-0.4.0\src\parse.rs C:\Users\jaewo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\py_literal-0.4.0\src/grammar.pest
+
+D:\Unity\Izakoza\AXOL\axol-lang\target\release\deps\libpy_literal-dfb26205201c17dd.rlib: C:\Users\jaewo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\py_literal-0.4.0\src\lib.rs C:\Users\jaewo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\py_literal-0.4.0\src\format.rs C:\Users\jaewo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\py_literal-0.4.0\src\parse_macros.rs C:\Users\jaewo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\py_literal-0.4.0\src\parse.rs C:\Users\jaewo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\py_literal-0.4.0\src/grammar.pest
+
+D:\Unity\Izakoza\AXOL\axol-lang\target\release\deps\libpy_literal-dfb26205201c17dd.rmeta: C:\Users\jaewo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\py_literal-0.4.0\src\lib.rs C:\Users\jaewo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\py_literal-0.4.0\src\format.rs C:\Users\jaewo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\py_literal-0.4.0\src\parse_macros.rs C:\Users\jaewo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\py_literal-0.4.0\src\parse.rs C:\Users\jaewo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\py_literal-0.4.0\src/grammar.pest
+
+C:\Users\jaewo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\py_literal-0.4.0\src\lib.rs:
+C:\Users\jaewo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\py_literal-0.4.0\src\format.rs:
+C:\Users\jaewo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\py_literal-0.4.0\src\parse_macros.rs:
+C:\Users\jaewo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\py_literal-0.4.0\src\parse.rs:
+C:\Users\jaewo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\py_literal-0.4.0\src/grammar.pest:

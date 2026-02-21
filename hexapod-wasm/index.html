@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>WTE Hexapod — Interactive Demo</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { overflow: hidden; background: #0d1117; font-family: 'Consolas','D2Coding',monospace; }
+canvas { display: block; }
+
+#hud { position: absolute; top: 16px; left: 16px; color: #c9d1d9; pointer-events: none; }
+#hud > * { pointer-events: auto; }
+.panel { background: rgba(13,17,23,0.85); border: 1px solid #30363d; border-radius: 10px;
+  padding: 14px 20px; margin-bottom: 10px; backdrop-filter: blur(8px); min-width: 230px; }
+.panel h3 { margin: 0 0 10px; color: #58a6ff; font-size: 15px; letter-spacing: 1px; }
+.stat { display: flex; justify-content: space-between; margin: 5px 0; font-size: 13px; }
+.stat .val { color: #58a6ff; font-weight: bold; }
+#speed-bar { width: 100%; height: 6px; background: #21262d; border-radius: 3px; margin-top: 10px; }
+#speed-fill { height: 100%; border-radius: 3px; transition: width 0.15s; }
+.btn-row { margin-top: 10px; display: flex; gap: 6px; flex-wrap: wrap; }
+button { background: #21262d; border: 1px solid #30363d; color: #c9d1d9;
+  padding: 7px 14px; border-radius: 6px; cursor: pointer; font-family: inherit; font-size: 12px; }
+button:hover { background: #30363d; }
+button.danger { border-color: #da3633; color: #f85149; }
+button.danger:hover { background: #da363330; }
+
+#keys { position: absolute; bottom: 16px; right: 16px; pointer-events: none; }
+.key-grid { display: grid; grid-template-columns: 40px 40px 40px; gap: 4px; }
+.key { width: 40px; height: 36px; background: rgba(33,38,45,0.8); border: 1px solid #30363d;
+  border-radius: 6px; display: flex; align-items: center; justify-content: center;
+  color: #484f58; font-size: 14px; font-weight: bold; }
+.key.active { background: #1f6feb; color: #fff; border-color: #58a6ff; }
+
+#help { position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%);
+  color: #484f58; font-size: 13px; text-align: center; pointer-events: none; }
+
+.banner { position: absolute; top: 60px; left: 50%; transform: translateX(-50%);
+  background: #da3633; color: #fff; padding: 10px 28px; border-radius: 10px;
+  font-size: 20px; font-weight: bold; opacity: 0; transition: opacity 0.3s;
+  pointer-events: none; z-index: 10; }
+.banner.ok { background: #238636; }
+.banner.show { opacity: 1; }
+
+#loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+  color: #58a6ff; font-size: 18px; }
+</style>
+</head>
+<body>
+<div id="loading">Loading WASM...</div>
+<div id="hud" style="display:none">
+  <div class="panel">
+    <h3>WTE HEXAPOD</h3>
+    <div style="font-size:11px;color:#8b949e;margin:-6px 0 10px">Artificial Instinct Demo</div>
+    <div class="stat"><span>Speed</span><span class="val" id="vSpeed">0.000 m/s</span></div>
+    <div class="stat"><span>Legs</span><span class="val" id="vLegs">6 / 6</span></div>
+    <div class="stat"><span>Pool</span><span class="val" id="vPool">20</span></div>
+    <div class="stat"><span>Fitness</span><span class="val" id="vFit">0.0000</span></div>
+    <div class="stat"><span>Distance</span><span class="val" id="vDist">0.0 m</span></div>
+    <div id="speed-bar"><div id="speed-fill"></div></div>
+    <div class="btn-row">
+      <button onclick="doReset()">Reset</button>
+      <button onclick="doRestore()">Restore All</button>
+      <button class="danger" onclick="randomRemove()">Damage</button>
+    </div>
+  </div>
+</div>
+<div id="keys">
+  <div class="key-grid">
+    <div></div><div class="key" id="kW">W</div><div></div>
+    <div class="key" id="kA">A</div><div class="key" id="kS">S</div><div class="key" id="kD">D</div>
+  </div>
+  <div style="color:#484f58;font-size:10px;text-align:center;margin-top:6px">Click leg to remove</div>
+</div>
+<div class="banner" id="banner"></div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import init, { HexapodWasm } from './pkg/hexapod_wasm.js';
+
+// ── Layout ──
+const LEG_NAMES = ['L1 Front','R1 Front','L2 Mid','R2 Mid','L3 Rear','R3 Rear'];
+// Hip positions in robot-local coords: [along body, 0, lateral]
+// X = forward, Z = left(+)/right(-)
+const HIP_LOCAL = [
+  [0.35, 0, 0.26],  // L1 front-left
+  [0.35, 0, -0.26], // R1 front-right
+  [0.0,  0, 0.28],  // L2 mid-left
+  [0.0,  0, -0.28], // R2 mid-right
+  [-0.35, 0, 0.26], // L3 rear-left
+  [-0.35, 0, -0.26],// R3 rear-right
+];
+const LEG_DIR = [1, -1, 1, -1, 1, -1];
+
+const BODY_Y = 0.38;
+const LEG_REACH = 0.38;
+const COL_STANCE = 0x3fb950;
+const COL_SWING = 0xd29922;
+const COL_DEAD = 0xda3633;
+const COL_BODY = 0x1f6feb;
+
+let wasm, scene, camera, renderer, controls;
+let hexGroup, bodyMesh, legData = [], legClickTargets = [];
+let lastPx = 0, lastPz = 0, bodyBobY = BODY_Y;
+const keys = {};
+let bannerTimeout;
+
+// ── Init ──
+async function main() {
+  await init();
+  wasm = new HexapodWasm();
+  lastPx = wasm.pos_x();
+  lastPz = wasm.pos_z();
+  document.getElementById('loading').style.display = 'none';
+  document.getElementById('hud').style.display = 'block';
+
+  initThree();
+  buildWorld();
+  buildHexapod();
+  initInput();
+  animate();
+}
+main();
+
+function initThree() {
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x0a0e14);
+  scene.fog = new THREE.FogExp2(0x0a0e14, 0.04);
+
+  camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.1, 200);
+  camera.position.set(lastPx - 1.5, 2.0, lastPz + 2.5);
+
+  renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(innerWidth, innerHeight);
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.1;
+  document.body.prepend(renderer.domElement);
+
+  controls = new OrbitControls(camera, renderer.domElement);
+  controls.target.set(lastPx, 0.25, lastPz);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.08;
+  controls.maxPolarAngle = Math.PI * 0.48;
+  controls.minDistance = 1.2;
+  controls.maxDistance = 8;
+  controls.update();
+
+  // Lights
+  scene.add(new THREE.AmbientLight(0x8b949e, 0.6));
+
+  const sun = new THREE.DirectionalLight(0xffeedd, 1.8);
+  sun.position.set(5, 8, 3);
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(2048, 2048);
+  sun.shadow.camera.left = -6; sun.shadow.camera.right = 6;
+  sun.shadow.camera.top = 6; sun.shadow.camera.bottom = -6;
+  sun.shadow.camera.near = 1; sun.shadow.camera.far = 30;
+  sun.shadow.bias = -0.001;
+  scene.add(sun);
+  scene.add(new THREE.DirectionalLight(0x58a6ff, 0.3).translateX(-3).translateY(4).translateZ(-2));
+
+  window.addEventListener('resize', () => {
+    camera.aspect = innerWidth / innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(innerWidth, innerHeight);
+  });
+  renderer.domElement.addEventListener('click', onClick);
+}
+
+// ── 3D World ──
+function buildWorld() {
+  // Ground plane (shadow receiver)
+  const planeMat = new THREE.MeshStandardMaterial({
+    color: 0x161b22, roughness: 0.95, metalness: 0.0
+  });
+  const plane = new THREE.Mesh(new THREE.PlaneGeometry(200, 200), planeMat);
+  plane.rotation.x = -Math.PI / 2;
+  plane.receiveShadow = true;
+  scene.add(plane);
+
+  // Ground grid
+  const grid = new THREE.GridHelper(200, 200, 0x21262d, 0x1a1f27);
+  grid.position.y = 0.002;
+  scene.add(grid);
+
+  // Scattered pillars (landmarks)
+  const pillarGeo = new THREE.CylinderGeometry(0.15, 0.2, 1.5, 6);
+  const pillarMat = new THREE.MeshStandardMaterial({ color: 0x30363d, roughness: 0.7 });
+  const positions = [
+    [4, 3], [-3, 5], [8, -2], [-6, -4], [2, -6], [10, 4], [-8, 2], [6, 7],
+    [-5, -7], [12, -5], [-10, 6], [15, 1], [-2, 9], [7, -8], [-9, -3],
+  ];
+  for (const [px, pz] of positions) {
+    const h = 0.8 + Math.random() * 1.2;
+    const p = new THREE.Mesh(pillarGeo, pillarMat);
+    p.position.set(px, h / 2, pz);
+    p.scale.y = h / 1.5;
+    p.castShadow = true;
+    p.receiveShadow = true;
+    scene.add(p);
+    // Glow ring at base
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(0.22, 0.3, 6),
+      new THREE.MeshBasicMaterial({ color: 0x58a6ff, transparent: true, opacity: 0.15 })
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.set(px, 0.01, pz);
+    scene.add(ring);
+  }
+
+  // Path markers (dotted line on ground)
+  const dotGeo = new THREE.CircleGeometry(0.05, 8);
+  const dotMat = new THREE.MeshBasicMaterial({ color: 0x30363d });
+  for (let i = -20; i < 40; i++) {
+    const dot = new THREE.Mesh(dotGeo, dotMat);
+    dot.rotation.x = -Math.PI / 2;
+    dot.position.set(i * 0.8, 0.003, 0);
+    scene.add(dot);
+  }
+}
+
+// ── Hexapod 3D Model ──
+function buildHexapod() {
+  hexGroup = new THREE.Group();
+  scene.add(hexGroup);
+
+  // Body
+  const bodyGeo = new THREE.BoxGeometry(0.9, 0.16, 0.42);
+  const bodyMat = new THREE.MeshPhongMaterial({
+    color: COL_BODY, specular: 0x58a6ff, shininess: 60
+  });
+  bodyMesh = new THREE.Mesh(bodyGeo, bodyMat);
+  bodyMesh.position.y = BODY_Y;
+  bodyMesh.castShadow = true;
+  hexGroup.add(bodyMesh);
+
+  // Direction arrow
+  const arrGeo = new THREE.ConeGeometry(0.05, 0.12, 4);
+  arrGeo.rotateZ(-Math.PI / 2);
+  const arrMat = new THREE.MeshPhongMaterial({ color: 0x58a6ff, emissive: 0x58a6ff, emissiveIntensity: 0.4 });
+  const arrow = new THREE.Mesh(arrGeo, arrMat);
+  arrow.position.set(0.52, BODY_Y, 0);
+  hexGroup.add(arrow);
+
+  // Legs
+  for (let i = 0; i < 6; i++) {
+    const ld = createLeg(i);
+    legData.push(ld);
+    hexGroup.add(ld.group);
+  }
+}
+
+function createLeg(idx) {
+  const group = new THREE.Group();
+  const r = 0.02;
+
+  const mkMat = (col) => new THREE.MeshPhongMaterial({ color: col });
+  const upper = new THREE.Mesh(new THREE.CylinderGeometry(r, r, 1, 8), mkMat(COL_STANCE));
+  const lower = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.7, r * 0.7, 1, 8), mkMat(COL_STANCE));
+  const hip = new THREE.Mesh(new THREE.SphereGeometry(r * 1.4, 8, 8), mkMat(COL_STANCE));
+  const knee = new THREE.Mesh(new THREE.SphereGeometry(r * 1.2, 8, 8), mkMat(COL_STANCE));
+  const foot = new THREE.Mesh(new THREE.SphereGeometry(r * 1.8, 8, 8), mkMat(COL_STANCE));
+  [upper, lower, hip, foot].forEach(m => m.castShadow = true);
+  group.add(upper, lower, hip, knee, foot);
+
+  // Click target
+  const ct = new THREE.Mesh(
+    new THREE.SphereGeometry(0.14, 8, 8),
+    new THREE.MeshBasicMaterial({ visible: false })
+  );
+  ct.userData.legIndex = idx;
+  group.add(ct);
+  legClickTargets.push(ct);
+
+  // Stump
+  const stump = new THREE.Mesh(
+    new THREE.CylinderGeometry(r * 1.2, r * 0.4, 0.07, 8),
+    mkMat(COL_DEAD)
+  );
+  stump.visible = false;
+  group.add(stump);
+
+  return { group, upper, lower, hip, knee, foot, ct, stump };
+}
+
+function setCyl(mesh, a, b) {
+  const d = new THREE.Vector3().subVectors(b, a);
+  const l = d.length();
+  if (l < 0.001) return;
+  mesh.position.lerpVectors(a, b, 0.5);
+  mesh.scale.y = l;
+  mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), d.normalize());
+}
+
+function updateLeg(idx) {
+  const ld = legData[idx];
+  const [lx, , lz] = HIP_LOCAL[idx];
+  const dir = LEG_DIR[idx];
+  const active = wasm.leg_active(idx);
+  const hipP = new THREE.Vector3(lx, bodyBobY - 0.08, lz);
+
+  if (!active) {
+    ld.upper.visible = ld.lower.visible = ld.knee.visible = ld.foot.visible = false;
+    ld.stump.visible = true;
+    ld.ct.visible = false;
+    ld.stump.position.copy(hipP).add(new THREE.Vector3(0, -0.02, dir * 0.04));
+    const sd = new THREE.Vector3(0, -0.5, dir * 0.6).normalize();
+    ld.stump.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), sd);
+    ld.hip.position.copy(hipP);
+    ld.hip.material.color.setHex(COL_DEAD);
+    return;
+  }
+
+  ld.upper.visible = ld.lower.visible = ld.knee.visible = ld.foot.visible = true;
+  ld.stump.visible = false;
+  ld.ct.visible = true;
+
+  // Use ACTUAL simulation phases (synced with Rust)
+  const legPhase = wasm.leg_phase(idx);
+  const gaitOffset = wasm.gait_phase(idx);
+  const eff = (legPhase + gaitOffset) % 1.0;
+  const stance = eff < 0.5;
+
+  let fx, fy, fz;
+  if (stance) {
+    // Foot on ground, slides backward to create walking motion
+    const t = eff / 0.5;
+    const stride = 0.10;
+    fx = lx + stride * (0.5 - t);
+    fy = 0.015;
+    fz = lz + dir * LEG_REACH;
+  } else {
+    // Foot lifts in smooth arc, swings forward
+    const t = (eff - 0.5) / 0.5;
+    const lift = Math.sin(t * Math.PI);
+    const stride = 0.10;
+    fx = lx + stride * (t - 0.5);
+    fy = 0.015 + lift * 0.14;
+    fz = lz + dir * (LEG_REACH - lift * 0.02);
+  }
+
+  const footP = new THREE.Vector3(fx, fy, fz);
+
+  // Knee: pushed outward + slightly up for natural bend
+  const kx = (lx + fx) / 2;
+  const ky = (hipP.y + fy) / 2 + 0.06;
+  const kz = (lz + fz) / 2 + dir * 0.04;
+  const kneeP = new THREE.Vector3(kx, ky, kz);
+
+  ld.hip.position.copy(hipP);
+  ld.knee.position.copy(kneeP);
+  ld.foot.position.copy(footP);
+  setCyl(ld.upper, hipP, kneeP);
+  setCyl(ld.lower, kneeP, footP);
+  ld.ct.position.lerpVectors(hipP, footP, 0.5);
+
+  const col = stance ? COL_STANCE : COL_SWING;
+  [ld.upper, ld.lower, ld.hip, ld.knee, ld.foot].forEach(m => m.material.color.setHex(col));
+}
+
+// ── Input ──
+function initInput() {
+  window.addEventListener('keydown', e => {
+    keys[e.code] = true;
+    e.preventDefault();
+  });
+  window.addEventListener('keyup', e => {
+    keys[e.code] = false;
+    e.preventDefault();
+  });
+}
+
+function processInput() {
+  let fwd = 1.0, turn = 0;
+  if (keys['KeyW'] || keys['ArrowUp']) fwd = 1.0;
+  if (keys['KeyS'] || keys['ArrowDown']) fwd = 0.0;
+  if (keys['KeyA'] || keys['ArrowLeft']) turn = 1.0;
+  if (keys['KeyD'] || keys['ArrowRight']) turn = -1.0;
+  wasm.set_input(fwd, turn);
+
+  // Visual key indicators
+  document.getElementById('kW').classList.toggle('active', !!(keys['KeyW'] || keys['ArrowUp']));
+  document.getElementById('kA').classList.toggle('active', !!(keys['KeyA'] || keys['ArrowLeft']));
+  document.getElementById('kS').classList.toggle('active', !!(keys['KeyS'] || keys['ArrowDown']));
+  document.getElementById('kD').classList.toggle('active', !!(keys['KeyD'] || keys['ArrowRight']));
+}
+
+// ── Click ──
+const raycaster = new THREE.Raycaster();
+const mouse = new THREE.Vector2();
+function onClick(e) {
+  mouse.x = (e.clientX / innerWidth) * 2 - 1;
+  mouse.y = -(e.clientY / innerHeight) * 2 + 1;
+  raycaster.setFromCamera(mouse, camera);
+  const hits = raycaster.intersectObjects(legClickTargets, false);
+  if (hits.length > 0) {
+    const idx = hits[0].object.userData.legIndex;
+    if (wasm.leg_active(idx)) {
+      wasm.remove_leg(idx);
+      showBanner(LEG_NAMES[idx] + ' removed!', false);
+    }
+  }
+}
+
+function showBanner(msg, ok) {
+  const b = document.getElementById('banner');
+  b.textContent = msg;
+  b.className = 'banner show' + (ok ? ' ok' : '');
+  clearTimeout(bannerTimeout);
+  bannerTimeout = setTimeout(() => b.classList.remove('show'), 2000);
+}
+
+// ── Global actions ──
+window.doReset = () => {
+  wasm.reset();
+  lastPx = wasm.pos_x(); lastPz = wasm.pos_z();
+  showBanner('Reset!', true);
+};
+window.doRestore = () => { wasm.restore_all(); showBanner('All legs restored!', true); };
+window.randomRemove = () => {
+  const a = [];
+  for (let i = 0; i < 6; i++) if (wasm.leg_active(i)) a.push(i);
+  if (a.length <= 2) return;
+  const idx = a[Math.floor(Math.random() * a.length)];
+  wasm.remove_leg(idx);
+  showBanner(LEG_NAMES[idx] + ' removed!', false);
+};
+
+// ── HUD ──
+function updateHud() {
+  const sp = wasm.speed();
+  document.getElementById('vSpeed').textContent = sp.toFixed(3) + ' m/s';
+  document.getElementById('vLegs').textContent = wasm.active_count() + ' / 6';
+  document.getElementById('vPool').textContent = wasm.pool_size();
+  document.getElementById('vFit').textContent = wasm.fitness().toFixed(4);
+  const dist = Math.sqrt(wasm.pos_x() ** 2 + wasm.pos_z() ** 2);
+  document.getElementById('vDist').textContent = dist.toFixed(1) + ' m';
+  const pct = Math.min(sp / 0.8 * 100, 100);
+  const fill = document.getElementById('speed-fill');
+  fill.style.width = pct + '%';
+  fill.style.background = sp > 0.3 ? '#3fb950' : sp > 0.1 ? '#d29922' : '#da3633';
+}
+
+// ── Animation ──
+function animate() {
+  requestAnimationFrame(animate);
+
+  processInput();
+  wasm.step_frame(20);
+
+  const px = wasm.pos_x();
+  const pz = wasm.pos_z();
+  const heading = wasm.get_heading();
+
+  // Hexapod world transform
+  hexGroup.position.set(px, 0, pz);
+  hexGroup.rotation.y = heading;
+
+  // Body dynamics: bob + tilt
+  let gL = 0, gR = 0, gTotal = 0;
+  for (let i = 0; i < 6; i++) {
+    if (wasm.leg_active(i) && wasm.leg_ground(i)) {
+      gTotal++;
+      if (LEG_DIR[i] > 0) gL++; else gR++;
+    }
+  }
+  const targetBob = BODY_Y - (6 - Math.max(gTotal, 1)) * 0.012;
+  bodyBobY += (targetBob - bodyBobY) * 0.12;
+  bodyMesh.position.y = bodyBobY;
+  const targetRoll = (gR - gL) * 0.03;
+  bodyMesh.rotation.z += (targetRoll - bodyMesh.rotation.z) * 0.1;
+  const targetPitch = wasm.get_tilt() * 0.08;
+  bodyMesh.rotation.x += (targetPitch - bodyMesh.rotation.x) * 0.1;
+
+  // Update legs
+  for (let i = 0; i < 6; i++) updateLeg(i);
+
+  // Camera follow (delta method — preserves user orbit)
+  const dx = px - lastPx;
+  const dz = pz - lastPz;
+  lastPx = px;
+  lastPz = pz;
+  controls.target.x += dx;
+  controls.target.z += dz;
+  camera.position.x += dx;
+  camera.position.z += dz;
+  controls.update();
+
+  // Move shadow-casting light to follow
+  scene.traverse(c => {
+    if (c.isDirectionalLight && c.castShadow) {
+      c.position.set(px + 5, 8, pz + 3);
+      c.target.position.set(px, 0, pz);
+      c.target.updateMatrixWorld();
+    }
+  });
+
+  updateHud();
+  renderer.render(scene, camera);
+}
+</script>
+</body>
+</html>

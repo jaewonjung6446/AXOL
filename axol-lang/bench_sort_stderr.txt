@@ -1,0 +1,168 @@
+warning: unused import: `crate::errors::Result`
+ --> src\density.rs:5:5
+  |
+5 | use crate::errors::Result;
+  |     ^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `num_complex::Complex64`
+  --> src\observatory.rs:12:5
+   |
+12 | use num_complex::Complex64;
+   |     ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `self`
+  --> src\observatory.rs:18:23
+   |
+18 | use crate::collapse::{self, CollapseMetrics};
+   |                       ^^^^
+
+warning: unused import: `crate::ops`
+ --> src\compose\logic.rs:8:5
+  |
+8 | use crate::ops;
+  |     ^^^^^^^^^^
+
+warning: unused import: `crate::observatory`
+  --> src\axol_ai.rs:18:5
+   |
+18 | use crate::observatory;
+   |     ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `AxolError`
+  --> src\axol_ai.rs:22:21
+   |
+22 | use crate::errors::{AxolError, Result};
+   |                     ^^^^^^^^^
+
+warning: unused import: `crate::errors::Result`
+  --> src\text\sps.rs:20:5
+   |
+20 | use crate::errors::Result;
+   |     ^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused variable: `dim`
+   --> src\axol_ai.rs:354:9
+    |
+354 |         dim: usize,
+    |         ^^^ help: if this is intentional, prefix it with an underscore: `_dim`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `omega`
+   --> src\axol_ai.rs:355:9
+    |
+355 |         omega: f64,
+    |         ^^^^^ help: if this is intentional, prefix it with an underscore: `_omega`
+
+warning: unused variable: `phi`
+   --> src\axol_ai.rs:356:9
+    |
+356 |         phi: f64,
+    |         ^^^ help: if this is intentional, prefix it with an underscore: `_phi`
+
+warning: unused variable: `total_obs`
+   --> src\axol_ai.rs:569:9
+    |
+569 |         total_obs: &mut usize,
+    |         ^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_total_obs`
+
+warning: fields `training_data`, `num_pools`, and `k` are never read
+   --> src\text\chat.rs:542:5
+    |
+540 | pub struct SemanticProjection {
+    |            ------------------ fields in this struct
+541 |     /// 훈련 입력의 파동 특징 + 풀 인덱스 (k-NN용).
+542 |     training_data: Vec<(Vec<f64>, usize)>,
+    |     ^^^^^^^^^^^^^
+543 |     /// 풀 수.
+544 |     num_pools: usize,
+    |     ^^^^^^^^^
+545 |     /// k-NN의 k값.
+546 |     k: usize,
+    |     ^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: method `classify` is never used
+   --> src\text\chat.rs:597:8
+    |
+549 | impl SemanticProjection {
+    | ----------------------- method in this implementation
+...
+597 |     fn classify(&self, features: &[f64]) -> (Vec<f64>, usize) {
+    |        ^^^^^^^^
+
+warning: `axol-lang` (lib) generated 13 warnings (run `cargo fix --lib -p axol-lang` to apply 11 suggestions)
+warning: method `scatter_positions` is never used
+   --> src\bin\bench_sort.rs:189:8
+    |
+145 | impl ResonanceTable {
+    | ------------------- method in this implementation
+...
+189 |     fn scatter_positions(&self, data: &[f64]) -> Vec<usize> {
+    |        ^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `bench_ensemble` is never used
+   --> src\bin\bench_sort.rs:657:4
+    |
+657 | fn bench_ensemble(n: usize, rng: &mut ChaCha8Rng, std_sort_us: f64, hybrid_sort_us: f64) -> Vec<EnsembleEntry> {
+    |    ^^^^^^^^^^^^^^
+
+warning: `axol-lang` (bin "bench_sort") generated 2 warnings
+    Finished `release` profile [optimized] target(s) in 0.16s
+     Running `target\release\bench_sort.exe`
+Benchmarking n=100...
+  std=0.6us  pure=0.1us(70.0%)  hybrid=0.2us(100.0%)  radix=2.7us  [scatter=0.1us bucket=0.1us]
+Benchmarking n=1000...
+  std=7.8us  pure=1.7us(65.3%)  hybrid=2.3us(100.0%)  radix=16.9us  [scatter=1.7us bucket=0.6us]
+Benchmarking n=10000...
+  std=105.4us  pure=20.0us(62.7%)  hybrid=29.7us(100.0%)  radix=177.3us  [scatter=20.0us bucket=9.7us]
+Benchmarking n=100000...
+  std=1492.8us  pure=332.0us(63.0%)  hybrid=718.4us(100.0%)  radix=1580.9us  [scatter=332.0us bucket=386.4us]
+Benchmarking n=1000000...
+  std=17723.6us  pure=15792.2us(63.2%)  hybrid=18922.9us(100.0%)  radix=27068.9us  [scatter=15792.2us bucket=3130.7us]
+Benchmarking n=10000000...
+  std=210958.9us  pure=293203.2us(63.2%)  hybrid=290439.5us(100.0%)  radix=267082.9us  [scatter=293203.2us bucket=-2763.7us]
+Benchmarking n=100000000...
+  std=2795300.6us  pure=4183092.7us(63.2%)  hybrid=3448559.3us(100.0%)  radix=2599868.7us  [scatter=4183092.7us bucket=-734533.4us]
+
+=== GPU+CPU Heterogeneous Estimate (GPU=500GB/s, CPU=50GB/s, PCIe=25GB/s) ===
+  n=100        GPU+CPU=      0.1us  CPU hybrid=      0.2us  GPU radix=      0.4us  | vs std=4.5x  vs cpu_hybrid=1.6x  vs gpu_radix=3.5x
+  n=1000       GPU+CPU=      1.3us  CPU hybrid=      2.3us  GPU radix=      2.8us  | vs std=6.1x  vs cpu_hybrid=1.8x  vs gpu_radix=2.2x
+  n=10000      GPU+CPU=     16.9us  CPU hybrid=     29.7us  GPU radix=     29.5us  | vs std=6.2x  vs cpu_hybrid=1.8x  vs gpu_radix=1.7x
+  n=100000     GPU+CPU=    484.8us  CPU hybrid=    718.4us  GPU radix=    263.5us  | vs std=3.1x  vs cpu_hybrid=1.5x  vs gpu_radix=0.5x
+  n=1000000    GPU+CPU=   6609.1us  CPU hybrid=  18922.9us  GPU radix=   4511.5us  | vs std=2.7x  vs cpu_hybrid=2.9x  vs gpu_radix=0.7x
+  n=10000000   GPU+CPU=  59077.0us  CPU hybrid= 290439.5us  GPU radix=  44513.8us  | vs std=3.6x  vs cpu_hybrid=4.9x  vs gpu_radix=0.8x
+  n=100000000  GPU+CPU= 134085.1us  CPU hybrid=3448559.3us  GPU radix= 433311.5us  | vs std=20.8x  vs cpu_hybrid=25.7x  vs gpu_radix=3.2x
+
+=== 3-Way CPU Comparison: Hybrid vs Radix vs Ensemble(k=1000) ===
+  Ensemble k=1000 n=100...
+    n=100      Hybrid=       0.2us  Radix=       2.7us  Ensemble=    1144.5us  | acc=0.9800  confirmed=38.0%
+  Ensemble k=1000 n=1000...
+    n=1000     Hybrid=       2.3us  Radix=      16.9us  Ensemble=   11215.7us  | acc=1.0000  confirmed=34.7%
+  Ensemble k=1000 n=10000...
+    n=10000    Hybrid=      29.7us  Radix=     177.3us  Ensemble=   95096.2us  | acc=1.0000  confirmed=36.6%
+  Ensemble k=1000 n=100000...
+    n=100000   Hybrid=     718.4us  Radix=    1580.9us  Ensemble= 1242586.8us  | acc=0.9998  confirmed=36.9%
+
+Multi-slit sweep (n=10000)...
+  k= 1  acc=0.6302  sort=960.4us  ns/elem=96.0  speedup=0.11x
+  k= 2  acc=0.7274  sort=1092.5us  ns/elem=109.2  speedup=0.10x
+  k= 3  acc=0.6690  sort=1115.2us  ns/elem=111.5  speedup=0.09x
+  k= 5  acc=0.6548  sort=1154.4us  ns/elem=115.4  speedup=0.09x
+  k= 7  acc=0.6452  sort=1127.6us  ns/elem=112.8  speedup=0.09x
+  k= 9  acc=0.6480  sort=1249.3us  ns/elem=124.9  speedup=0.08x
+  k=11  acc=0.6451  sort=1288.1us  ns/elem=128.8  speedup=0.08x
+  k=15  acc=0.6445  sort=1497.6us  ns/elem=149.8  speedup=0.07x
+
+Generating visualization data (n=10000)...
+Generating large visualization data (n=100000000)...
+  Counting total inversions (merge sort)...
+  inversions=24994369 / 4999999950000000 pairs  kendall_tau=100.0000%
+  Computing displacement stats (argsort)...
+  exact_match=63.22%  kendall_tau=100.0000%  adj_order=81.61%  mean_disp=0.46  within2=98.7%
+Done.

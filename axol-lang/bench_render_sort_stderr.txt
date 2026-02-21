@@ -1,0 +1,266 @@
+warning: unused import: `crate::errors::Result`
+ --> src\density.rs:5:5
+  |
+5 | use crate::errors::Result;
+  |     ^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `num_complex::Complex64`
+  --> src\observatory.rs:12:5
+   |
+12 | use num_complex::Complex64;
+   |     ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `self`
+  --> src\observatory.rs:18:23
+   |
+18 | use crate::collapse::{self, CollapseMetrics};
+   |                       ^^^^
+
+warning: unused import: `crate::ops`
+ --> src\compose\logic.rs:8:5
+  |
+8 | use crate::ops;
+  |     ^^^^^^^^^^
+
+warning: unused import: `crate::observatory`
+  --> src\axol_ai.rs:18:5
+   |
+18 | use crate::observatory;
+   |     ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `AxolError`
+  --> src\axol_ai.rs:22:21
+   |
+22 | use crate::errors::{AxolError, Result};
+   |                     ^^^^^^^^^
+
+warning: unused import: `crate::errors::Result`
+  --> src\text\sps.rs:20:5
+   |
+20 | use crate::errors::Result;
+   |     ^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused variable: `dim`
+   --> src\axol_ai.rs:354:9
+    |
+354 |         dim: usize,
+    |         ^^^ help: if this is intentional, prefix it with an underscore: `_dim`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `omega`
+   --> src\axol_ai.rs:355:9
+    |
+355 |         omega: f64,
+    |         ^^^^^ help: if this is intentional, prefix it with an underscore: `_omega`
+
+warning: unused variable: `phi`
+   --> src\axol_ai.rs:356:9
+    |
+356 |         phi: f64,
+    |         ^^^ help: if this is intentional, prefix it with an underscore: `_phi`
+
+warning: unused variable: `total_obs`
+   --> src\axol_ai.rs:569:9
+    |
+569 |         total_obs: &mut usize,
+    |         ^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_total_obs`
+
+warning: fields `training_data`, `num_pools`, and `k` are never read
+   --> src\text\chat.rs:542:5
+    |
+540 | pub struct SemanticProjection {
+    |            ------------------ fields in this struct
+541 |     /// 훈련 입력의 파동 특징 + 풀 인덱스 (k-NN용).
+542 |     training_data: Vec<(Vec<f64>, usize)>,
+    |     ^^^^^^^^^^^^^
+543 |     /// 풀 수.
+544 |     num_pools: usize,
+    |     ^^^^^^^^^
+545 |     /// k-NN의 k값.
+546 |     k: usize,
+    |     ^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: method `classify` is never used
+   --> src\text\chat.rs:597:8
+    |
+549 | impl SemanticProjection {
+    | ----------------------- method in this implementation
+...
+597 |     fn classify(&self, features: &[f64]) -> (Vec<f64>, usize) {
+    |        ^^^^^^^^
+
+warning: `axol-lang` (lib) generated 13 warnings (run `cargo fix --lib -p axol-lang` to apply 11 suggestions)
+    Finished `release` profile [optimized] target(s) in 0.17s
+     Running `target\release\bench_render_sort.exe`
+=== Rendering-Fair Sort Benchmark (f32) ===
+Hardware model: GPU=500GB/s  CPU=50GB/s  PCIe=25GB/s
+GPU efficiency: merge=0.3  scatter=0.5  radix=0.6
+
+Generating distributions...
+  particle_95      n=1000000    pre_sort=0.9524  mean=0.5000  std=0.2887
+  particle_99      n=2000000    pre_sort=0.9901  mean=0.5000  std=0.2887
+  oit_5layer       n=100000     pre_sort=0.8000  mean=0.5000  std=0.2828
+  oit_20layer      n=100000     pre_sort=0.9500  mean=0.5000  std=0.2883
+  rayhit_heavy     n=10000000   pre_sort=0.5001  mean=0.6000  std=0.2619
+  rayhit_normal    n=10000000   pre_sort=0.5001  mean=0.6667  std=0.2357
+  uniform_1m       n=1000000    pre_sort=0.4997  mean=0.5000  std=0.2889
+  uniform_10m      n=10000000   pre_sort=0.5000  mean=0.5000  std=0.2887
+
+Benchmarking particle_95  (n=1000000)...
+  Computing scatter quality metrics...
+    adj_order=98.8709%  mean_disp=0.02  max_disp=1  within1=100.0%  within10=100.0%
+    concordance=99.995300%  singleton_buckets=52.4%  collision_buckets=23.8%  max_bucket=2
+  std_sort          17784.8us  acc=1.0000  kt=100.0%  speedup=1.00x
+  axol_pure          6518.1us  acc=0.9774  kt=100.0%  speedup=2.73x
+  axol_hybrid        7615.5us  acc=1.0000  kt=100.0%  speedup=2.34x
+  radix_4pass       13488.1us  acc=1.0000  kt=100.0%  speedup=1.32x
+  insertion       7063359.6us  acc=1.0000  kt=100.0%  speedup=0.00x
+Benchmarking particle_99  (n=2000000)...
+  Computing scatter quality metrics...
+    adj_order=99.8069%  mean_disp=0.00  max_disp=1  within1=100.0%  within10=100.0%
+    concordance=99.999200%  singleton_buckets=60.7%  collision_buckets=19.6%  max_bucket=2
+  std_sort          40562.3us  acc=1.0000  kt=100.0%  speedup=1.00x
+  axol_pure          9734.3us  acc=0.9961  kt=100.0%  speedup=4.17x
+  axol_hybrid       15077.2us  acc=1.0000  kt=100.0%  speedup=2.69x
+  radix_4pass       28527.6us  acc=1.0000  kt=100.0%  speedup=1.42x
+  insertion       6015777.6us  acc=1.0000  kt=100.0%  speedup=0.01x
+Benchmarking oit_5layer  (n=100000)...
+  Computing scatter quality metrics...
+    adj_order=53.5575%  mean_disp=8.01  max_disp=49  within1=17.3%  within10=70.2%
+    concordance=97.103882%  singleton_buckets=0.9%  collision_buckets=6.0%  max_bucket=54
+  std_sort           1677.4us  acc=1.0000  kt=100.0%  speedup=1.00x
+  axol_pure           343.6us  acc=0.0722  kt=100.0%  speedup=4.88x
+  axol_hybrid        1103.7us  acc=1.0000  kt=100.0%  speedup=1.52x
+  radix_4pass         942.4us  acc=1.0000  kt=100.0%  speedup=1.78x
+Benchmarking oit_20layer  (n=100000)...
+  Computing scatter quality metrics...
+    adj_order=53.2845%  mean_disp=9.27  max_disp=64  within1=15.2%  within10=64.5%
+    concordance=96.633565%  singleton_buckets=0.8%  collision_buckets=5.3%  max_bucket=65
+  std_sort           1788.2us  acc=1.0000  kt=100.0%  speedup=1.00x
+  axol_pure           301.8us  acc=0.0635  kt=100.0%  speedup=5.93x
+  axol_hybrid        1164.7us  acc=1.0000  kt=100.0%  speedup=1.54x
+  radix_4pass         975.6us  acc=1.0000  kt=100.0%  speedup=1.83x
+Benchmarking rayhit_heavy  (n=10000000)...
+  Computing scatter quality metrics...
+    adj_order=89.4848%  mean_disp=0.55  max_disp=10  within1=89.0%  within10=100.0%
+    concordance=99.885300%  singleton_buckets=33.1%  collision_buckets=26.5%  max_bucket=11
+  std_sort         247414.3us  acc=1.0000  kt=100.0%  speedup=1.00x
+  axol_pure        417984.0us  acc=0.7898  kt=100.0%  speedup=0.59x
+  axol_hybrid      387751.9us  acc=1.0000  kt=100.0%  speedup=0.64x
+  radix_4pass      129772.5us  acc=1.0000  kt=100.0%  speedup=1.91x
+Benchmarking rayhit_normal  (n=10000000)...
+  Computing scatter quality metrics...
+    adj_order=89.3930%  mean_disp=0.65  max_disp=11  within1=85.6%  within10=100.0%
+    concordance=99.863100%  singleton_buckets=29.0%  collision_buckets=26.7%  max_bucket=13
+  std_sort         243228.4us  acc=1.0000  kt=100.0%  speedup=1.00x
+  axol_pure        323928.0us  acc=0.7879  kt=100.0%  speedup=0.75x
+  axol_hybrid      382604.0us  acc=1.0000  kt=100.0%  speedup=0.64x
+  radix_4pass      134382.0us  acc=1.0000  kt=100.0%  speedup=1.81x
+Benchmarking uniform_1m  (n=1000000)...
+  Computing scatter quality metrics...
+    adj_order=82.6826%  mean_disp=0.46  max_disp=7  within1=92.7%  within10=100.0%
+    concordance=99.877897%  singleton_buckets=36.8%  collision_buckets=26.4%  max_bucket=9
+  std_sort          25532.8us  acc=1.0000  kt=100.0%  speedup=1.00x
+  axol_pure         21032.4us  acc=0.6541  kt=100.0%  speedup=1.21x
+  axol_hybrid       28669.1us  acc=1.0000  kt=100.0%  speedup=0.89x
+  radix_4pass       12730.9us  acc=1.0000  kt=100.0%  speedup=2.01x
+Benchmarking uniform_10m  (n=10000000)...
+  Computing scatter quality metrics...
+    adj_order=91.5987%  mean_disp=0.50  max_disp=10  within1=90.5%  within10=100.0%
+    concordance=99.901800%  singleton_buckets=35.1%  collision_buckets=26.5%  max_bucket=12
+  std_sort         249473.9us  acc=1.0000  kt=100.0%  speedup=1.00x
+  axol_pure        348407.7us  acc=0.8319  kt=100.0%  speedup=0.72x
+  axol_hybrid      371958.9us  acc=1.0000  kt=100.0%  speedup=0.67x
+  radix_4pass      130823.7us  acc=1.0000  kt=100.0%  speedup=1.91x
+
+=== GPU Estimates ===
+particle_95:
+  std_sort       cpu=   17784.8us  gpu=    5928.3us  hetero=    5928.3us
+  axol_pure      cpu=    6518.1us  gpu=    1303.6us  hetero=    1303.6us
+  axol_hybrid    cpu=    7615.5us  gpu=    1303.6us  hetero=    2561.0us
+  radix_4pass    cpu=   13488.1us  gpu=    2248.0us  hetero=    2248.0us
+  insertion      cpu= 7063359.6us  gpu= 7063359.6us  hetero= 7063359.6us
+particle_99:
+  std_sort       cpu=   40562.3us  gpu=   13520.8us  hetero=   13520.8us
+  axol_pure      cpu=    9734.3us  gpu=    1946.9us  hetero=    1946.9us
+  axol_hybrid    cpu=   15077.2us  gpu=    1946.9us  hetero=    7609.8us
+  radix_4pass    cpu=   28527.6us  gpu=    4754.6us  hetero=    4754.6us
+  insertion      cpu= 6015777.6us  gpu= 6015777.6us  hetero= 6015777.6us
+oit_5layer:
+  std_sort       cpu=    1677.4us  gpu=     559.1us  hetero=     559.1us
+  axol_pure      cpu=     343.6us  gpu=      68.7us  hetero=      68.7us
+  axol_hybrid    cpu=    1103.7us  gpu=      68.7us  hetero=     844.8us
+  radix_4pass    cpu=     942.4us  gpu=     157.1us  hetero=     157.1us
+oit_20layer:
+  std_sort       cpu=    1788.2us  gpu=     596.1us  hetero=     596.1us
+  axol_pure      cpu=     301.8us  gpu=      60.4us  hetero=      60.4us
+  axol_hybrid    cpu=    1164.7us  gpu=      60.4us  hetero=     939.3us
+  radix_4pass    cpu=     975.6us  gpu=     162.6us  hetero=     162.6us
+rayhit_heavy:
+  std_sort       cpu=  247414.3us  gpu=   82471.4us  hetero=   82471.4us
+  axol_pure      cpu=  417984.0us  gpu=   83596.8us  hetero=   83596.8us
+  axol_hybrid    cpu=  387751.9us  gpu=   83596.8us  hetero=   54964.7us
+  radix_4pass    cpu=  129772.5us  gpu=   21628.8us  hetero=   21628.8us
+rayhit_normal:
+  std_sort       cpu=  243228.4us  gpu=   81076.1us  hetero=   81076.1us
+  axol_pure      cpu=  323928.0us  gpu=   64785.6us  hetero=   64785.6us
+  axol_hybrid    cpu=  382604.0us  gpu=   64785.6us  hetero=  125061.6us
+  radix_4pass    cpu=  134382.0us  gpu=   22397.0us  hetero=   22397.0us
+uniform_1m:
+  std_sort       cpu=   25532.8us  gpu=    8510.9us  hetero=    8510.9us
+  axol_pure      cpu=   21032.4us  gpu=    4206.5us  hetero=    4206.5us
+  axol_hybrid    cpu=   28669.1us  gpu=    4206.5us  hetero=   12003.2us
+  radix_4pass    cpu=   12730.9us  gpu=    2121.8us  hetero=    2121.8us
+uniform_10m:
+  std_sort       cpu=  249473.9us  gpu=   83157.9us  hetero=   83157.9us
+  axol_pure      cpu=  348407.7us  gpu=   69681.5us  hetero=   69681.5us
+  axol_hybrid    cpu=  371958.9us  gpu=   69681.5us  hetero=   94832.8us
+  radix_4pass    cpu=  130823.7us  gpu=   21803.9us  hetero=   21803.9us
+
+=== Fairness Summary ===
+CPU winners:
+  particle_95      → axol_hybrid (7615.5us)
+  particle_99      → axol_hybrid (15077.2us)
+  oit_5layer       → radix_4pass (942.4us)
+  oit_20layer      → radix_4pass (975.6us)
+  rayhit_heavy     → radix_4pass (129772.5us)
+  rayhit_normal    → radix_4pass (134382.0us)
+  uniform_1m       → radix_4pass (12730.9us)
+  uniform_10m      → radix_4pass (130823.7us)
+GPU winners:
+  particle_95      → radix_4pass (2248.0us)
+  particle_99      → radix_4pass (4754.6us)
+  oit_5layer       → radix_4pass (157.1us)
+  oit_20layer      → radix_4pass (162.6us)
+  rayhit_heavy     → radix_4pass (21628.8us)
+  rayhit_normal    → radix_4pass (22397.0us)
+  uniform_1m       → radix_4pass (2121.8us)
+  uniform_10m      → radix_4pass (21803.9us)
+
+aXOL advantages:
+  + CPU particle_95: aXOL Hybrid wins (7615.5us)
+  + CPU particle_99: aXOL Hybrid wins (15077.2us)
+  + aXOL Hybrid CPU wins: 2/8 scenarios
+  + aXOL Hybrid GPU wins: 0/8 scenarios
+aXOL disadvantages:
+  - CPU oit_5layer: radix_4pass wins (942.4us), aXOL Hybrid 1.2x slower (1103.7us)
+  - CPU oit_20layer: radix_4pass wins (975.6us), aXOL Hybrid 1.2x slower (1164.7us)
+  - CPU rayhit_heavy: radix_4pass wins (129772.5us), aXOL Hybrid 3.0x slower (387751.9us)
+  - CPU rayhit_normal: radix_4pass wins (134382.0us), aXOL Hybrid 2.8x slower (382604.0us)
+  - CPU uniform_1m: radix_4pass wins (12730.9us), aXOL Hybrid 2.3x slower (28669.1us)
+  - CPU uniform_10m: radix_4pass wins (130823.7us), aXOL Hybrid 2.8x slower (371958.9us)
+  - GPU particle_95: radix_4pass wins (2248.0us), aXOL Hybrid 1.1x slower (2561.0us)
+  - GPU particle_99: radix_4pass wins (4754.6us), aXOL Hybrid 1.6x slower (7609.8us)
+  - GPU oit_5layer: radix_4pass wins (157.1us), aXOL Hybrid 5.4x slower (844.8us)
+  - GPU oit_20layer: radix_4pass wins (162.6us), aXOL Hybrid 5.8x slower (939.3us)
+  - GPU rayhit_heavy: radix_4pass wins (21628.8us), aXOL Hybrid 2.5x slower (54964.7us)
+  - GPU rayhit_normal: radix_4pass wins (22397.0us), aXOL Hybrid 5.6x slower (125061.6us)
+  - GPU uniform_1m: radix_4pass wins (2121.8us), aXOL Hybrid 5.7x slower (12003.2us)
+  - GPU uniform_10m: radix_4pass wins (21803.9us), aXOL Hybrid 4.3x slower (94832.8us)
+
+Done. JSON written to stdout.

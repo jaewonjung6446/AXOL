@@ -14,6 +14,9 @@ rand_chacha = "0.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 clap = { version = "4", features = ["derive"] }
+wgpu = "28"
+pollster = "0.4"
+bytemuck = { version = "1", features = ["derive"] }
 
 [lib]
 name = "axol"
@@ -30,6 +33,22 @@ path = "src/bin/wte_chat.rs"
 [[bin]]
 name = "bench_wave"
 path = "src/bin/bench_wave.rs"
+
+[[bin]]
+name = "hexapod_sim"
+path = "src/bin/hexapod_sim.rs"
+
+[[bin]]
+name = "bench_sort"
+path = "src/bin/bench_sort.rs"
+
+[[bin]]
+name = "bench_render_sort"
+path = "src/bin/bench_render_sort.rs"
+
+[[bin]]
+name = "bench_gpu_sort"
+path = "src/bin/bench_gpu_sort.rs"
 
 [profile.release]
 opt-level = 3

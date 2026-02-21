@@ -24,3 +24,4 @@ pub mod learn;
 pub mod relation;
 pub mod dsl;
 pub mod text;
+pub mod gpu_scatter;

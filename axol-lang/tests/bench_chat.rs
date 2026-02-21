@@ -2,7 +2,7 @@
 
 use axol::text::data::{chat_corpus, chat_intents_ko, chat_classification_data};
 use axol::text::engine::{WaveTextEngine, EngineConfig};
-use axol::text::chat::ChatEngine;
+use axol::text::chat::{ChatEngine, GrowthConfig};
 use std::time::Instant;
 
 fn build_chat_engine() -> ChatEngine {
@@ -434,4 +434,524 @@ fn bench_chat_accuracy_and_speed() {
     println!("  출현 풀:     {}", s_emerged);
     println!("  클론:        {}", s_clones);
     println!();
+}
+
+#[test]
+fn bench_deep_reservoir() {
+    println!("\n======================================================================");
+    println!("  Deep Reservoir — depth별 정확도 & 속도 비교");
+    println!("======================================================================\n");
+
+    let corpus = chat_corpus();
+    let engine_config = EngineConfig {
+        dim: 128,
+        num_merges: 400,
+        max_vocab: 3000,
+        seed: 42,
+        hidden_dim: 1024,
+        ..EngineConfig::default()
+    };
+    let refs: Vec<&str> = corpus.iter().map(|s| *s).collect();
+
+    let cases = korean_test_cases();
+
+    // Depth 비교 (slits=1)
+    println!("[Depth 비교 (slits=1)]");
+    for depth in [1, 2, 3] {
+        let mut engine = WaveTextEngine::from_corpus_with_config(&refs, &engine_config);
+        let (labeled, class_labels) = chat_classification_data();
+        engine.train_classifier(&labeled, class_labels);
+
+        let growth_config = GrowthConfig {
+            depth,
+            num_slits: 1,
+            ..GrowthConfig::default()
+        };
+        let mut chat = ChatEngine::with_growth(engine, chat_intents_ko(), growth_config);
+
+        let t0 = Instant::now();
+        let mut correct = 0;
+        let mut total = 0;
+        for (input, expected) in &cases {
+            let result = chat.respond(input);
+            if result.intent == *expected { correct += 1; }
+            total += 1;
+        }
+        let elapsed = t0.elapsed();
+        let acc = correct as f64 / total as f64 * 100.0;
+        let avg_ms = elapsed.as_secs_f64() * 1000.0 / total as f64;
+
+        println!("  depth={} slits=1: 정확도 {}/{} ({:.1}%)  평균 {:.2}ms/쿼리",
+            depth, correct, total, acc, avg_ms);
+    }
+    println!();
+
+    // Multi-slit 비교 (depth=2)
+    println!("[Multi-slit 비교 (depth=2)]");
+    for num_slits in [1, 2, 3, 4] {
+        let mut engine = WaveTextEngine::from_corpus_with_config(&refs, &engine_config);
+        let (labeled, class_labels) = chat_classification_data();
+        engine.train_classifier(&labeled, class_labels);
+
+        let growth_config = GrowthConfig {
+            depth: 2,
+            num_slits,
+            ..GrowthConfig::default()
+        };
+        let mut chat = ChatEngine::with_growth(engine, chat_intents_ko(), growth_config);
+
+        let t0 = Instant::now();
+        let mut correct = 0;
+        let mut total = 0;
+        for (input, expected) in &cases {
+            let result = chat.respond(input);
+            if result.intent == *expected { correct += 1; }
+            total += 1;
+        }
+        let elapsed = t0.elapsed();
+        let acc = correct as f64 / total as f64 * 100.0;
+        let avg_ms = elapsed.as_secs_f64() * 1000.0 / total as f64;
+
+        println!("  depth=2 slits={}: 정확도 {}/{} ({:.1}%)  평균 {:.2}ms/쿼리",
+            num_slits, correct, total, acc, avg_ms);
+    }
+    println!();
+}
+
+#[test]
+fn bench_resonance_map() {
+    println!("\n======================================================================");
+    println!("  [공명 맵] — O(1) 파동 서명 탐색 벤치마크");
+    println!("======================================================================\n");
+
+    let mut chat = build_chat_engine();
+    let cases = korean_test_cases();
+
+    // ── 공명 맵 구축 시간 ──
+    let t_build = Instant::now();
+    // Force rebuild by triggering dirty + respond
+    chat.growth_cycle();
+    let _ = chat.respond("테스트");
+    let build_ms = t_build.elapsed().as_secs_f64() * 1000.0;
+    println!("[공명 맵 구축]");
+    println!("  구축 시간 (growth_cycle + rebuild): {:.3}ms", build_ms);
+    println!("  풀 수:         {}", chat.pools.len());
+    let total_entries: usize = chat.pools.iter().map(|p| p.entries.len()).sum();
+    println!("  총 엔트리:     {}", total_entries);
+    println!();
+
+    // ── O(1) 쿼리 속도 ──
+    println!("[O(1) 공명 탐색 속도]");
+    let mut times = Vec::new();
+    let mut correct = 0;
+    let mut total = 0;
+
+    for (input, expected) in &cases {
+        let t = Instant::now();
+        let result = chat.respond(input);
+        let elapsed_ms = t.elapsed().as_secs_f64() * 1000.0;
+        times.push(elapsed_ms);
+
+        if result.intent == *expected {
+            correct += 1;
+        } else {
+            println!("    FAIL: \"{}\" → 예측={}, 정답={}", input, result.intent, expected);
+        }
+        total += 1;
+    }
+
+    let avg = times.iter().sum::<f64>() / times.len() as f64;
+    let mut sorted = times.clone();
+    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let p50 = sorted[sorted.len() / 2];
+    let p95 = sorted[(sorted.len() as f64 * 0.95) as usize];
+    let min = sorted[0];
+    let max = *sorted.last().unwrap();
+
+    println!("  정확도:      {}/{} ({:.1}%)", correct, total,
+        correct as f64 / total as f64 * 100.0);
+    println!("  평균 지연:   {:.2}ms", avg);
+    println!("  최소 지연:   {:.2}ms", min);
+    println!("  최대 지연:   {:.2}ms", max);
+    println!("  P50 지연:    {:.2}ms", p50);
+    println!("  P95 지연:    {:.2}ms", p95);
+    println!("  처리량:      {:.0} queries/sec", 1000.0 / avg);
+    println!();
+
+    // ── 반복 쿼리 (맵 이미 구축, dirty=false) ──
+    println!("[반복 쿼리 — 맵 캐시 상태]");
+    let repeat_inputs = vec![
+        "안녕하세요", "강아지 좋아해?", "배고파", "날씨 어때?",
+        "슬퍼", "도와줘", "안녕히 가세요", "친구가 보고 싶어",
+        "자연이 좋아", "뭐 먹을까?",
+    ];
+    let mut repeat_times = Vec::new();
+    for input in &repeat_inputs {
+        let t = Instant::now();
+        let _ = chat.respond(input);
+        repeat_times.push(t.elapsed().as_secs_f64() * 1000.0);
+    }
+    let repeat_avg = repeat_times.iter().sum::<f64>() / repeat_times.len() as f64;
+    println!("  반복 쿼리 수:  {}", repeat_times.len());
+    println!("  평균 지연:     {:.2}ms (맵 재구축 없음)", repeat_avg);
+    println!("  처리량:        {:.0} queries/sec", 1000.0 / repeat_avg);
+    println!();
+
+    // ── 키워드 분류기 vs 파동 클러스터링 비교 ──
+    println!("[키워드 분류기 vs 파동 클러스터링]");
+    {
+        // 방법 1: 키워드 분류기 (현재 방식)
+        let mut clf_correct = 0;
+        for (input, expected) in &cases {
+            if let Some(result) = chat.engine.classify(input) {
+                if result.class_label == *expected { clf_correct += 1; }
+            }
+        }
+        println!("  키워드 분류기:    {}/{} ({:.1}%)",
+            clf_correct, cases.len(), clf_correct as f64 / cases.len() as f64 * 100.0);
+
+        // 방법 2: 풀 중심 파동 (cavity wave) — 키워드 없이 응답 파동만으로
+        // 각 풀의 적합도 가중 중심 특징 벡터 계산
+        let pool_centroids: Vec<Vec<f64>> = chat.pools.iter().map(|pool| {
+            let dim = pool.entries[0].features.len();
+            let total_fitness: f64 = pool.entries.iter().map(|e| e.fitness).sum();
+            if total_fitness < 1e-10 {
+                return vec![0.0; dim];
+            }
+            let mut centroid = vec![0.0; dim];
+            for entry in &pool.entries {
+                let w = entry.fitness / total_fitness;
+                for (i, &f) in entry.features.iter().enumerate() {
+                    centroid[i] += f * w;
+                }
+            }
+            centroid
+        }).collect();
+
+        fn cos_sim(a: &[f64], b: &[f64]) -> f64 {
+            let len = a.len().min(b.len());
+            let (mut d, mut na, mut nb) = (0.0, 0.0, 0.0);
+            for i in 0..len { d += a[i]*b[i]; na += a[i]*a[i]; nb += b[i]*b[i]; }
+            let dn = na.sqrt() * nb.sqrt();
+            if dn > 1e-10 { d / dn } else { 0.0 }
+        }
+
+        let mut wave_correct = 0;
+        for (input, expected) in &cases {
+            let state = chat.engine.process_text_deep(input, 2, 1);
+            let feat = state.to_feature_vector();
+            let mut best_pool = 0;
+            let mut best_sim = f64::NEG_INFINITY;
+            for (pi, centroid) in pool_centroids.iter().enumerate() {
+                let sim = cos_sim(&feat, centroid);
+                if sim > best_sim { best_sim = sim; best_pool = pi; }
+            }
+            if chat.pools[best_pool].intent == *expected { wave_correct += 1; }
+        }
+        println!("  파동 클러스터링:  {}/{} ({:.1}%) ← 키워드 없이 순수 파동",
+            wave_correct, cases.len(), wave_correct as f64 / cases.len() as f64 * 100.0);
+
+        // 방법 3: 파동 + 적합도 가중 (sqrt(fitness))
+        let mut wave_fit_correct = 0;
+        for (input, expected) in &cases {
+            let state = chat.engine.process_text_deep(input, 2, 1);
+            let feat = state.to_feature_vector();
+            let mut best_pool = 0;
+            let mut best_score = f64::NEG_INFINITY;
+            for (pi, pool) in chat.pools.iter().enumerate() {
+                for entry in &pool.entries {
+                    let sim = cos_sim(&feat, &entry.features);
+                    let score = sim * entry.fitness.sqrt();
+                    if score > best_score { best_score = score; best_pool = pi; }
+                }
+            }
+            if chat.pools[best_pool].intent == *expected { wave_fit_correct += 1; }
+        }
+        println!("  파동+적합도:      {}/{} ({:.1}%) ← 엔트리별 cos×√fitness",
+            wave_fit_correct, cases.len(), wave_fit_correct as f64 / cases.len() as f64 * 100.0);
+
+        // 방법 4: 의미 투영 (SemanticProjection — 입력 공간 Fisher 판별)
+        // respond()가 이제 의미 투영을 사용하므로 직접 측정
+        let mut sem_correct = 0;
+        for (input, expected) in &cases {
+            let result = chat.respond(input);
+            if result.intent == *expected { sem_correct += 1; }
+        }
+        println!("  의미 투영:        {}/{} ({:.1}%) ← 입력 파동의 의미 축 투영",
+            sem_correct, cases.len(), sem_correct as f64 / cases.len() as f64 * 100.0);
+
+        // 방법 5: 파동 클러스터링 + 분류기 앙상블
+        let mut ensemble_correct = 0;
+        for (input, expected) in &cases {
+            let state = chat.engine.process_text_deep(input, 2, 1);
+            let feat = state.to_feature_vector();
+
+            // 파동 점수
+            let mut wave_scores: Vec<(usize, f64)> = pool_centroids.iter().enumerate()
+                .map(|(pi, c)| (pi, cos_sim(&feat, c)))
+                .collect();
+            wave_scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+            let wave_top = wave_scores[0].0;
+
+            // 분류기 점수
+            let clf_top = if let Some(result) = chat.engine.classify(input) {
+                chat.pools.iter().position(|p| p.intent == result.class_label)
+                    .unwrap_or(0)
+            } else { 0 };
+
+            // 앙상블: 둘이 같으면 확신, 다르면 분류기 우선
+            let pick = if wave_top == clf_top { wave_top } else { clf_top };
+            if chat.pools[pick].intent == *expected { ensemble_correct += 1; }
+        }
+        println!("  앙상블(파동+분류기): {}/{} ({:.1}%)",
+            ensemble_correct, cases.len(), ensemble_correct as f64 / cases.len() as f64 * 100.0);
+    }
+    println!();
+
+    // ── 공명 해상도(dims×bands) 비교 ──
+    println!("[공명 해상도 비교]");
+    println!("  {:>6} {:>6} {:>10} {:>8} {:>12}",
+        "dims", "bands", "buckets", "정확도", "평균ms");
+    for &(dims, bands) in &[
+        (4, 2), (4, 3), (6, 3), (6, 4),
+        (8, 3), (8, 4), (10, 4), (12, 4), (16, 4),
+    ] {
+        let corpus = chat_corpus();
+        let config = EngineConfig {
+            dim: 128, num_merges: 400, max_vocab: 3000,
+            seed: 42, hidden_dim: 1024,
+            ..EngineConfig::default()
+        };
+        let refs: Vec<&str> = corpus.iter().map(|s| *s).collect();
+        let mut engine = WaveTextEngine::from_corpus_with_config(&refs, &config);
+        let (labeled, class_labels) = chat_classification_data();
+        engine.train_classifier(&labeled, class_labels);
+
+        let growth_config = GrowthConfig {
+            resonance_dims: dims,
+            resonance_bands: bands,
+            ..GrowthConfig::default()
+        };
+        let mut chat_r = ChatEngine::with_growth(engine, chat_intents_ko(), growth_config);
+
+        let t0 = Instant::now();
+        let mut c = 0;
+        let mut t = 0;
+        for (input, expected) in &cases {
+            let result = chat_r.respond(input);
+            if result.intent == *expected { c += 1; }
+            t += 1;
+        }
+        let elapsed = t0.elapsed();
+        let acc = c as f64 / t as f64 * 100.0;
+        let avg_ms = elapsed.as_secs_f64() * 1000.0 / t as f64;
+        let total_buckets = (bands as u64).pow(dims as u32);
+
+        println!("  {:>6} {:>6} {:>10} {:>7.1}% {:>10.2}ms",
+            dims, bands, total_buckets, acc, avg_ms);
+    }
+    println!();
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// 정확 경향성 테스트 — AXOL 시간복잡도 독립 × 수렴 검증
+// ══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn bench_convergence_tendency() {
+    println!("\n======================================================================");
+    println!("  [정확 경향성] — 피드백 반복에 따른 수렴 + 비용 일정성 검증");
+    println!("======================================================================\n");
+
+    let mut chat = build_chat_engine();
+    chat.self_learning.retrain_interval = 20;
+
+    let eval_cases = korean_test_cases();
+
+    // 학습에 사용할 쿼리 (정답 의도 포함)
+    let train_queries: Vec<(&str, &str)> = vec![
+        ("안녕하세요", "greeting"), ("안녕!", "greeting"), ("반가워", "greeting"),
+        ("좋은 아침", "greeting"), ("잘 지냈어?", "greeting"),
+        ("강아지 귀여워", "animals"), ("고양이 좋아", "animals"), ("동물 키워?", "animals"),
+        ("반려동물 사랑", "animals"), ("강아지가 아파", "animals"),
+        ("친구가 보고 싶어", "people"), ("가족 관계", "people"), ("사람이 그리워", "people"),
+        ("직장 동료", "people"), ("인간관계 어려워", "people"),
+        ("바다 가자", "nature"), ("숲이 좋아", "nature"), ("자연이 최고", "nature"),
+        ("산이 멋져", "nature"), ("바다가 보고 싶다", "nature"),
+        ("잘 가요", "farewell"), ("또 만나", "farewell"), ("안녕히", "farewell"),
+        ("바이바이", "farewell"), ("다음에 또", "farewell"),
+        ("도와줘", "help"), ("뭐 할 수 있어?", "help"), ("기능이 뭐야?", "help"),
+        ("사용법", "help"), ("어떻게 써?", "help"),
+        ("오늘 덥다", "weather"), ("비 와?", "weather"), ("미세먼지 심해", "weather"),
+        ("날씨 어때?", "weather"), ("장마 언제?", "weather"),
+        ("배고파", "food"), ("뭐 먹을까", "food"), ("치킨!", "food"),
+        ("라면 먹자", "food"), ("맛집 추천", "food"),
+        ("슬프다", "emotions"), ("기쁘다", "emotions"), ("화나", "emotions"),
+        ("우울해", "emotions"), ("스트레스", "emotions"),
+    ];
+
+    // 평가 함수: (정확도, 평균 지연ms, 총 엔트리 수, 풀 수)
+    let measure = |chat: &mut ChatEngine, cases: &[(&str, &str)]| -> (f64, f64, usize, usize) {
+        let mut correct = 0;
+        let mut total_ms = 0.0;
+        for &(input, expected) in cases {
+            let t = Instant::now();
+            let result = chat.respond(input);
+            total_ms += t.elapsed().as_secs_f64() * 1000.0;
+            if result.intent == expected { correct += 1; }
+        }
+        let acc = correct as f64 / cases.len() as f64 * 100.0;
+        let avg_ms = total_ms / cases.len() as f64;
+        let total_entries: usize = chat.pools.iter().map(|p| p.entries.len()).sum();
+        let num_pools = chat.pools.len();
+        (acc, avg_ms, total_entries, num_pools)
+    };
+
+    // ── 체크포인트 기록 ──
+    struct Checkpoint {
+        round: usize,
+        acc: f64,
+        avg_ms: f64,
+        entries: usize,
+        pools: usize,
+        retrains: usize,
+    }
+    let mut checkpoints: Vec<Checkpoint> = Vec::new();
+
+    // ── Round 0: 초기 상태 ──
+    let (acc, avg_ms, entries, pools) = measure(&mut chat, &eval_cases);
+    checkpoints.push(Checkpoint { round: 0, acc, avg_ms, entries, pools, retrains: 0 });
+
+    // ── Round 1..20: 반복 학습 ──
+    let total_rounds = 20;
+    for round in 1..=total_rounds {
+        // 1라운드 = train_queries 전체를 한 번 순회하며 피드백
+        for &(input, correct_intent) in &train_queries {
+            let result = chat.respond(input);
+            if result.intent == correct_intent {
+                chat.feedback(result.pool_id, result.response_id, true);
+            } else {
+                chat.feedback(result.pool_id, result.response_id, false);
+                chat.feedback_correct(correct_intent);
+            }
+        }
+
+        // 안정화 (50 사이클)
+        chat.stabilize(50);
+
+        // 평가
+        let (acc, avg_ms, entries, pools) = measure(&mut chat, &eval_cases);
+        checkpoints.push(Checkpoint {
+            round, acc, avg_ms, entries, pools,
+            retrains: chat.retrain_count(),
+        });
+    }
+
+    // ── 결과 출력 ──
+    println!("{:>6} {:>8} {:>10} {:>8} {:>6} {:>8}",
+        "라운드", "정확도%", "지연ms", "엔트리", "풀수", "재훈련");
+    println!("  {}", "─".repeat(56));
+    for cp in &checkpoints {
+        // 경향성 화살표
+        let trend = if cp.round == 0 { " " }
+            else if cp.acc > checkpoints[cp.round - 1].acc { "↑" }
+            else if cp.acc < checkpoints[cp.round - 1].acc { "↓" }
+            else { "→" };
+        println!("  {:>4}   {:>6.1}% {:<2} {:>7.2}ms {:>7} {:>5} {:>6}",
+            cp.round, cp.acc, trend, cp.avg_ms, cp.entries, cp.pools, cp.retrains);
+    }
+
+    // ── 수렴 분석 ──
+    let initial_acc = checkpoints[0].acc;
+    let final_acc = checkpoints.last().unwrap().acc;
+    let initial_ms = checkpoints[0].avg_ms;
+    let final_ms = checkpoints.last().unwrap().avg_ms;
+    let initial_entries = checkpoints[0].entries;
+    let final_entries = checkpoints.last().unwrap().entries;
+
+    // 정확도가 개선된 라운드 수
+    let improving_rounds = checkpoints.windows(2)
+        .filter(|w| w[1].acc > w[0].acc).count();
+    let declining_rounds = checkpoints.windows(2)
+        .filter(|w| w[1].acc < w[0].acc).count();
+    let stable_rounds = checkpoints.windows(2)
+        .filter(|w| (w[1].acc - w[0].acc).abs() < 0.01).count();
+
+    println!("\n[수렴 분석]");
+    println!("  초기 정확도:     {:.1}%", initial_acc);
+    println!("  최종 정확도:     {:.1}%", final_acc);
+    println!("  정확도 변화:     {:+.1}%", final_acc - initial_acc);
+    println!("  개선 라운드:     {}", improving_rounds);
+    println!("  하락 라운드:     {}", declining_rounds);
+    println!("  안정 라운드:     {}", stable_rounds);
+
+    println!("\n[비용 일정성]");
+    println!("  초기 지연:       {:.2}ms (엔트리: {})", initial_ms, initial_entries);
+    println!("  최종 지연:       {:.2}ms (엔트리: {})", final_ms, final_entries);
+    println!("  엔트리 증가율:   {:.1}x", final_entries as f64 / initial_entries as f64);
+    let ms_change = (final_ms - initial_ms) / initial_ms * 100.0;
+    println!("  지연 변화율:     {:+.1}%", ms_change);
+
+    // ── 피드백 수당 정확도 효율 ──
+    let total_feedback = train_queries.len() * total_rounds;
+    let acc_per_feedback = (final_acc - initial_acc) / total_feedback as f64;
+    println!("\n[효율]");
+    println!("  총 피드백 수:    {}", total_feedback);
+    println!("  피드백당 정확도: {:+.3}%/feedback", acc_per_feedback);
+    println!("  경향성 비율:     {:.0}% 개선 / {:.0}% 하락",
+        improving_rounds as f64 / total_rounds as f64 * 100.0,
+        declining_rounds as f64 / total_rounds as f64 * 100.0);
+
+    // ── ASCII 수렴 그래프 ──
+    println!("\n[수렴 그래프]");
+    let min_acc = checkpoints.iter().map(|c| c.acc).fold(f64::MAX, f64::min);
+    let max_acc = checkpoints.iter().map(|c| c.acc).fold(f64::MIN, f64::max);
+    let range = (max_acc - min_acc).max(1.0);
+    let bar_width = 40;
+
+    for cp in &checkpoints {
+        let normalized = (cp.acc - min_acc) / range;
+        let filled = (normalized * bar_width as f64) as usize;
+        let bar: String = "█".repeat(filled) + &"░".repeat(bar_width - filled);
+        println!("  R{:>2} |{}| {:.1}%", cp.round, bar, cp.acc);
+    }
+
+    // ── 지연 그래프 ──
+    println!("\n[지연 그래프 (엔트리 증가에도 일정한가?)]");
+    let min_ms = checkpoints.iter().map(|c| c.avg_ms).fold(f64::MAX, f64::min);
+    let max_ms = checkpoints.iter().map(|c| c.avg_ms).fold(f64::MIN, f64::max);
+    let ms_range = (max_ms - min_ms).max(0.01);
+
+    for cp in &checkpoints {
+        let normalized = (cp.avg_ms - min_ms) / ms_range;
+        let filled = (normalized * bar_width as f64) as usize;
+        let bar: String = "█".repeat(filled) + &"░".repeat(bar_width - filled);
+        println!("  R{:>2} |{}| {:.2}ms (E={})",
+            cp.round, bar, cp.avg_ms, cp.entries);
+    }
+
+    // ── 결론 ──
+    println!("\n[결론]");
+    let tendency_valid = improving_rounds > declining_rounds;
+    let cost_stable = ms_change.abs() < 50.0; // 지연 변화 50% 이내면 안정
+
+    if tendency_valid && cost_stable {
+        println!("  ✓ 정확 경향성 유효: 피드백에 따라 정확도 수렴, 비용 일정");
+    } else if tendency_valid {
+        println!("  △ 정확 경향성 유효하나 비용 증가 (지연 {:+.1}%)", ms_change);
+    } else if cost_stable {
+        println!("  △ 비용은 일정하나 정확 경향성 불명확");
+    } else {
+        println!("  ✗ 경향성 + 비용 일정성 모두 미충족");
+    }
+
+    let stats = chat.growth_stats();
+    println!("\n[성장 통계]");
+    println!("  총 쿼리:       {}", stats.total_queries);
+    println!("  총 사이클:     {}", stats.total_cycles);
+    println!("  재훈련:        {}회", stats.classifier_retrains);
+    println!("  정리:          {}", stats.total_pruned);
+    println!("  출현 풀:       {}", stats.emergent_pools_created);
+    println!("  클론:          {}", stats.total_clones);
+    println!("  시드부스트:    {}", stats.gen_boosts);
 }

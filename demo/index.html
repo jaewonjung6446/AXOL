@@ -1,0 +1,809 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AXOL SORT BENCHMARK</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#050508;color:#ddd;font-family:'Segoe UI',system-ui,sans-serif;overflow-x:hidden}
+:root{--cyan:#4fc3f7;--red:#ef5350;--green:#66bb6a;--gold:#ffd740;--dim:#555}
+
+/* Header */
+.hdr{text-align:center;padding:12px 0 4px;background:linear-gradient(180deg,#0a0a14 0%,#050508 100%)}
+.hdr h1{font-size:20px;font-weight:300;color:#fff;letter-spacing:4px}
+.hdr h1 b{color:var(--cyan);font-weight:800}
+.hdr .sub{font-size:11px;color:#444;margin-top:2px}
+
+/* Controls */
+.ctrl{display:flex;justify-content:center;gap:14px;padding:6px 10px;flex-wrap:wrap;align-items:center;background:#08080e;border-bottom:1px solid #151520}
+.cg{display:flex;align-items:center;gap:4px}
+.cg label{font-size:10px;color:#666;white-space:nowrap}
+.cg input[type=range]{width:90px;accent-color:var(--cyan)}
+.cg select{background:#0e0e18;border:1px solid #222;color:#ccc;padding:2px 5px;border-radius:3px;font-size:10px}
+.val{color:var(--cyan);font-weight:700;min-width:36px;text-align:right;font-size:11px;font-variant-numeric:tabular-nums}
+button{border:none;padding:5px 14px;border-radius:4px;font-weight:700;font-size:11px;cursor:pointer;transition:all .15s}
+.btn-bench{background:linear-gradient(135deg,var(--cyan),#0288d1);color:#000;font-size:13px;padding:7px 22px;letter-spacing:1px;text-transform:uppercase}
+.btn-bench:hover{filter:brightness(1.2);transform:scale(1.03)}
+.btn-bench.running{background:var(--red);animation:pulse 1s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.7}}
+button.sec{background:#1a1a2e;color:#888}
+button.sec:hover{background:#252540;color:#ccc}
+button.on{background:#29b6f6;color:#000}
+.fpsd{font-size:10px;color:#444;font-variant-numeric:tabular-nums}.fpsd b{color:var(--cyan)}
+
+/* Bench overlay strip */
+.bench-strip{display:none;background:linear-gradient(90deg,#0a0a14,#0d1020,#0a0a14);border-bottom:1px solid #1a2030;padding:8px 20px;text-align:center}
+.bench-strip.show{display:flex;align-items:center;justify-content:center;gap:20px}
+.phase-name{font-size:16px;font-weight:700;color:var(--gold);letter-spacing:2px;text-transform:uppercase;min-width:160px;text-align:right}
+.phase-desc{font-size:10px;color:#666;min-width:180px;text-align:left}
+.phase-n{font-size:13px;color:var(--cyan);font-weight:700;font-variant-numeric:tabular-nums;min-width:80px}
+.prog-wrap{flex:1;max-width:300px}
+.prog-bg{height:6px;background:#111;border-radius:3px;overflow:hidden}
+.prog-fill{height:100%;background:linear-gradient(90deg,var(--cyan),var(--gold));border-radius:3px;transition:width .1s}
+.phase-pct{font-size:10px;color:#666;margin-top:2px}
+.bench-score{font-size:14px;color:var(--gold);font-weight:700;min-width:100px;font-variant-numeric:tabular-nums}
+
+/* Viewports + Graph */
+.vp-area{position:relative;display:flex;justify-content:center;padding:2px 4px;gap:2px}
+.vp-col{text-align:center}
+.vp-col .lbl{font-size:9px;color:#444;height:14px}
+.vp-col .lbl strong{color:#999}
+canvas{display:block;border:1px solid #151520;border-radius:2px}
+#orbitOverlay{position:absolute;top:14px;left:0;height:calc(100% - 14px);z-index:5;cursor:grab}
+#orbitOverlay:active{cursor:grabbing}
+
+/* FPS Graph */
+#cvGraph{background:#06060c;border-color:#1a1a2e}
+
+/* Big FPS comparison */
+.fps-cmp{display:flex;justify-content:center;gap:10px;padding:8px 14px;max-width:1440px;margin:0 auto}
+.fps-box{flex:1;max-width:340px;background:#0a0a14;border:1px solid #1a1a2e;border-radius:6px;padding:10px 14px;text-align:center}
+.fps-box.rx{border-color:#ef535022}.fps-box.ax{border-color:#4fc3f722}
+.fps-box .tag{font-size:9px;color:#555;text-transform:uppercase;letter-spacing:1px}
+.fps-box .big{font-size:32px;font-weight:800;margin:2px 0;font-variant-numeric:tabular-nums}
+.fps-box.rx .big{color:var(--red)}.fps-box.ax .big{color:var(--cyan)}
+.fps-box .det{font-size:9px;color:#444;line-height:1.4}
+.fps-box .det b{color:#888}
+.fps-gain-box{flex:0 0 100px;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#0a0a14;border:1px solid #66bb6a22;border-radius:6px;padding:8px}
+.fps-gain-box .gv{font-size:24px;font-weight:800;color:var(--green)}
+.fps-gain-box .gl{font-size:8px;color:#555;text-transform:uppercase}
+.stacked-row{display:flex;gap:6px;margin-top:6px;align-items:center;max-width:1440px;margin:6px auto 0;padding:0 14px}
+.stacked-lbl{font-size:10px;color:#555;min-width:50px;text-align:right}
+.stacked{flex:1;height:16px;background:#0a0a14;border-radius:2px;overflow:hidden;display:flex}
+.stacked .s{height:100%;display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:600;color:#000;transition:width .2s}
+.s.ren{background:#444}.s.srt-ex{background:var(--red)}.s.srt-ax{background:var(--cyan)}.s.idle{background:#0f0f18}
+.stacked-fps{font-size:10px;color:#666;min-width:44px;font-variant-numeric:tabular-nums}
+
+/* Metrics */
+.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:5px;padding:6px 14px;max-width:1440px;margin:0 auto}
+.mc{background:#0a0a12;border:1px solid #141420;border-radius:5px;padding:8px 10px}
+.mc h3{font-size:9px;color:#444;text-transform:uppercase;letter-spacing:1px;margin-bottom:5px}
+.mr{display:flex;justify-content:space-between;padding:1px 0;font-size:11px}
+.mr .l{color:#555}.mr .v{font-weight:600;font-variant-numeric:tabular-nums}
+.good{color:var(--green)}.great{color:var(--cyan)}.warn{color:var(--gold)}
+
+/* Heatmap */
+.hm{padding:4px 14px;max-width:1440px;margin:0 auto}
+.hm h3{font-size:9px;color:#444;text-transform:uppercase;letter-spacing:1px;margin-bottom:2px}
+.hm-leg{font-size:8px;color:#444;display:flex;gap:8px;margin-top:2px}
+.sw{display:inline-block;width:8px;height:8px;border-radius:1px;vertical-align:middle;margin-right:2px}
+
+/* Score overlay */
+.score-overlay{display:none;position:fixed;inset:0;background:rgba(5,5,8,.92);z-index:50;align-items:center;justify-content:center;flex-direction:column}
+.score-overlay.show{display:flex}
+.score-title{font-size:14px;color:#666;text-transform:uppercase;letter-spacing:3px;margin-bottom:8px}
+.score-big{font-size:72px;font-weight:800;color:var(--gold);font-variant-numeric:tabular-nums;text-shadow:0 0 40px #ffd74040}
+.score-sub{font-size:14px;color:#888;margin-top:8px}
+.score-row{display:flex;gap:30px;margin-top:20px}
+.score-col{text-align:center}
+.score-col .sv{font-size:28px;font-weight:700;font-variant-numeric:tabular-nums}
+.score-col .sl{font-size:10px;color:#555;text-transform:uppercase;margin-top:2px}
+.score-col.rx .sv{color:var(--red)}.score-col.ax .sv{color:var(--cyan)}
+.score-close{margin-top:24px;background:var(--cyan);color:#000;padding:10px 30px;font-size:14px;border-radius:6px}
+
+.footer{text-align:center;padding:8px;font-size:9px;color:#222;border-top:1px solid #0e0e14}
+.load-msg{position:fixed;inset:0;background:#050508;display:flex;align-items:center;justify-content:center;z-index:100;font-size:16px;color:#444}
+.load-msg b{color:var(--cyan)}
+@media(max-width:1200px){.metrics{grid-template-columns:repeat(2,1fr)}}
+</style>
+</head>
+<body>
+
+<div class="load-msg" id="loadMsg">Loading <b>AXOL BENCHMARK</b>...</div>
+
+<div class="hdr">
+    <h1><b>AXOL</b> SORT BENCHMARK</h1>
+    <div class="sub">Extreme transparency sorting stress test — Drag to orbit, or run the automated benchmark</div>
+</div>
+
+<div class="ctrl">
+    <div class="cg"><label>n:</label><input type="range" id="nSlider" min="0" max="100" value="43"><span class="val" id="nVal">2.0K</span></div>
+    <div class="cg"><label>k:</label><input type="range" id="kSlider" min="1" max="7" value="1" step="2"><span class="val" id="kVal">1</span></div>
+    <div class="cg"><label>FPS cap:</label><input type="range" id="fpsSlider" min="10" max="144" value="60"><span class="val" id="fpsTgt">60</span></div>
+    <div class="cg"><label>Load:</label><input type="range" id="loadSlider" min="1" max="30" value="8"><span class="val" id="loadVal">8ms</span></div>
+    <div class="cg"><label>Scene:</label>
+        <select id="sceneType">
+            <option value="inferno">Inferno</option>
+            <option value="crystal">Crystal Palace</option>
+            <option value="splat">Gaussian Splatting</option>
+            <option value="abyss">Deep Abyss</option>
+            <option value="jungle">Dense Jungle</option>
+        </select>
+    </div>
+    <button id="autoBtn" class="sec">Rotate</button>
+    <button id="benchBtn" class="btn-bench">START BENCHMARK</button>
+    <div class="fpsd">FPS <b id="fpsLive">—</b></div>
+</div>
+
+<div class="bench-strip" id="benchStrip">
+    <span class="phase-name" id="phaseName">—</span>
+    <span class="phase-n" id="phaseN">n=0</span>
+    <div class="prog-wrap"><div class="prog-bg"><div class="prog-fill" id="progFill" style="width:0%"></div></div><div class="phase-pct" id="phasePct">0%</div></div>
+    <span class="phase-desc" id="phaseDesc">—</span>
+    <span class="bench-score">Score: <span id="liveScore">0</span></span>
+</div>
+
+<div class="vp-area">
+    <div class="vp-col">
+        <div class="lbl">Exact Sort <strong>(100%)</strong></div>
+        <canvas id="cvExact" width="440" height="340"></canvas>
+    </div>
+    <div class="vp-col">
+        <div class="lbl">AXOL k=<strong id="kLbl">1</strong> <strong id="accLbl">(~63%)</strong></div>
+        <canvas id="cvAxol" width="440" height="340"></canvas>
+    </div>
+    <div class="vp-col">
+        <div class="lbl"><strong>Estimated GPU FPS</strong> — <span style="color:var(--red)">Radix</span> vs <span style="color:var(--cyan)">AXOL</span></div>
+        <canvas id="cvGraph" width="440" height="340"></canvas>
+    </div>
+    <div id="orbitOverlay"></div>
+</div>
+
+<div class="fps-cmp">
+    <div class="fps-box rx">
+        <div class="tag">Radix Sort (Exact)</div>
+        <div class="big" id="fpsRx">—<span style="font-size:14px;color:#888"> fps</span></div>
+        <div class="det">Render <b id="d1r">—</b>ms + Sort <b id="d1s">—</b>ms = <b id="d1t">—</b>ms</div>
+    </div>
+    <div class="fps-gain-box">
+        <div class="gv">+<span id="gainPct">0</span>%</div>
+        <div class="gl">FPS Gain</div>
+        <div class="gv" style="font-size:14px;color:var(--cyan)">+<span id="gainAbs">0</span></div>
+        <div class="gl">extra fps</div>
+    </div>
+    <div class="fps-box ax">
+        <div class="tag">AXOL k=<span id="kFLbl">1</span></div>
+        <div class="big" id="fpsAx">—<span style="font-size:14px;color:#888"> fps</span></div>
+        <div class="det">Render <b id="d2r">—</b>ms + Sort <b id="d2s">—</b>ms = <b id="d2t">—</b>ms</div>
+    </div>
+</div>
+<div class="stacked-row">
+    <span class="stacked-lbl">Radix</span>
+    <div class="stacked"><div class="s ren" id="sb1r" style="width:50%">Render</div><div class="s srt-ex" id="sb1s" style="width:30%">Sort</div><div class="s idle" id="sb1i" style="width:20%"></div></div>
+    <span class="stacked-fps" id="sf1">—</span>
+</div>
+<div class="stacked-row">
+    <span class="stacked-lbl">AXOL</span>
+    <div class="stacked"><div class="s ren" id="sb2r" style="width:50%">Render</div><div class="s srt-ax" id="sb2s" style="width:10%">Sort</div><div class="s idle" id="sb2i" style="width:40%"></div></div>
+    <span class="stacked-fps" id="sf2">—</span>
+</div>
+
+<div class="metrics">
+    <div class="mc"><h3>Sort Quality</h3>
+        <div class="mr"><span class="l">Exact Accuracy</span><span class="v warn" id="mAcc">—</span></div>
+        <div class="mr"><span class="l">Kendall tau</span><span class="v great" id="mTau">—</span></div>
+        <div class="mr"><span class="l">Adjacent Order</span><span class="v good" id="mAdj">—</span></div>
+    </div>
+    <div class="mc"><h3>Displacement</h3>
+        <div class="mr"><span class="l">Mean</span><span class="v good" id="mDM">—</span></div>
+        <div class="mr"><span class="l">Max</span><span class="v" id="mDX">—</span></div>
+        <div class="mr"><span class="l">Within ±1</span><span class="v good" id="mW1">—</span></div>
+    </div>
+    <div class="mc"><h3>JS Sort Time</h3>
+        <div class="mr"><span class="l">Exact</span><span class="v" id="mTE">—</span></div>
+        <div class="mr"><span class="l">AXOL</span><span class="v great" id="mTA">—</span></div>
+        <div class="mr"><span class="l">Speedup</span><span class="v great" id="mSp">—</span></div>
+    </div>
+    <div class="mc"><h3>Pixel Diff</h3>
+        <div class="mr"><span class="l">RMSE</span><span class="v good" id="mRm">—</span></div>
+        <div class="mr"><span class="l">Diff >5%</span><span class="v good" id="mDP">—</span></div>
+        <div class="mr"><span class="l">Max Ch</span><span class="v" id="mMC">—</span></div>
+    </div>
+</div>
+
+<div class="hm">
+    <h3>Displacement Heatmap</h3>
+    <canvas id="cvHeat" width="1440" height="16"></canvas>
+    <div class="hm-leg">
+        <span><span class="sw" style="background:#1b5e20"></span>0</span>
+        <span><span class="sw" style="background:#66bb6a"></span>±1</span>
+        <span><span class="sw" style="background:#ffee58"></span>±2-3</span>
+        <span><span class="sw" style="background:#ff9800"></span>±4-7</span>
+        <span><span class="sw" style="background:#f44336"></span>8+</span>
+    </div>
+</div>
+
+<div class="footer">AXOL SORT BENCHMARK — "63% Accurate, 99.999% Correct"</div>
+
+<!-- Score overlay -->
+<div class="score-overlay" id="scoreOvl">
+    <div class="score-title">Benchmark Complete</div>
+    <div class="score-big" id="finalScore">0</div>
+    <div class="score-sub">AXOL Sort Advantage Score</div>
+    <div class="score-row">
+        <div class="score-col rx"><div class="sv" id="scRxFps">0</div><div class="sl">Radix Avg FPS</div></div>
+        <div class="score-col ax"><div class="sv" id="scAxFps">0</div><div class="sl">AXOL Avg FPS</div></div>
+        <div class="score-col"><div class="sv good" id="scGain">+0%</div><div class="sl">FPS Gain</div></div>
+        <div class="score-col"><div class="sv warn" id="scPeak">0</div><div class="sl">Peak n (AXOL 60fps)</div></div>
+    </div>
+    <button class="score-close" id="scoreClose">CLOSE</button>
+</div>
+
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.163.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.163.0/examples/jsm/"}}</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+document.getElementById('loadMsg').style.display='none';
+
+// ═══════════════════════════════════════════════════
+// State
+// ═══════════════════════════════════════════════════
+const CVW=440,CVH=340,MAX_N=100000;
+let n=2000,k=1,targetFps=60,renderLoad=8,sceneType='inferno';
+let autoRotate=false,cameraDirty=true,needsRegen=true;
+let lastFrameTime=0,frameCount=0,fpsA=0,fpsS=0,dispFps=0;
+let tExact=0,tAxol=0;
+const mPos=new Float32Array(MAX_N*3),mCol=new Float32Array(MAX_N*3);
+const mAlpha=new Float32Array(MAX_N),mSize=new Float32Array(MAX_N);
+const depths=new Float64Array(MAX_N);
+let eOrd=new Int32Array(0),aOrd=new Int32Array(0),metrics={};
+
+// Benchmark
+let benchRunning=false,benchPhase=0,benchStart=0,benchProg=0;
+let benchScore=0,benchRxFpsSum=0,benchAxFpsSum=0,benchFrames=0,benchPeakAxol60=0;
+const fpsHistory=[];// {rx,ax} per graph point
+const PHASES=[
+    {name:'IGNITION',scene:'inferno',nS:2000,nE:8000,dur:6000,desc:'Particle VFX warm-up'},
+    {name:'INFERNO',scene:'inferno',nS:8000,nE:25000,dur:7000,desc:'Dense fire & smoke'},
+    {name:'CRYSTAL STORM',scene:'crystal',nS:25000,nE:50000,dur:7000,desc:'Transparent architecture'},
+    {name:'DEEP ABYSS',scene:'abyss',nS:50000,nE:80000,dur:7000,desc:'Underwater volumetric'},
+    {name:'APOCALYPSE',scene:'jungle',nS:80000,nE:100000,dur:7000,desc:'Maximum density'},
+];
+
+// ═══════════════════════════════════════════════════
+// RNG
+// ═══════════════════════════════════════════════════
+function R32(s){let v=s|0;return()=>{v=(v+0x6D2B79F5)|0;let t=Math.imul(v^(v>>>15),1|v);t=(t+Math.imul(t^(t>>>7),61|t))^t;return((t^(t>>>14))>>>0)/4294967296;};}
+function G(r){const u=Math.max(1e-10,r()),v=r();return Math.sqrt(-2*Math.log(u))*Math.cos(6.2832*v);}
+
+// ═══════════════════════════════════════════════════
+// Scene Generation — Extreme Density
+// ═══════════════════════════════════════════════════
+function sP(i,x,y,z,r,g,b,a,sz){
+    const j=i*3;
+    mPos[j]=x;mPos[j+1]=y;mPos[j+2]=z;
+    mCol[j]=Math.min(1,Math.max(0,r));mCol[j+1]=Math.min(1,Math.max(0,g));mCol[j+2]=Math.min(1,Math.max(0,b));
+    mAlpha[i]=Math.min(1,Math.max(.01,a));mSize[i]=sz;
+}
+
+function genParticles(){
+    const R=R32(42);
+    switch(sceneType){
+
+    case 'inferno':{
+        for(let i=0;i<n;i++){
+            const t=R();
+            if(t<.06){// embers on ground
+                const a=R()*6.28,r=R()*3;
+                sP(i,Math.cos(a)*r,-.1+R()*.15,Math.sin(a)*r,.15+R()*.1,.07+R()*.05,.03,.18+R()*.12,2+R()*3);
+            }else if(t<.25){// white-hot core
+                const h=R()*1.5,sp=G(R)*(0.3+h*.1),sp2=G(R)*(0.3+h*.1);
+                const ht=1-h/2;
+                sP(i,sp,h,sp2,1,.7*ht+.3,.15*ht,Math.max(.1,.8*ht),6+R()*10);
+            }else if(t<.45){// flame tongues
+                const h=.5+R()*3,sp=G(R)*(.4+h*.18),sp2=G(R)*(.4+h*.18);
+                const ht=Math.max(0,1-h/3.5);
+                sP(i,sp,h,sp2,.95,.3+ht*.45,.04+R()*.06,Math.max(.05,.55*ht),10+R()*16);
+            }else if(t<.65){// rising smoke (dense)
+                const h=2+R()*6,d=G(R)*(.7+h*.22),d2=G(R)*(.7+h*.22);
+                const f=Math.max(0,1-(h-2)/6);
+                const g=.22+R()*.18;
+                sP(i,d,h,d2,g,g,g+.02,Math.max(.02,.4*f),16+R()*28);
+            }else if(t<.78){// sparks
+                const a=R()*6.28,r=.5+R()*2.5,h=R()*5;
+                sP(i,Math.cos(a)*r,h,Math.sin(a)*r,1,.6+R()*.3,.1+R()*.2,.3+R()*.4,1+R()*2);
+            }else{// heat haze (large translucent)
+                const x=G(R)*2.5,y=1+R()*5,z=G(R)*2.5;
+                sP(i,x,y,z,.35,.2,.1,.02+R()*.04,25+R()*35);
+            }
+        }
+        break;}
+
+    case 'crystal':{
+        const blds=[ [-3,-1.5,2,1.5,6,.25,.45,.9], [0,-2.5,2.5,1.2,8,.3,.7,.55], [3,.5,1.8,2,5,.85,.55,.25],
+            [-.8,2.5,3,1,4,.5,.45,.75], [2.5,-3,1.5,1.5,7,.55,.8,.8], [-2.5,1.5,1.5,1.5,5,.7,.3,.5] ];
+        for(let i=0;i<n;i++){
+            const t=R();
+            if(t<.1){// ground
+                sP(i,(R()-.5)*12,-.05+R()*.05,(R()-.5)*12,.15,.15,.18,.35+R()*.15,4+R()*3);
+            }else if(t<.15){// reflections on ground
+                const bi=Math.floor(R()*blds.length),b=blds[bi];
+                sP(i,b[0]+G(R)*b[2]*.3,-.02,b[1]+G(R)*b[3]*.3,b[5]*.3,b[6]*.3,b[7]*.3,.06+R()*.08,8+R()*6);
+            }else{// glass panels — very dense
+                const bi=Math.floor(R()*blds.length),b=blds[bi];
+                const face=Math.floor(R()*4);
+                let x,y,z; y=R()*b[4];
+                if(face===0){x=b[0]-b[2]/2;z=b[1]+(R()-.5)*b[3];}
+                else if(face===1){x=b[0]+b[2]/2;z=b[1]+(R()-.5)*b[3];}
+                else if(face===2){x=b[0]+(R()-.5)*b[2];z=b[1]-b[3]/2;}
+                else{x=b[0]+(R()-.5)*b[2];z=b[1]+b[3]/2;}
+                const v=.8+R()*.2,ref=.25+.35*Math.max(0,Math.sin(y*.7));
+                sP(i,x,y,z,b[5]*v+ref*.12,b[6]*v+ref*.12,b[7]*v+ref*.18,.12+R()*.22,4+R()*5);
+            }
+        }
+        break;}
+
+    case 'splat':{
+        for(let i=0;i<n;i++){
+            const t=R();
+            if(t<.22){// floor
+                const x=(R()-.5)*7,z=(R()-.5)*7,pl=Math.sin(x*3)*.03;
+                sP(i,x,-.02+R()*.03,z,.42+R()*.1+pl,.28+R()*.07+pl,.14+R()*.04,.65+R()*.3,3+R()*3);
+            }else if(t<.38){// back wall
+                const x=(R()-.5)*7,y=R()*4.5,sh=.65+.12*Math.sin(x*2+y);
+                sP(i,x,y,-3.5+G(R)*.04,.72*sh,.7*sh,.66*sh,.55+R()*.35,3+R()*3);
+            }else if(t<.52){// side wall
+                const z=(R()-.5)*7,y=R()*4.5,sh=.6+.1*Math.sin(z*2+y);
+                sP(i,-3.5+G(R)*.04,y,z,.68*sh,.66*sh,.62*sh,.5+R()*.35,3+R()*3);
+            }else if(t<.62){// furniture (table+chairs)
+                const fx=(R()-.5)*2.5,fz=(R()-.5)*1.5,fy=R()<.5?1.1+G(R)*.02:R()*.9;
+                sP(i,fx,fy,fz,.32+R()*.08,.2+R()*.05,.1+R()*.04,.55+R()*.3,3+R()*2);
+            }else if(t<.72){// vase/objects
+                const a=R()*6.28,r=.1+R()*.2,h=1.15+R()*.6;
+                const ob=Math.floor(R()*3);
+                const cols=[[.7,.1,.08],[.1,.6,.15],[.15,.2,.65]];
+                const c=cols[ob];
+                sP(i,Math.cos(a)*r+(ob-1)*1.2,h,Math.sin(a)*r-.2,c[0]+R()*.15,c[1]+R()*.1,c[2]+R()*.1,.5+R()*.35,2+R()*3);
+            }else if(t<.82){// bookshelf on wall
+                const bx=2+G(R)*.15,by=R()*3.5,bz=-3.3+G(R)*.1;
+                const isBook=R()<.7;
+                sP(i,bx,by,bz,isBook?.3+R()*.5:.5+R()*.1,isBook?.1+R()*.3:.4+R()*.1,isBook?.1+R()*.4:.25+R()*.1,.6+R()*.3,2+R()*3);
+            }else{// ceiling lamp glow
+                const a=R()*6.28,r=R()*2,h=4.2-r*.15;
+                const br=Math.max(0,1-r/2.2);
+                sP(i,Math.cos(a)*r,h,Math.sin(a)*r,.95,.88,.65,br*.35+.01,5+R()*9);
+            }
+        }
+        break;}
+
+    case 'abyss':{
+        for(let i=0;i<n;i++){
+            const t=R();
+            if(t<.2){// sandy floor with ripples
+                const x=(R()-.5)*10,z=(R()-.5)*10;
+                const rip=Math.sin(x*2+z)*Math.cos(z*3)*.08;
+                sP(i,x,-2.5+rip+R()*.06,z,.65+R()*.1,.55+R()*.08,.3+R()*.08,.5+R()*.3,3+R()*4);
+            }else if(t<.35){// coral + anemones
+                const cx=(R()-.5)*7,cz=(R()-.5)*7,a=R()*6.28,r=R()*.7;
+                const h=-2.5+R()*1.5;
+                const tp=Math.floor(R()*4);
+                const cols=[[.8,.15,.25],[.9,.45,.1],[.2,.65,.35],[.85,.7,.15]];
+                const c=cols[tp];
+                sP(i,cx+Math.cos(a)*r,h,cz+Math.sin(a)*r,c[0]+R()*.12,c[1]+R()*.12,c[2]+R()*.08,.45+R()*.35,3+R()*5);
+            }else if(t<.5){// fish schools (small bright clusters)
+                const sx=(R()-.5)*4,sy=-1+R()*2,sz=(R()-.5)*4;
+                sP(i,sx+G(R)*.3,sy+G(R)*.15,sz+G(R)*.3,.6+R()*.3,.5+R()*.3,.2+R()*.2,.35+R()*.3,1+R()*2);
+            }else if(t<.65){// bubbles
+                const x=(R()-.5)*5,z=(R()-.5)*5,y=-2.5+R()*7;
+                sP(i,x+G(R)*.15,y,z+G(R)*.15,.65+R()*.1,.82+R()*.1,.95,.1+R()*.15,1+R()*3);
+            }else if(t<.82){// water volume haze
+                const x=(R()-.5)*10,y=(R()-.5)*6,z=(R()-.5)*10;
+                const df=1-(y+3)/7;
+                sP(i,x,y,z,.04+df*.08,.15+df*.12,.35+df*.12,.025+R()*.04,18+R()*28);
+            }else{// god rays
+                const x=(R()-.5)*6,z=(R()-.5)*6,y=-1+R()*5;
+                const br=Math.max(0,.7-Math.abs(x)*.12)*Math.max(0,(y+1)/5);
+                sP(i,x+G(R)*.1,y,z+G(R)*.1,.55+br*.3,.75+br*.15,.82+br*.1,br*.1+.005,7+R()*12);
+            }
+        }
+        break;}
+
+    case 'jungle':{
+        const trees=[];const tr=R32(77);
+        for(let t=0;t<16;t++) trees.push({x:(tr()-.5)*10,z:(tr()-.5)*10});
+        for(let i=0;i<n;i++){
+            const t=R();
+            if(t<.12){// ground moss/dirt
+                const x=(R()-.5)*12,z=(R()-.5)*12;
+                const g=R()<.6;
+                sP(i,x,-.04+R()*.08,z,g?.12+R()*.12:.22+R()*.08,g?.25+R()*.2:.17+R()*.06,g?.04+R()*.06:.07+R()*.04,.4+R()*.3,3+R()*4);
+            }else if(t<.25){// tree trunks + vines
+                const ti=Math.floor(R()*trees.length),tr=trees[ti];
+                const h=R()*5,a=R()*6.28,r=.12+R()*.1;
+                const vine=R()<.15;
+                sP(i,tr.x+Math.cos(a)*r+(vine?G(R)*.3:0),h,tr.z+Math.sin(a)*r+(vine?G(R)*.3:0),
+                    vine?.1+R()*.15:.28+R()*.08,vine?.3+R()*.2:.16+R()*.06,.06+R()*.04,.55+R()*.3,vine?1+R()*2:2+R()*4);
+            }else if(t<.7){// canopy — massive dense layers
+                const ti=Math.floor(R()*trees.length),tr=trees[ti];
+                const layer=3+R()*4.5,sp=.8+(layer-3)*.35;
+                const ox=G(R)*sp*.5,oz=G(R)*sp*.5;
+                const sun=Math.max(0,.4+(layer-3)/4.5*.5+R()*.25);
+                sP(i,tr.x+ox,layer,tr.z+oz,.08+sun*.22,.2+sun*.45,.03+sun*.12,.15+R()*.35,5+R()*9);
+            }else if(t<.82){// undergrowth ferns
+                const x=(R()-.5)*11,z=(R()-.5)*11,h=R()*1.2;
+                sP(i,x,h,z,.08+R()*.1,.28+R()*.2,.04+R()*.06,.22+R()*.2,4+R()*6);
+            }else if(t<.92){// mist/fog layers
+                const x=(R()-.5)*10,y=.5+R()*3,z=(R()-.5)*10;
+                sP(i,x,y,z,.3,.35,.3,.03+R()*.04,20+R()*30);
+            }else{// light shafts through canopy
+                const x=(R()-.5)*8,z=(R()-.5)*8,y=.5+R()*6;
+                const br=.2+R()*.4;
+                sP(i,x,y,z,.9,.85,.45,br*.05+.005,10+R()*18);
+            }
+        }
+        break;}
+    }
+}
+
+// ═══════════════════════════════════════════════════
+// Sort
+// ═══════════════════════════════════════════════════
+function axolSort(d,c,sl){
+    let mn=Infinity,mx=-Infinity;
+    for(let i=0;i<c;i++){if(d[i]<mn)mn=d[i];if(d[i]>mx)mx=d[i];}
+    const rng=mx-mn,res=new Int32Array(c);
+    if(rng<1e-12){for(let i=0;i<c;i++)res[i]=i;return res;}
+    const nb=sl*c,inv=(nb-1)/rng;
+    const cnt=new Uint32Array(nb);
+    for(let i=0;i<c;i++)cnt[Math.min(((d[i]-mn)*inv)|0,nb-1)]++;
+    const pre=new Uint32Array(nb+1);
+    for(let i=0;i<nb;i++)pre[i+1]=pre[i]+cnt[i];
+    const off=new Uint32Array(nb);off.set(pre.subarray(0,nb));
+    for(let i=0;i<c;i++){const b=Math.min(((d[i]-mn)*inv)|0,nb-1);res[off[b]++]=i;}
+    return res;
+}
+function exSort(d,c){const idx=new Int32Array(c);for(let i=0;i<c;i++)idx[i]=i;idx.sort((a,b)=>d[a]-d[b]);return idx;}
+
+// ═══════════════════════════════════════════════════
+// Three.js
+// ═══════════════════════════════════════════════════
+const cvE=document.getElementById('cvExact'),cvA=document.getElementById('cvAxol');
+const cvG=document.getElementById('cvGraph'),ctxG=cvG.getContext('2d');
+
+const V=`attribute float aA;attribute float aS;varying vec3 vC;varying float vA;
+void main(){vC=color;vA=aA;vec4 mv=modelViewMatrix*vec4(position,1.);gl_PointSize=clamp(aS*(280./-mv.z),.5,96.);gl_Position=projectionMatrix*mv;}`;
+const F=`precision mediump float;varying vec3 vC;varying float vA;
+void main(){float d=length(gl_PointCoord-.5);if(d>.5)discard;float e=1.-smoothstep(.2,.5,d);gl_FragColor=vec4(vC,vA*e);}`;
+
+const cam=new THREE.PerspectiveCamera(50,CVW/CVH,.1,200);
+cam.position.set(3,3,8);
+const ov=document.getElementById('orbitOverlay');
+const ctrl=new OrbitControls(cam,ov);
+ctrl.target.set(0,2,0);ctrl.enableDamping=true;ctrl.dampingFactor=.12;
+ctrl.addEventListener('change',()=>{cameraDirty=true;});
+
+const bgs={inferno:0x080404,crystal:0x060810,splat:0x080810,abyss:0x020608,jungle:0x040804};
+function mkScene(bg){
+    const sc=new THREE.Scene();sc.background=new THREE.Color(bg);
+    const geo=new THREE.BufferGeometry();
+    geo.setAttribute('position',new THREE.BufferAttribute(new Float32Array(MAX_N*3),3));
+    geo.setAttribute('color',new THREE.BufferAttribute(new Float32Array(MAX_N*3),3));
+    geo.setAttribute('aA',new THREE.BufferAttribute(new Float32Array(MAX_N),1));
+    geo.setAttribute('aS',new THREE.BufferAttribute(new Float32Array(MAX_N),1));
+    geo.setDrawRange(0,n);
+    sc.add(new THREE.Points(geo,new THREE.ShaderMaterial({vertexShader:V,fragmentShader:F,transparent:true,depthWrite:false,vertexColors:true})));
+    return{sc,geo};
+}
+const s1=mkScene(bgs.inferno),s2=mkScene(bgs.inferno);
+const r1=new THREE.WebGLRenderer({canvas:cvE,antialias:true,preserveDrawingBuffer:true});r1.setSize(CVW,CVH);
+const r2=new THREE.WebGLRenderer({canvas:cvA,antialias:true,preserveDrawingBuffer:true});r2.setSize(CVW,CVH);
+
+function updBg(){const c=new THREE.Color(bgs[sceneType]||0x080808);s1.sc.background=c;s2.sc.background=c;}
+function fitOv(){const a=cvE.getBoundingClientRect(),b=cvA.getBoundingClientRect(),p=ov.parentElement.getBoundingClientRect();
+    ov.style.left=(a.left-p.left)+'px';ov.style.width=(b.right-a.left)+'px';ov.style.top=(a.top-p.top)+'px';ov.style.height=a.height+'px';}
+window.addEventListener('resize',fitOv);requestAnimationFrame(fitOv);
+
+function fillBuf(geo,ord){
+    const p=geo.attributes.position.array,c=geo.attributes.color.array,a=geo.attributes.aA.array,s=geo.attributes.aS.array;
+    for(let i=0;i<n;i++){const j=ord[i],i3=i*3,j3=j*3;
+        p[i3]=mPos[j3];p[i3+1]=mPos[j3+1];p[i3+2]=mPos[j3+2];
+        c[i3]=mCol[j3];c[i3+1]=mCol[j3+1];c[i3+2]=mCol[j3+2];
+        a[i]=mAlpha[j];s[i]=mSize[j];}
+    geo.attributes.position.needsUpdate=true;geo.attributes.color.needsUpdate=true;
+    geo.attributes.aA.needsUpdate=true;geo.attributes.aS.needsUpdate=true;geo.setDrawRange(0,n);
+}
+
+// ═══════════════════════════════════════════════════
+// FPS Graph
+// ═══════════════════════════════════════════════════
+const GW=CVW,GH=CVH,MAX_HIST=300;
+function drawGraph(){
+    const c=ctxG;
+    c.fillStyle='#06060c';c.fillRect(0,0,GW,GH);
+    // Grid
+    c.strokeStyle='#151520';c.lineWidth=1;
+    const yLines=[30,60,90,120,144];
+    c.font='9px monospace';c.fillStyle='#333';
+    for(const fps of yLines){
+        const y=GH-(fps/160)*GH;
+        c.beginPath();c.moveTo(0,y);c.lineTo(GW,y);c.stroke();
+        c.fillText(fps+'fps',2,y-2);
+    }
+    // 60fps reference
+    c.strokeStyle='#66bb6a22';c.lineWidth=2;
+    const y60=GH-(60/160)*GH;
+    c.beginPath();c.moveTo(0,y60);c.lineTo(GW,y60);c.stroke();
+
+    if(fpsHistory.length<2) return;
+    const step=GW/MAX_HIST;
+    const startI=Math.max(0,fpsHistory.length-MAX_HIST);
+
+    // Fill between (advantage area)
+    c.fillStyle='rgba(102,187,106,.08)';
+    c.beginPath();
+    for(let i=startI;i<fpsHistory.length;i++){
+        const x=(i-startI)*step;
+        c.lineTo(x,GH-(Math.min(160,fpsHistory[i].ax)/160)*GH);
+    }
+    for(let i=fpsHistory.length-1;i>=startI;i--){
+        const x=(i-startI)*step;
+        c.lineTo(x,GH-(Math.min(160,fpsHistory[i].rx)/160)*GH);
+    }
+    c.closePath();c.fill();
+
+    // Radix line
+    c.strokeStyle='#ef5350';c.lineWidth=2;c.beginPath();
+    for(let i=startI;i<fpsHistory.length;i++){
+        const x=(i-startI)*step,y=GH-(Math.min(160,fpsHistory[i].rx)/160)*GH;
+        i===startI?c.moveTo(x,y):c.lineTo(x,y);
+    }c.stroke();
+
+    // AXOL line
+    c.strokeStyle='#4fc3f7';c.lineWidth=2;c.beginPath();
+    for(let i=startI;i<fpsHistory.length;i++){
+        const x=(i-startI)*step,y=GH-(Math.min(160,fpsHistory[i].ax)/160)*GH;
+        i===startI?c.moveTo(x,y):c.lineTo(x,y);
+    }c.stroke();
+
+    // Labels
+    if(fpsHistory.length>0){
+        const last=fpsHistory[fpsHistory.length-1];
+        const lx=GW-55;
+        c.font='bold 11px monospace';
+        c.fillStyle='#ef5350';c.fillText('Radix: '+Math.round(last.rx),lx,16);
+        c.fillStyle='#4fc3f7';c.fillText(' AXOL: '+Math.round(last.ax),lx,30);
+    }
+}
+
+// ═══════════════════════════════════════════════════
+// Metrics & Diff
+// ═══════════════════════════════════════════════════
+function compMetrics(){
+    const eR=new Int32Array(n),aR=new Int32Array(n);
+    for(let i=0;i<n;i++){eR[eOrd[i]]=i;aR[aOrd[i]]=i;}
+    let cor=0;for(let i=0;i<n;i++)if(eOrd[i]===aOrd[i])cor++;
+    let tD=0,mD=0,w1=0;const ds=new Int32Array(n);
+    for(let i=0;i<n;i++){const d=Math.abs(eR[i]-aR[i]);ds[i]=d;tD+=d;if(d>mD)mD=d;if(d<=1)w1++;}
+    let aO=0;for(let i=0;i<n-1;i++)if(depths[aOrd[i]]<=depths[aOrd[i+1]])aO++;
+    const rng=R32(777);let co=0,to=0;const sa=Math.min(150000,n*(n-1)/2);
+    for(let s=0;s<sa;s++){const a=(rng()*n)|0,b=(rng()*n)|0;if(a===b)continue;to++;if((eR[a]<eR[b])===(aR[a]<aR[b]))co++;}
+    metrics={acc:cor/n,tau:to>0?co/to:1,adj:n>1?aO/(n-1):1,meanD:tD/n,maxD:mD,w1:w1/n,ds};
+}
+
+const px1=new Uint8Array(CVW*CVH*4),px2=new Uint8Array(CVW*CVH*4);
+function compDiff(){
+    const g1=r1.getContext(),g2=r2.getContext();
+    g1.readPixels(0,0,CVW,CVH,g1.RGBA,g1.UNSIGNED_BYTE,px1);
+    g2.readPixels(0,0,CVW,CVH,g2.RGBA,g2.UNSIGNED_BYTE,px2);
+    let sq=0,dp=0,mc=0;
+    for(let i=0;i<px1.length;i+=4){
+        const dr=Math.abs(px1[i]-px2[i]),dg=Math.abs(px1[i+1]-px2[i+1]),db=Math.abs(px1[i+2]-px2[i+2]);
+        mc=Math.max(mc,dr,dg,db);sq+=(dr*dr+dg*dg+db*db)/3;if(dr+dg+db>12)dp++;
+    }
+    const tot=CVW*CVH;
+    metrics.rmse=Math.sqrt(sq/tot);metrics.diffPct=dp/tot;metrics.maxCh=mc;
+}
+
+const cvH=document.getElementById('cvHeat'),ctxH=cvH.getContext('2d');
+function drawHeat(){
+    if(!metrics.ds)return;const W=cvH.width,H=cvH.height;
+    ctxH.fillStyle='#0a0a12';ctxH.fillRect(0,0,W,H);
+    const st=Math.max(1,W/n);
+    for(let i=0;i<n&&i*st<W;i++){
+        const d=metrics.ds[eOrd[i]];
+        ctxH.fillStyle=d===0?'#1b5e20':d<=1?'#66bb6a':d<=3?'#ffee58':d<=7?'#ff9800':'#f44336';
+        ctxH.fillRect((i*st)|0,0,Math.max(1,Math.ceil(st)),H);
+    }
+}
+
+// ═══════════════════════════════════════════════════
+// GPU timing estimates (from AXOL bench data)
+// ═══════════════════════════════════════════════════
+function gpuTimes(){
+    const s=Math.sqrt(n/1e6);
+    return{rx:Math.max(.4,6*s+.3),ax:Math.max(.15,1.6*s+.1)};
+}
+
+// ═══════════════════════════════════════════════════
+// UI Update
+// ═══════════════════════════════════════════════════
+function updUI(){
+    const m=metrics,p=v=>(v*100).toFixed(2)+'%';
+    document.getElementById('accLbl').textContent='(~'+(m.acc*100).toFixed(0)+'%)';
+    document.getElementById('kLbl').textContent=k;document.getElementById('kFLbl').textContent=k;
+    document.getElementById('mAcc').textContent=(m.acc*100).toFixed(1)+'%';
+    document.getElementById('mTau').textContent=(m.tau*100).toFixed(3)+'%';
+    document.getElementById('mAdj').textContent=p(m.adj);
+    document.getElementById('mDM').textContent=m.meanD.toFixed(2);
+    document.getElementById('mDX').textContent=m.maxD+'';
+    document.getElementById('mW1').textContent=p(m.w1);
+    document.getElementById('mTE').textContent=tExact.toFixed(2)+'ms';
+    document.getElementById('mTA').textContent=tAxol.toFixed(2)+'ms';
+    document.getElementById('mSp').textContent=(tAxol>0?(tExact/tAxol):0).toFixed(1)+'x';
+    if(m.rmse!=null){document.getElementById('mRm').textContent=m.rmse.toFixed(3);
+        document.getElementById('mDP').textContent=(m.diffPct*100).toFixed(2)+'%';
+        document.getElementById('mMC').textContent=m.maxCh+'/255';}
+
+    // FPS comparison
+    const gt=gpuTimes(),rl=renderLoad;
+    const totRx=rl+gt.rx,totAx=rl+gt.ax;
+    const fRx=Math.min(999,Math.round(1000/totRx)),fAx=Math.min(999,Math.round(1000/totAx));
+    const gA=fAx-fRx,gP=fRx>0?Math.round((fAx/fRx-1)*100):0;
+    document.getElementById('fpsRx').innerHTML=fRx+'<span style="font-size:14px;color:#888"> fps</span>';
+    document.getElementById('fpsAx').innerHTML=fAx+'<span style="font-size:14px;color:#888"> fps</span>';
+    document.getElementById('gainPct').textContent=gP;document.getElementById('gainAbs').textContent=gA;
+    document.getElementById('d1r').textContent=rl;document.getElementById('d1s').textContent=gt.rx.toFixed(1);document.getElementById('d1t').textContent=totRx.toFixed(1);
+    document.getElementById('d2r').textContent=rl;document.getElementById('d2s').textContent=gt.ax.toFixed(1);document.getElementById('d2t').textContent=totAx.toFixed(1);
+
+    const mx=Math.max(totRx,totAx)*1.15;
+    const r1p=rl/mx*100,s1p=gt.rx/mx*100,i1p=Math.max(0,100-r1p-s1p);
+    const r2p=rl/mx*100,s2p=gt.ax/mx*100,i2p=Math.max(0,100-r2p-s2p);
+    document.getElementById('sb1r').style.width=r1p+'%';document.getElementById('sb1s').style.width=s1p+'%';document.getElementById('sb1i').style.width=i1p+'%';
+    document.getElementById('sb2r').style.width=r2p+'%';document.getElementById('sb2s').style.width=s2p+'%';document.getElementById('sb2i').style.width=i2p+'%';
+    document.getElementById('sb1r').textContent=r1p>12?'Render':'';document.getElementById('sb1s').textContent=s1p>8?'Sort':'';
+    document.getElementById('sb2r').textContent=r2p>12?'Render':'';document.getElementById('sb2s').textContent=s2p>8?'Sort':'';
+    document.getElementById('sf1').textContent=fRx+' fps';document.getElementById('sf2').textContent=fAx+' fps';
+
+    // Push to graph
+    fpsHistory.push({rx:fRx,ax:fAx});
+    if(fpsHistory.length>MAX_HIST*2) fpsHistory.splice(0,fpsHistory.length-MAX_HIST);
+    drawGraph();
+
+    // Benchmark tracking
+    if(benchRunning){
+        benchRxFpsSum+=fRx;benchAxFpsSum+=fAx;benchFrames++;
+        benchScore+=Math.round(fAx*(n/1000));
+        if(fAx>=60) benchPeakAxol60=Math.max(benchPeakAxol60,n);
+        document.getElementById('liveScore').textContent=benchScore;
+    }
+}
+
+// ═══════════════════════════════════════════════════
+// Controls
+// ═══════════════════════════════════════════════════
+function s2n(v){return Math.round(Math.pow(10,2+v*3/100));}
+function n2s(v){return Math.round((Math.log10(v)-2)*100/3);}
+function fN(v){return v>=1000?(v/1000).toFixed(v>=10000?0:1)+'K':v+'';}
+const nSl=document.getElementById('nSlider'),nVl=document.getElementById('nVal');
+nSl.value=n2s(n);nVl.textContent=fN(n);
+nSl.addEventListener('input',()=>{if(benchRunning)return;n=s2n(+nSl.value);nVl.textContent=fN(n);needsRegen=true;cameraDirty=true;});
+document.getElementById('kSlider').addEventListener('input',e=>{k=+e.target.value;document.getElementById('kVal').textContent=k;cameraDirty=true;});
+document.getElementById('fpsSlider').addEventListener('input',e=>{targetFps=+e.target.value;document.getElementById('fpsTgt').textContent=targetFps;});
+document.getElementById('loadSlider').addEventListener('input',e=>{renderLoad=+e.target.value;document.getElementById('loadVal').textContent=renderLoad+'ms';});
+document.getElementById('sceneType').addEventListener('change',e=>{
+    if(benchRunning)return;sceneType=e.target.value;updBg();
+    const cp={inferno:{p:[3,3,8],t:[0,2.5,0]},crystal:{p:[6,5,9],t:[0,2,0]},splat:{p:[4,3,6],t:[0,1.5,0]},abyss:{p:[3,1,7],t:[0,-.5,0]},jungle:{p:[5,4,8],t:[0,2.5,0]}};
+    const c=cp[sceneType]||cp.inferno;cam.position.set(...c.p);ctrl.target.set(...c.t);ctrl.update();
+    needsRegen=true;cameraDirty=true;});
+document.getElementById('autoBtn').addEventListener('click',()=>{
+    autoRotate=!autoRotate;ctrl.autoRotate=autoRotate;ctrl.autoRotateSpeed=2;
+    const b=document.getElementById('autoBtn');b.classList.toggle('on',autoRotate);b.classList.toggle('sec',!autoRotate);if(autoRotate)cameraDirty=true;});
+
+// ═══════════════════════════════════════════════════
+// Benchmark Controller
+// ═══════════════════════════════════════════════════
+function startBench(){
+    benchRunning=true;benchPhase=0;benchStart=performance.now();benchScore=0;
+    benchRxFpsSum=0;benchAxFpsSum=0;benchFrames=0;benchPeakAxol60=0;
+    fpsHistory.length=0;
+    ctrl.autoRotate=true;ctrl.autoRotateSpeed=3;autoRotate=true;
+    document.getElementById('autoBtn').classList.add('on');
+    document.getElementById('autoBtn').classList.remove('sec');
+    document.getElementById('benchStrip').classList.add('show');
+    document.getElementById('benchBtn').textContent='RUNNING...';
+    document.getElementById('benchBtn').classList.add('running');
+    applyPhase();
+}
+
+function applyPhase(){
+    if(benchPhase>=PHASES.length){endBench();return;}
+    const ph=PHASES[benchPhase];
+    sceneType=ph.scene;updBg();
+    document.getElementById('phaseName').textContent=ph.name;
+    document.getElementById('phaseDesc').textContent=ph.desc;
+    document.getElementById('sceneType').value=ph.scene;
+    benchStart=performance.now();
+}
+
+function tickBench(){
+    const ph=PHASES[benchPhase];
+    const elapsed=performance.now()-benchStart;
+    const prog=Math.min(1,elapsed/ph.dur);
+    n=Math.round(ph.nS+(ph.nE-ph.nS)*prog);
+    nSl.value=n2s(n);nVl.textContent=fN(n);
+    document.getElementById('phaseN').textContent='n='+fN(n);
+    const totalProg=((benchPhase+prog)/PHASES.length)*100;
+    document.getElementById('progFill').style.width=totalProg+'%';
+    document.getElementById('phasePct').textContent=Math.round(totalProg)+'%';
+    needsRegen=true;cameraDirty=true;
+    if(prog>=1){benchPhase++;applyPhase();}
+}
+
+function endBench(){
+    benchRunning=false;
+    ctrl.autoRotate=false;autoRotate=false;
+    document.getElementById('autoBtn').classList.remove('on');
+    document.getElementById('autoBtn').classList.add('sec');
+    document.getElementById('benchStrip').classList.remove('show');
+    document.getElementById('benchBtn').textContent='START BENCHMARK';
+    document.getElementById('benchBtn').classList.remove('running');
+    // Show score
+    const avgRx=benchFrames>0?Math.round(benchRxFpsSum/benchFrames):0;
+    const avgAx=benchFrames>0?Math.round(benchAxFpsSum/benchFrames):0;
+    const gain=avgRx>0?Math.round((avgAx/avgRx-1)*100):0;
+    document.getElementById('finalScore').textContent=benchScore.toLocaleString();
+    document.getElementById('scRxFps').textContent=avgRx;
+    document.getElementById('scAxFps').textContent=avgAx;
+    document.getElementById('scGain').textContent='+'+gain+'%';
+    document.getElementById('scPeak').textContent=fN(benchPeakAxol60);
+    document.getElementById('scoreOvl').classList.add('show');
+}
+
+document.getElementById('benchBtn').addEventListener('click',()=>{
+    if(benchRunning){benchPhase=PHASES.length;endBench();}else startBench();
+});
+document.getElementById('scoreClose').addEventListener('click',()=>{
+    document.getElementById('scoreOvl').classList.remove('show');
+});
+
+// ═══════════════════════════════════════════════════
+// Animation Loop
+// ═══════════════════════════════════════════════════
+function animate(now){
+    requestAnimationFrame(animate);
+    const ms=1000/targetFps;
+    const dt=now-lastFrameTime;
+    if(dt<ms*.92)return;
+    lastFrameTime=now;
+
+    fpsA+=dt;fpsS++;
+    if(fpsA>500){dispFps=Math.round(1000/(fpsA/fpsS));document.getElementById('fpsLive').textContent=dispFps;fpsA=0;fpsS=0;}
+
+    ctrl.update();
+    if(autoRotate)cameraDirty=true;
+    if(benchRunning)tickBench();
+    if(needsRegen){genParticles();needsRegen=false;}
+
+    if(cameraDirty){
+        const e=cam.matrixWorldInverse.elements;
+        for(let i=0;i<n;i++){const j=i*3;depths[i]=e[2]*mPos[j]+e[6]*mPos[j+1]+e[10]*mPos[j+2]+e[14];}
+        const t0=performance.now();eOrd=exSort(depths,n);tExact=performance.now()-t0;
+        const t1=performance.now();aOrd=axolSort(depths,n,k);tAxol=performance.now()-t1;
+        fillBuf(s1.geo,eOrd);fillBuf(s2.geo,aOrd);
+        compMetrics();cameraDirty=false;
+    }
+
+    r1.render(s1.sc,cam);r2.render(s2.sc,cam);
+
+    frameCount++;
+    if(frameCount%4===0){compDiff();drawHeat();updUI();}
+}
+
+genParticles();cameraDirty=true;
+document.getElementById('sceneType').dispatchEvent(new Event('change'));
+requestAnimationFrame(animate);
+</script>
+</body>
+</html>

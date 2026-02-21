@@ -405,6 +405,111 @@ impl WaveResonanceReservoir {
     pub fn num_scales(&self) -> usize {
         self.registers.len()
     }
+
+    /// Number of nodes per register.
+    pub fn num_nodes(&self) -> usize {
+        self.registers.first().map_or(4, |r| r.num_nodes)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Multi-slit interference
+// ---------------------------------------------------------------------------
+
+/// Create a variant reservoir for multi-slit experiment.
+///
+/// Each slit_idx produces a different physical configuration —
+/// different τ values and interference patterns, like slits of
+/// different widths at different positions.
+pub fn make_slit_reservoir(dim: usize, slit_idx: usize, num_nodes: usize) -> WaveResonanceReservoir {
+    let configs: Vec<(f64, InterferencePattern)> = match slit_idx % 4 {
+        0 => vec![
+            (2.0, InterferencePattern::Destructive),
+            (5.0, InterferencePattern::Constructive),
+            (15.0, InterferencePattern::Conditional),
+        ],
+        1 => vec![
+            (3.0, InterferencePattern::Constructive),
+            (8.0, InterferencePattern::Conditional),
+            (20.0, InterferencePattern::Destructive),
+        ],
+        2 => vec![
+            (1.5, InterferencePattern::Conditional),
+            (4.0, InterferencePattern::Destructive),
+            (12.0, InterferencePattern::Constructive),
+        ],
+        _ => vec![
+            (4.0, InterferencePattern::Additive),
+            (10.0, InterferencePattern::Multiplicative),
+            (25.0, InterferencePattern::Constructive),
+        ],
+    };
+    WaveResonanceReservoir::with_scales(dim, &configs, num_nodes)
+}
+
+/// Interfere multiple reservoir states (multi-slit experiment).
+///
+/// Complex amplitudes are ADDED across slits (not averaged).
+/// Phase-aligned signals reinforce (constructive interference),
+/// phase-misaligned signals cancel (destructive interference).
+/// The interference pattern encodes information from ALL slits.
+pub fn interfere_states(states: &[ReservoirState], dim: usize) -> ReservoirState {
+    if states.len() <= 1 {
+        return states[0].clone();
+    }
+
+    let num_scales = states[0].scales.len();
+
+    // Interfere corresponding scale waves across slits
+    let mut interfered_scales: Vec<Wave> = Vec::with_capacity(num_scales);
+    for s in 0..num_scales {
+        let mut data = vec![Complex64::new(0.0, 0.0); dim];
+        for state in states {
+            if s < state.scales.len() {
+                for (i, &amp) in state.scales[s].amplitudes.data.iter().enumerate() {
+                    if i < dim { data[i] += amp; }
+                }
+            }
+        }
+        interfered_scales.push(Wave {
+            amplitudes: ComplexVec::new(data).normalized(),
+            t: 0.0,
+            density: None,
+            dim,
+            metrics: CollapseMetrics::new(),
+        });
+    }
+
+    // Interfere merged waves
+    let mut merged_data = vec![Complex64::new(0.0, 0.0); dim];
+    for state in states {
+        for (i, &amp) in state.merged.amplitudes.data.iter().enumerate() {
+            if i < dim { merged_data[i] += amp; }
+        }
+    }
+    let merged = Wave {
+        amplitudes: ComplexVec::new(merged_data).normalized(),
+        t: 0.0,
+        density: None,
+        dim,
+        metrics: CollapseMetrics::new(),
+    };
+
+    // Collect ALL node waves from all slits (richer μ/σ statistics)
+    let node_waves: Vec<Wave> = states.iter()
+        .flat_map(|s| s.node_waves.iter().cloned())
+        .collect();
+
+    let phase_coherence = compute_phase_coherence(&interfered_scales);
+    let resonance_energy: f64 = states.iter().map(|s| s.resonance_energy).sum();
+
+    ReservoirState {
+        merged,
+        scales: interfered_scales,
+        node_waves,
+        phase_coherence,
+        resonance_energy,
+    }
 }
 
 // ---------------------------------------------------------------------------
