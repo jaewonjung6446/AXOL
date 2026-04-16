@@ -117,6 +117,11 @@ from axol.quantum.sentence_decoder import (
     SentenceDecoderLanguageModel,
     SnapResult,
 )
+from axol.quantum.fractal_text import (
+    NoiseField,
+    FractalTextGenerator,
+    FractalResult,
+)
 from axol.quantum.dsl import (
     parse_quantum,
     QuantumProgram,
@@ -172,6 +177,8 @@ __all__ = [
     "HierarchicalResult", "HierarchicalReport",
     # Sentence-snap decoder (Intent + Dictionary)
     "SentenceDictionary", "SentenceDecoderLanguageModel", "SnapResult",
+    # Fractal noise composition (Perlin/fBm-style creative blends)
+    "NoiseField", "FractalTextGenerator", "FractalResult",
     # DSL
     "parse_quantum", "QuantumProgram",
     "ObserveStatement", "ReobserveStatement", "ConditionalBlock",
