@@ -86,6 +86,13 @@ from axol.quantum.online import (
     OnlineLearner,
     LearningReport,
 )
+from axol.quantum.conversation import (
+    CharTokenizer,
+    Verbalizer,
+    WorkingMemory,
+    ConversationalAxol,
+    ConversationReport,
+)
 from axol.quantum.dsl import (
     parse_quantum,
     QuantumProgram,
@@ -127,6 +134,9 @@ __all__ = [
     "observe", "reobserve",
     # Online learning
     "OnlineLearner", "LearningReport",
+    # Conversational (dual-layer)
+    "CharTokenizer", "Verbalizer", "WorkingMemory",
+    "ConversationalAxol", "ConversationReport",
     # DSL
     "parse_quantum", "QuantumProgram",
     "ObserveStatement", "ReobserveStatement", "ConditionalBlock",
