@@ -97,6 +97,11 @@ from axol.quantum.language_model import (
     LanguageModel,
     GenerationResult,
 )
+from axol.quantum.two_stage import (
+    TwoStageLanguageModel,
+    TwoStageGeneration,
+    TwoStageReport,
+)
 from axol.quantum.dsl import (
     parse_quantum,
     QuantumProgram,
@@ -143,6 +148,8 @@ __all__ = [
     "ConversationalAxol", "ConversationReport",
     # Language model
     "LanguageModel", "GenerationResult",
+    # Two-stage (intent + surface)
+    "TwoStageLanguageModel", "TwoStageGeneration", "TwoStageReport",
     # DSL
     "parse_quantum", "QuantumProgram",
     "ObserveStatement", "ReobserveStatement", "ConditionalBlock",
