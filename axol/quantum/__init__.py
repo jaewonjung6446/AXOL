@@ -82,6 +82,51 @@ from axol.quantum.density import (
 )
 from axol.quantum.weaver import weave
 from axol.quantum.observatory import observe, reobserve
+from axol.quantum.online import (
+    OnlineLearner,
+    LearningReport,
+)
+from axol.quantum.conversation import (
+    CharTokenizer,
+    Verbalizer,
+    WorkingMemory,
+    ConversationalAxol,
+    ConversationReport,
+    vocab_from_texts,
+)
+from axol.quantum.language_model import (
+    LanguageModel,
+    GenerationResult,
+)
+from axol.quantum.two_stage import (
+    TwoStageLanguageModel,
+    TwoStageGeneration,
+    TwoStageReport,
+)
+from axol.quantum.streaming import (
+    StreamingLanguageModel,
+    StreamResult,
+)
+from axol.quantum.hierarchical import (
+    HierarchicalLanguageModel,
+    LevelConfig,
+    HierarchicalResult,
+    HierarchicalReport,
+)
+from axol.quantum.sentence_decoder import (
+    SentenceDictionary,
+    SentenceDecoderLanguageModel,
+    SnapResult,
+    HybridResponder,
+    HybridResponse,
+)
+from axol.quantum.fractal_text import (
+    NoiseField,
+    FractalTextGenerator,
+    FractalResult,
+)
+from axol.quantum.ngram_filter import NgramFilter
+from axol.quantum import jamo
 from axol.quantum.dsl import (
     parse_quantum,
     QuantumProgram,
@@ -121,6 +166,28 @@ __all__ = [
     "weave",
     # Observatory
     "observe", "reobserve",
+    # Online learning
+    "OnlineLearner", "LearningReport",
+    # Conversational (dual-layer)
+    "CharTokenizer", "Verbalizer", "WorkingMemory",
+    "ConversationalAxol", "ConversationReport",
+    "vocab_from_texts",
+    # Language model
+    "LanguageModel", "GenerationResult",
+    # Two-stage (intent + surface)
+    "TwoStageLanguageModel", "TwoStageGeneration", "TwoStageReport",
+    # Stream-of-consciousness (recursive intent↔surface)
+    "StreamingLanguageModel", "StreamResult",
+    # Hierarchical (N-level with chunk propagation)
+    "HierarchicalLanguageModel", "LevelConfig",
+    "HierarchicalResult", "HierarchicalReport",
+    # Sentence-snap decoder (Intent + Dictionary)
+    "SentenceDictionary", "SentenceDecoderLanguageModel", "SnapResult",
+    "HybridResponder", "HybridResponse",
+    # Fractal noise composition (Perlin/fBm-style creative blends)
+    "NoiseField", "FractalTextGenerator", "FractalResult",
+    # Grammar and Korean-specific helpers
+    "NgramFilter", "jamo",
     # DSL
     "parse_quantum", "QuantumProgram",
     "ObserveStatement", "ReobserveStatement", "ConditionalBlock",
