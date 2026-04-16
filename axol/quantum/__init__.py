@@ -93,6 +93,10 @@ from axol.quantum.conversation import (
     ConversationalAxol,
     ConversationReport,
 )
+from axol.quantum.language_model import (
+    LanguageModel,
+    GenerationResult,
+)
 from axol.quantum.dsl import (
     parse_quantum,
     QuantumProgram,
@@ -137,6 +141,8 @@ __all__ = [
     # Conversational (dual-layer)
     "CharTokenizer", "Verbalizer", "WorkingMemory",
     "ConversationalAxol", "ConversationReport",
+    # Language model
+    "LanguageModel", "GenerationResult",
     # DSL
     "parse_quantum", "QuantumProgram",
     "ObserveStatement", "ReobserveStatement", "ConditionalBlock",
