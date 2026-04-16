@@ -106,6 +106,12 @@ from axol.quantum.streaming import (
     StreamingLanguageModel,
     StreamResult,
 )
+from axol.quantum.hierarchical import (
+    HierarchicalLanguageModel,
+    LevelConfig,
+    HierarchicalResult,
+    HierarchicalReport,
+)
 from axol.quantum.dsl import (
     parse_quantum,
     QuantumProgram,
@@ -156,6 +162,9 @@ __all__ = [
     "TwoStageLanguageModel", "TwoStageGeneration", "TwoStageReport",
     # Stream-of-consciousness (recursive intent↔surface)
     "StreamingLanguageModel", "StreamResult",
+    # Hierarchical (N-level with chunk propagation)
+    "HierarchicalLanguageModel", "LevelConfig",
+    "HierarchicalResult", "HierarchicalReport",
     # DSL
     "parse_quantum", "QuantumProgram",
     "ObserveStatement", "ReobserveStatement", "ConditionalBlock",
