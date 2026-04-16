@@ -82,6 +82,10 @@ from axol.quantum.density import (
 )
 from axol.quantum.weaver import weave
 from axol.quantum.observatory import observe, reobserve
+from axol.quantum.online import (
+    OnlineLearner,
+    LearningReport,
+)
 from axol.quantum.dsl import (
     parse_quantum,
     QuantumProgram,
@@ -121,6 +125,8 @@ __all__ = [
     "weave",
     # Observatory
     "observe", "reobserve",
+    # Online learning
+    "OnlineLearner", "LearningReport",
     # DSL
     "parse_quantum", "QuantumProgram",
     "ObserveStatement", "ReobserveStatement", "ConditionalBlock",
