@@ -1,17 +1,28 @@
-"""한국어 실전 테스트: Q&A 암기 + 프랙탈 변주.
+"""한국어 AXOL 대화 — 직접 사용 가능한 CLI.
 
-AXOL의 CharTokenizer는 원래 유니코드 기반이므로 한글을 있는 그대로
-처리합니다. 여기서 검증하는 것:
-
-  1. Q&A 쌍 완벽 recall (snap decoder)
-  2. 새 프롬프트의 가장 가까운 문장 retrieval
-  3. 프랙탈 노이즈로 창조적 변주
-  4. 한국 속담에서의 동작
-
-실행 방법
----------
+실행
+----
+    # 내장 corpus 107쌍으로 바로 대화
     python demo/korean_chat.py
-    python demo/korean_chat.py --repl        (대화형 모드)
+
+    # 저장된 모델 불러오기
+    python demo/korean_chat.py --load mybot
+
+    # 평가만 (REPL 없이)
+    python demo/korean_chat.py --eval
+
+REPL 명령어
+-----------
+    /help               명령어 목록
+    /teach 입력 -> 출력  실시간으로 새 대화 가르치기
+    /forget 0.5         기억 50% 약화
+    /save PATH          모델 저장 (PATH.npz + PATH.json)
+    /load PATH          저장된 모델 불러오기
+    /mode snap|hybrid|creative   응답 전략 전환
+    /alt                방금 응답의 2~3순위 대안 보기
+    /report             학습 상태 보고
+    /vary on|off        동일 프롬프트에 조금씩 변주 (hybrid 모드)
+    /quit               종료
 """
 
 from __future__ import annotations
@@ -27,165 +38,175 @@ if _REPO_ROOT not in sys.path:
 
 from axol.quantum.conversation import vocab_from_texts  # noqa: E402
 from axol.quantum.fractal_text import FractalTextGenerator  # noqa: E402
-from axol.quantum.sentence_decoder import SentenceDecoderLanguageModel  # noqa: E402
+from axol.quantum.sentence_decoder import (  # noqa: E402
+    HybridResponder,
+    SentenceDecoderLanguageModel,
+)
+
+from demo.korean_corpus import CORPUS, all_texts  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
-# 대화 샘플 (FAQ 스타일)
+# 모델 구성
 # ---------------------------------------------------------------------------
 
-QA_PAIRS: list[tuple[str, str]] = [
-    ("안녕",           "안녕하세요 반갑습니다"),
-    ("이름이 뭐야",    "저는 악솔 입니다"),
-    ("잘 지내",        "네 덕분에 잘 지냅니다"),
-    ("뭐 해",          "지금 대화를 나누고 있습니다"),
-    ("고마워",         "천만에요 도움이 되어 기쁩니다"),
-    ("미안해",         "괜찮습니다 신경 쓰지 마세요"),
-    ("몇 살",          "저는 방금 만들어졌습니다"),
-    ("날씨",           "저는 날씨를 알 수 없습니다"),
-    ("잘 가",          "안녕히 가세요 또 만나요"),
-    ("사랑해",         "저도 당신을 좋아합니다"),
-    ("배고파",         "맛있는 것을 드세요"),
-    ("슬퍼",           "무슨 일인지 이야기해 보세요"),
-]
-
-
-# ---------------------------------------------------------------------------
-# 한국 속담 (창조적 변주용)
-# ---------------------------------------------------------------------------
-
-PROVERBS: list[str] = [
-    "가는 말이 고와야 오는 말이 곱다",
-    "세 살 버릇 여든까지 간다",
-    "등잔 밑이 어둡다",
-    "티끌 모아 태산",
-    "백지장도 맞들면 낫다",
-    "발 없는 말이 천리 간다",
-    "우물 안 개구리",
-    "고생 끝에 낙이 온다",
-    "호랑이도 제 말 하면 온다",
-    "벼는 익을수록 고개를 숙인다",
-]
-
-
-# ---------------------------------------------------------------------------
-# 모델 학습
-# ---------------------------------------------------------------------------
-
-def build_qa_model() -> SentenceDecoderLanguageModel:
-    all_text = [q for q, _ in QA_PAIRS] + [a for _, a in QA_PAIRS]
-    vocab = vocab_from_texts(all_text)
-    m = SentenceDecoderLanguageModel(
-        vocab=vocab, intent_dim=22, intent_window=6,
-        regularization=1e-4, seed=0,
+def build_model() -> SentenceDecoderLanguageModel:
+    vocab = vocab_from_texts(all_texts())
+    return SentenceDecoderLanguageModel(
+        vocab=vocab,
+        intent_dim=28,           # 한국어 + corpus 100+ 쌍을 위해 확장
+        intent_window=8,
+        regularization=1e-4,
+        seed=0,
     )
-    m.train_pairs(QA_PAIRS, epochs=5)
-    return m
 
 
-def build_proverb_model() -> SentenceDecoderLanguageModel:
-    # 속담을 (첫 두 어절 → 전체) 쌍으로 학습
-    pairs = [(" ".join(p.split()[:2]), p) for p in PROVERBS]
-    all_text = [q for q, _ in pairs] + [a for _, a in pairs]
-    vocab = vocab_from_texts(all_text)
-    m = SentenceDecoderLanguageModel(
-        vocab=vocab, intent_dim=24, intent_window=6,
-        regularization=1e-4, seed=0,
-    )
-    m.train_pairs(pairs, epochs=6)
-    return m
+def train_on_corpus(m: SentenceDecoderLanguageModel, epochs: int = 4) -> None:
+    m.train_pairs(CORPUS, epochs=epochs)
 
 
 # ---------------------------------------------------------------------------
-# 평가 섹션들
+# 간단한 평가
 # ---------------------------------------------------------------------------
 
-def eval_qa_recall(m: SentenceDecoderLanguageModel) -> None:
-    print("=" * 75)
-    print("1) Q&A 완벽 recall 테스트 (snap decoder)")
-    print("=" * 75)
-    print(f"{'프롬프트':12s}  {'정답':28s}  {'응답':28s}  conf")
-    print("-" * 75)
+def quick_eval(m: SentenceDecoderLanguageModel) -> None:
+    print("=" * 70)
+    print(f"암기 검증 — 학습된 {len(CORPUS)}쌍 중 샘플 20쌍")
+    print("=" * 70)
+    import random
+    rng = random.Random(0)
+    sample = rng.sample(CORPUS, min(20, len(CORPUS)))
     hits = 0
-    for q, expected in QA_PAIRS:
+    for q, expected in sample:
         res = m.generate(q)
         ok = res.text == expected
         hits += int(ok)
         mark = "✓" if ok else "✗"
-        print(f"  {mark} {q:12s}  {expected:28s}  {res.text:28s}  {res.confidence:.3f}")
-    print(f"\n  암기 성공: {hits}/{len(QA_PAIRS)}")
-    print(f"  intent Ω={m.omega:.3f}   dict_size={m.dictionary_size}\n")
+        print(f"  {mark} {q:18s}  →  {res.text}")
+    print(f"\n  {hits}/{len(sample)} 정확 재현  (intent Ω={m.omega:.3f})")
+    print()
+
+    print("=" * 70)
+    print("학습 안 한 프롬프트 — 의미적 검색")
+    print("=" * 70)
+    novel = ["반가워요", "기분이 좋아", "너무 힘드네", "안녕히 가", "나 집에 갈래",
+             "기쁘다", "피곤하네", "뭘 물어볼까"]
+    for q in novel:
+        res = m.generate(q, top_k=2)
+        print(f"  {q!r:16} → {res.text!r:30} (conf={res.confidence:.3f})")
+    print()
 
 
-def eval_novel_prompts(m: SentenceDecoderLanguageModel) -> None:
-    print("=" * 75)
-    print("2) 학습 안 한 프롬프트 — 가장 가까운 학습 문장으로 snap")
-    print("=" * 75)
-    novels = ["반가워", "안녕히", "뭐야", "오늘 어때", "도와줘"]
-    for q in novels:
-        res = m.generate(q, top_k=3)
-        print(f"  프롬프트: {q!r}")
-        print(f"    응답:   {res.text!r}  (conf={res.confidence:.3f})")
-        for alt, score in res.alternatives[1:]:
-            print(f"    대안:   {alt!r}  ({score:.3f})")
-        print()
+# ---------------------------------------------------------------------------
+# Hybrid + 프랙탈 변주 데모
+# ---------------------------------------------------------------------------
+
+def show_hybrid_modes(m: SentenceDecoderLanguageModel) -> None:
+    print("=" * 70)
+    print("Hybrid 응답 모드 비교")
+    print("=" * 70)
+    hr_strict = HybridResponder(m, snap_threshold=0.95, blend_threshold=0.60)
+    hr_vary = HybridResponder(m, snap_threshold=0.95, blend_threshold=0.60,
+                              vary_known=True, vary_strength=0.25)
+    hr_creative = HybridResponder(m, snap_threshold=1.01, blend_threshold=0.40,
+                                   vary_known=True, vary_strength=0.3,
+                                   blend_strength=0.7)
+
+    prompts = [
+        "안녕",                # 학습됨 → snap
+        "오랜만이야",           # 학습됨 → snap
+        "뭐 하고 놀까",          # 비슷한 게 있음 → blended
+        "오늘 기분이 좀 그래",   # medium
+        "빨간 코끼리가 춤춰",    # 완전 out-of-dist
+    ]
+    print(f"{'prompt':22s}  {'strict':20s}  {'vary':20s}  {'creative':20s}")
+    print("-" * 90)
+    for p in prompts:
+        s = hr_strict.respond(p, seed=7).text
+        v = hr_vary.respond(p, seed=7).text
+        c = hr_creative.respond(p, seed=7).text
+        print(f"  {p:20s}  {s[:18]:20s}  {v[:18]:20s}  {c[:18]:20s}")
+    print()
 
 
-def eval_proverb_recall(m: SentenceDecoderLanguageModel) -> None:
-    print("=" * 75)
-    print("3) 한국 속담 recall")
-    print("=" * 75)
-    hits = 0
-    for p in PROVERBS:
-        prompt = " ".join(p.split()[:2])
-        res = m.generate(prompt)
-        ok = res.text == p
-        hits += int(ok)
-        mark = "✓" if ok else "✗"
-        print(f"  {mark} {prompt:10s} → {res.text}")
-    print(f"\n  속담 암기: {hits}/{len(PROVERBS)}\n")
-
-
-def eval_fractal_variations(m: SentenceDecoderLanguageModel) -> None:
-    print("=" * 75)
-    print("4) 프랙탈 노이즈로 창조적 변주 (속담 mix-and-match)")
-    print("=" * 75)
+def show_fractal_blends(m: SentenceDecoderLanguageModel) -> None:
+    print("=" * 70)
+    print("프랙탈 노이즈 변주 — 학습된 조각들의 창조적 조합")
+    print("=" * 70)
     fg = FractalTextGenerator(m)
-
-    print("[noise 강도 sweep — 프롬프트 '가는', seed=42]")
-    for ns in [0.0, 0.3, 0.6, 1.0]:
-        r = fg.compose("가는", noise_strength=ns, chunk_scale=0.5,
-                        k_anchors=6, seed=42)
-        print(f"  noise={ns:.1f}  sub={r.substitution_rate:.2f}  {r.text!r}")
-
-    print("\n[여러 시드 변주 — 프롬프트 '세 살', noise=0.7]")
-    variants = fg.variations("세 살", n=5, base_seed=123,
-                              noise_strength=0.7, chunk_scale=0.4,
-                              k_anchors=5)
-    for i, v in enumerate(variants, 1):
-        print(f"  v{i}: {v.text!r}  (sub={v.substitution_rate:.2f})")
-
-    print("\n[chunk_scale sweep — 프롬프트 '티끌 모아', noise=0.9]")
-    for cs in [0.2, 0.5, 1.2, 2.5]:
-        r = fg.compose("티끌 모아", noise_strength=0.9, chunk_scale=cs,
-                        k_anchors=5, seed=7)
-        print(f"  chunk={cs:3.1f}  {r.text!r}")
+    for prompt in ["사랑해", "슬퍼", "고마워"]:
+        print(f"[{prompt!r}]")
+        for ns in [0.0, 0.4, 0.8]:
+            r = fg.compose(prompt, noise_strength=ns,
+                            chunk_scale=0.5, k_anchors=6, seed=42)
+            print(f"  noise={ns:.1f}  {r.text!r}")
+        print()
 
 
 # ---------------------------------------------------------------------------
 # REPL
 # ---------------------------------------------------------------------------
 
-def run_repl(qa_model: SentenceDecoderLanguageModel,
-             proverb_model: SentenceDecoderLanguageModel) -> None:
-    fg_q = FractalTextGenerator(qa_model)
-    fg_p = FractalTextGenerator(proverb_model)
-    current = "qa"
+class ChatSession:
+    """Stateful interactive session wrapping model + hybrid + history."""
 
-    print("\nAXOL 한국어 대화.  /help 입력 시 명령어 보기.")
+    def __init__(self, m: SentenceDecoderLanguageModel) -> None:
+        self.m = m
+        self.fg = FractalTextGenerator(m)
+        self.hybrid = HybridResponder(
+            m, snap_threshold=0.92, blend_threshold=0.55,
+            vary_known=True, vary_strength=0.2, blend_strength=0.6,
+        )
+        self.mode = "hybrid"    # "snap" | "hybrid" | "creative"
+        self.last_response = None
+        self.turn = 0
+
+    def _respond_snap(self, prompt: str):
+        return self.m.generate(prompt, top_k=3)
+
+    def _respond_hybrid(self, prompt: str, seed: int | None):
+        return self.hybrid.respond(prompt, seed=seed)
+
+    def _respond_creative(self, prompt: str, seed: int | None):
+        # Always apply fractal blend, even for known prompts.
+        r = self.fg.compose(prompt, noise_strength=0.75, chunk_scale=0.5,
+                            k_anchors=6, seed=seed)
+        snap = self.m.generate(prompt, top_k=3)
+        return type("X", (), {
+            "text": r.text or snap.text,
+            "confidence": snap.confidence,
+            "mode": "creative",
+            "alternatives": snap.alternatives,
+            "substitution_rate": r.substitution_rate,
+        })()
+
+    def respond(self, prompt: str) -> None:
+        self.turn += 1
+        seed = self.turn * 997   # each turn gets a different seed
+        if self.mode == "snap":
+            res = self._respond_snap(prompt)
+            text = res.text
+            tag = f"snap conf={res.confidence:.2f}"
+        elif self.mode == "creative":
+            res = self._respond_creative(prompt, seed)
+            text = res.text
+            tag = f"creative sub={res.substitution_rate:.2f} conf={res.confidence:.2f}"
+        else:
+            res = self._respond_hybrid(prompt, seed)
+            text = res.text
+            tag = f"{res.mode} conf={res.confidence:.2f}"
+            if getattr(res, "substitution_rate", 0.0) > 0:
+                tag += f" sub={res.substitution_rate:.2f}"
+        self.last_response = res
+        print(f"AXOL: {text}")
+        print(f"      [{tag}]")
+
+
+def run_repl(session: ChatSession) -> None:
+    print(f"\n한국어 대화 시작 — 모드 '{session.mode}'. /help 로 명령어 보기, /quit 종료.")
     while True:
         try:
-            line = input(f"[{current}]> ").strip()
+            line = input(f"[{session.mode}]> ").strip()
         except (EOFError, KeyboardInterrupt):
             print()
             break
@@ -193,36 +214,117 @@ def run_repl(qa_model: SentenceDecoderLanguageModel,
             continue
         if line in ("/quit", "/exit"):
             break
+
         if line == "/help":
-            print("  /qa               Q&A 모델로 전환")
-            print("  /proverb          속담 모델로 전환")
-            print("  /mix <프롬프트>    noise=0.7로 프랙탈 변주 생성")
-            print("  /quit             종료")
-            print("  그 외             프롬프트로 응답")
-            continue
-        if line == "/qa":
-            current = "qa"
-            continue
-        if line == "/proverb":
-            current = "proverb"
-            continue
-        if line.startswith("/mix"):
-            prompt = line[len("/mix"):].strip()
-            if not prompt:
-                print("  사용법: /mix 프롬프트")
-                continue
-            fg = fg_q if current == "qa" else fg_p
-            r = fg.compose(prompt, noise_strength=0.7, chunk_scale=0.5,
-                           k_anchors=5)
-            print(f"  변주: {r.text!r}  (sub={r.substitution_rate:.2f})")
+            print("  /help                       명령어 목록")
+            print("  /teach 입력 -> 출력          실시간 가르치기")
+            print("  /forget 0.5                 기억 절반 약화 (0..1)")
+            print("  /save PATH                  모델 저장")
+            print("  /load PATH                  모델 불러오기")
+            print("  /mode snap|hybrid|creative  응답 전략")
+            print("  /vary on|off                동일 프롬프트 변주 on/off")
+            print("  /alt                        2~3순위 대안 보기")
+            print("  /report                     상태 보고")
+            print("  /quit                       종료")
             continue
 
-        model = qa_model if current == "qa" else proverb_model
-        res = model.generate(line, top_k=2)
-        print(f"  응답: {res.text}   [conf={res.confidence:.3f}]")
-        if len(res.alternatives) > 1:
-            alt, score = res.alternatives[1]
-            print(f"  2순위: {alt}   ({score:.3f})")
+        if line.startswith("/teach"):
+            body = line[len("/teach"):].strip()
+            if "->" not in body:
+                print("  사용법: /teach 입력 -> 출력")
+                continue
+            left, right = [x.strip() for x in body.split("->", 1)]
+            if not left or not right:
+                print("  입력과 출력 모두 있어야 합니다")
+                continue
+            session.m.teach(left, right)
+            print(f"  [배웠음] {left!r} → {right!r}  (dict size={session.m.dictionary_size})")
+            continue
+
+        if line.startswith("/forget"):
+            body = line[len("/forget"):].strip()
+            try:
+                f = float(body)
+            except ValueError:
+                print("  사용법: /forget 0.5")
+                continue
+            session.m.forget(f)
+            print(f"  [망각] factor={f}")
+            continue
+
+        if line.startswith("/save"):
+            body = line[len("/save"):].strip()
+            if not body:
+                print("  사용법: /save PATH")
+                continue
+            session.m.save(body)
+            print(f"  [저장] {body}.npz + {body}.json")
+            continue
+
+        if line.startswith("/load"):
+            body = line[len("/load"):].strip()
+            if not body:
+                print("  사용법: /load PATH")
+                continue
+            try:
+                new_m = SentenceDecoderLanguageModel.load(body)
+            except Exception as e:
+                print(f"  [오류] {e}")
+                continue
+            session.m = new_m
+            session.fg = FractalTextGenerator(new_m)
+            session.hybrid = HybridResponder(
+                new_m, snap_threshold=0.92, blend_threshold=0.55,
+                vary_known=True, vary_strength=0.2, blend_strength=0.6,
+            )
+            print(f"  [불러옴] {body}  dict size={new_m.dictionary_size}  "
+                  f"pairs={new_m.pairs_taught}")
+            continue
+
+        if line.startswith("/mode"):
+            body = line[len("/mode"):].strip()
+            if body not in ("snap", "hybrid", "creative"):
+                print("  사용법: /mode snap|hybrid|creative")
+                continue
+            session.mode = body
+            print(f"  [모드] {body}")
+            continue
+
+        if line.startswith("/vary"):
+            body = line[len("/vary"):].strip()
+            if body == "on":
+                session.hybrid.vary_known = True
+                print("  [변주 켜짐]")
+            elif body == "off":
+                session.hybrid.vary_known = False
+                print("  [변주 꺼짐]")
+            else:
+                print("  사용법: /vary on|off")
+            continue
+
+        if line == "/alt":
+            if session.last_response is None:
+                print("  아직 응답이 없습니다")
+                continue
+            alts = getattr(session.last_response, "alternatives", [])
+            if not alts:
+                print("  대안이 없습니다")
+                continue
+            for i, (text, score) in enumerate(alts[:3], 1):
+                print(f"  {i}순위 ({score:.3f}): {text}")
+            continue
+
+        if line == "/report":
+            print(f"  dict size       : {session.m.dictionary_size}")
+            print(f"  pairs taught    : {session.m.pairs_taught}")
+            print(f"  intent Ω        : {session.m.omega:.3f}")
+            print(f"  intent Φ        : {session.m.phi:.3f}")
+            print(f"  mode            : {session.mode}")
+            print(f"  vary_known      : {session.hybrid.vary_known}")
+            continue
+
+        # 일반 프롬프트 → 응답
+        session.respond(line)
 
 
 # ---------------------------------------------------------------------------
@@ -230,24 +332,42 @@ def run_repl(qa_model: SentenceDecoderLanguageModel,
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="AXOL 한국어 실전 테스트")
-    parser.add_argument("--repl", action="store_true",
-                        help="REPL(대화형 모드) 실행")
-    parser.add_argument("--skip-eval", action="store_true",
-                        help="평가 섹션 건너뛰고 바로 REPL")
+    parser = argparse.ArgumentParser(description="AXOL 한국어 실전 대화")
+    parser.add_argument("--load", metavar="PATH", help="저장된 모델 불러오기")
+    parser.add_argument("--save", metavar="PATH",
+                        help="학습 후 모델 저장")
+    parser.add_argument("--eval", action="store_true",
+                        help="평가만 출력하고 REPL 건너뛰기")
+    parser.add_argument("--no-train", action="store_true",
+                        help="내장 corpus 학습 없이 실행 (fresh model)")
+    parser.add_argument("--epochs", type=int, default=4,
+                        help="corpus 학습 epoch 수")
     args = parser.parse_args()
 
-    qa_model = build_qa_model()
-    proverb_model = build_proverb_model()
+    if args.load:
+        m = SentenceDecoderLanguageModel.load(args.load)
+        print(f"[load] {args.load}  dict size={m.dictionary_size}  "
+              f"pairs={m.pairs_taught}")
+    else:
+        m = build_model()
+        if not args.no_train:
+            print(f"[train] corpus {len(CORPUS)}쌍 × {args.epochs} epochs ...")
+            train_on_corpus(m, epochs=args.epochs)
+            print(f"[train] done  dict={m.dictionary_size}  "
+                  f"intent Ω={m.omega:.3f}")
 
-    if not args.skip_eval:
-        eval_qa_recall(qa_model)
-        eval_novel_prompts(qa_model)
-        eval_proverb_recall(proverb_model)
-        eval_fractal_variations(proverb_model)
+    if args.save:
+        m.save(args.save)
+        print(f"[save] {args.save}.npz + {args.save}.json")
 
-    if args.repl:
-        run_repl(qa_model, proverb_model)
+    if args.eval:
+        quick_eval(m)
+        show_hybrid_modes(m)
+        show_fractal_blends(m)
+        return
+
+    session = ChatSession(m)
+    run_repl(session)
 
 
 if __name__ == "__main__":

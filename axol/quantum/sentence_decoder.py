@@ -308,3 +308,213 @@ class SentenceDecoderLanguageModel:
         self.intent_wm.reset()
         self.dictionary.clear()
         self._pairs_taught = 0
+
+    # ------------------------------------------------------------------
+    # Persistence
+    # ------------------------------------------------------------------
+
+    def save(self, path: str) -> None:
+        """Save full state next to ``path`` (``.npz`` + ``.json``).
+
+        Stores:
+          * Intent core moment matrices (G, H, B)
+          * Intent Verbalizer embedding matrix
+          * Dictionary vectors (stacked) and texts (JSON)
+          * All hyperparameters required to rebuild the model
+        """
+        import json as _json
+        from pathlib import Path as _Path
+        npz_path = _Path(path).with_suffix(".npz")
+        json_path = _Path(path).with_suffix(".json")
+
+        intuition = self.intent_core
+        dict_vecs = (np.stack(self.dictionary._vecs, axis=0)
+                     if self.dictionary.size else np.zeros((0, self.dictionary.dim),
+                                                           dtype=np.float32))
+        np.savez(
+            npz_path,
+            verbalizer_E=self.intent_verb.E,
+            intent_G=intuition._G,
+            intent_H=intuition._H,
+            intent_B=intuition._B,
+            dict_vecs=dict_vecs,
+        )
+        meta = {
+            "format_version": 1,
+            "config": {
+                "vocab": self.vocab,
+                "intent_dim": self.intent_verb.dim,
+                "intent_window": self.intent_wm.window,
+                "decay": self.intent_wm.decay,
+                "forgetting_factor": intuition.forgetting_factor,
+                "regularization": intuition.regularization,
+                "degree": intuition.degree,
+                "dict_ema": self.dictionary.ema,
+            },
+            "dict_texts": list(self.dictionary._texts),
+            "counters": {
+                "pairs_taught": self._pairs_taught,
+                "intent_n_samples": intuition._n_samples,
+            },
+        }
+        with json_path.open("w", encoding="utf-8") as f:
+            _json.dump(meta, f, ensure_ascii=False, indent=2)
+
+    @classmethod
+    def load(cls, path: str) -> "SentenceDecoderLanguageModel":
+        """Load a model previously saved by ``save``."""
+        import json as _json
+        from pathlib import Path as _Path
+        npz_path = _Path(path).with_suffix(".npz")
+        json_path = _Path(path).with_suffix(".json")
+
+        with json_path.open("r", encoding="utf-8") as f:
+            meta = _json.load(f)
+        if meta.get("format_version") != 1:
+            raise ValueError(
+                f"unsupported format_version {meta.get('format_version')!r}; expected 1"
+            )
+        cfg = meta["config"]
+
+        m = cls(
+            vocab=cfg["vocab"],
+            intent_dim=cfg["intent_dim"],
+            intent_window=cfg["intent_window"],
+            decay=cfg["decay"],
+            forgetting_factor=cfg["forgetting_factor"],
+            regularization=cfg["regularization"],
+            degree=cfg["degree"],
+            dict_ema=cfg["dict_ema"],
+        )
+
+        arrs = np.load(npz_path)
+        m.intent_verb.E = arrs["verbalizer_E"].astype(np.float32)
+        m.intent_core._G = arrs["intent_G"].astype(np.float64)
+        m.intent_core._H = arrs["intent_H"].astype(np.float64)
+        m.intent_core._B = arrs["intent_B"].astype(np.float64)
+        m.intent_core._K_cache = None
+        m.intent_core._n_samples = int(meta["counters"]["intent_n_samples"])
+
+        texts = list(meta["dict_texts"])
+        vecs = arrs["dict_vecs"]
+        m.dictionary.clear()
+        for text, vec in zip(texts, vecs):
+            m.dictionary._texts.append(text)
+            m.dictionary._vecs.append(vec.astype(np.float32))
+            m.dictionary._index_of_text[text] = len(m.dictionary._texts) - 1
+
+        m._pairs_taught = int(meta["counters"]["pairs_taught"])
+        return m
+
+
+# ---------------------------------------------------------------------------
+# Hybrid responder — confidence-gated snap / blend / fallback
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class HybridResponse:
+    """Output of ``HybridResponder.respond``."""
+
+    text: str
+    confidence: float
+    mode: str                       # "snap" | "varied" | "blended" | "unknown"
+    alternatives: list[tuple[str, float]]
+    substitution_rate: float        # 0.0 when snap, >0 when varied/blended
+
+
+class HybridResponder:
+    """Confidence-gated response strategy.
+
+    * ``confidence >= snap_threshold`` → return the snap verbatim (mode "snap")
+    * ``snap_threshold > confidence >= blend_threshold`` → use fractal blend
+      (mode "varied" when close to registered, "blended" when several anchors
+      contribute roughly equally)
+    * ``confidence < blend_threshold`` → return an ``unknown_message``
+      (mode "unknown"), optionally exposing the best guess as an alternative
+
+    ``vary_known``: even for high-confidence snaps, apply a very small
+    fractal noise so the agent doesn't repeat the exact same sentence
+    word-for-word on every turn (light variation in phrasing).
+    """
+
+    def __init__(
+        self,
+        decoder: "SentenceDecoderLanguageModel",
+        fractal_generator: object | None = None,
+        *,
+        snap_threshold: float = 0.92,
+        blend_threshold: float = 0.55,
+        unknown_message: str = "잘 모르겠어요. 다시 물어봐 주세요.",
+        vary_known: bool = False,
+        vary_strength: float = 0.15,
+        blend_strength: float = 0.6,
+        chunk_scale: float = 0.5,
+        k_anchors: int = 5,
+    ) -> None:
+        if blend_threshold < 0.0 or snap_threshold < blend_threshold:
+            raise ValueError(
+                "thresholds must satisfy 0 <= blend <= snap "
+                "(snap may exceed 1 to disable the pure-snap branch)"
+            )
+        # Lazy import to avoid a hard dependency if fractal_text isn't used.
+        if fractal_generator is None:
+            from axol.quantum.fractal_text import FractalTextGenerator
+            fractal_generator = FractalTextGenerator(decoder)
+        self.decoder = decoder
+        self.fg = fractal_generator
+        self.snap_threshold = float(snap_threshold)
+        self.blend_threshold = float(blend_threshold)
+        self.unknown_message = unknown_message
+        self.vary_known = bool(vary_known)
+        self.vary_strength = float(vary_strength)
+        self.blend_strength = float(blend_strength)
+        self.chunk_scale = float(chunk_scale)
+        self.k_anchors = int(k_anchors)
+
+    def respond(
+        self,
+        prompt: str,
+        seed: int | None = None,
+    ) -> HybridResponse:
+        snap = self.decoder.generate(prompt, top_k=self.k_anchors)
+        if self.decoder.dictionary.size == 0 or not snap.alternatives:
+            return HybridResponse(
+                text=self.unknown_message, confidence=0.0, mode="unknown",
+                alternatives=[], substitution_rate=0.0,
+            )
+
+        conf = snap.confidence
+
+        # ---- Unknown: below blend threshold ----
+        if conf < self.blend_threshold:
+            return HybridResponse(
+                text=self.unknown_message, confidence=conf, mode="unknown",
+                alternatives=snap.alternatives,
+                substitution_rate=0.0,
+            )
+
+        # ---- Snap: high confidence ----
+        if conf >= self.snap_threshold and not self.vary_known:
+            return HybridResponse(
+                text=snap.text, confidence=conf, mode="snap",
+                alternatives=snap.alternatives,
+                substitution_rate=0.0,
+            )
+
+        # ---- Varied / blended: fractal composition ----
+        if conf >= self.snap_threshold:
+            ns = self.vary_strength
+            mode = "varied"
+        else:
+            ns = self.blend_strength
+            mode = "blended"
+
+        fr = self.fg.compose(
+            prompt, noise_strength=ns, chunk_scale=self.chunk_scale,
+            k_anchors=self.k_anchors, seed=seed,
+        )
+        return HybridResponse(
+            text=fr.text or snap.text, confidence=conf, mode=mode,
+            alternatives=snap.alternatives,
+            substitution_rate=fr.substitution_rate,
+        )

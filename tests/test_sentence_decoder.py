@@ -7,6 +7,8 @@ import pytest
 
 from axol.quantum.conversation import vocab_from_texts
 from axol.quantum.sentence_decoder import (
+    HybridResponder,
+    HybridResponse,
     SentenceDecoderLanguageModel,
     SentenceDictionary,
     SnapResult,
@@ -263,6 +265,114 @@ class TestKorean:
             assert res.text == expected, (
                 f"Korean recall failed for {q!r}: got {res.text!r}"
             )
+
+
+class TestHybridResponder:
+    def _trained(self) -> SentenceDecoderLanguageModel:
+        pairs = [
+            ("hi",    "hello how are you"),
+            ("bye",   "goodbye take care"),
+            ("thanks","you are welcome"),
+            ("sorry", "no problem it is fine"),
+        ]
+        m = SentenceDecoderLanguageModel(
+            vocab="abcdefghijklmnopqrstuvwxyz ", intent_dim=18,
+            regularization=1e-4, seed=0,
+        )
+        m.train_pairs(pairs, epochs=5)
+        return m
+
+    def test_rejects_invalid_thresholds(self):
+        m = self._trained()
+        # blend > snap is invalid
+        with pytest.raises(ValueError):
+            HybridResponder(m, snap_threshold=0.3, blend_threshold=0.8)
+        # Negative blend is invalid
+        with pytest.raises(ValueError):
+            HybridResponder(m, snap_threshold=1.0, blend_threshold=-0.1)
+        # snap > 1 is allowed (disables pure-snap branch -> always varied/blended)
+        HybridResponder(m, snap_threshold=1.5, blend_threshold=0.3)
+
+    def test_high_conf_gives_snap(self):
+        m = self._trained()
+        hr = HybridResponder(m, snap_threshold=0.9, blend_threshold=0.5,
+                             vary_known=False)
+        res = hr.respond("hi")
+        assert isinstance(res, HybridResponse)
+        assert res.mode == "snap"
+        assert res.text == "hello how are you"
+        assert res.substitution_rate == 0.0
+
+    def test_unknown_returns_fallback(self):
+        m = self._trained()
+        hr = HybridResponder(
+            m, snap_threshold=0.99, blend_threshold=0.99,
+            unknown_message="모름",
+        )
+        res = hr.respond("zzzzzz")
+        assert res.mode == "unknown"
+        assert res.text == "모름"
+
+    def test_varying_known_produces_varied_mode(self):
+        m = self._trained()
+        hr = HybridResponder(
+            m, snap_threshold=0.9, blend_threshold=0.5,
+            vary_known=True, vary_strength=0.5,
+        )
+        # 'hi' is trained; with vary_known=True we expect mode 'varied'
+        res = hr.respond("hi", seed=1)
+        assert res.mode in ("varied", "snap")  # varied most seeds, snap on noise=0
+        # At least the alternatives list should survive
+        assert res.alternatives
+
+    def test_empty_dictionary_returns_unknown(self):
+        m = SentenceDecoderLanguageModel(vocab="abc", intent_dim=8)
+        hr = HybridResponder(m, unknown_message="모름")
+        res = hr.respond("a")
+        assert res.mode == "unknown"
+
+
+class TestSaveLoad:
+    def test_roundtrip_preserves_recall(self, tmp_path):
+        pairs = [("a", "xx"), ("b", "yy"), ("c", "zz")]
+        m = SentenceDecoderLanguageModel(
+            vocab="abcxyz ", intent_dim=10, regularization=1e-3,
+        )
+        m.train_pairs(pairs, epochs=5)
+        path = tmp_path / "mod"
+        m.save(path)
+
+        loaded = SentenceDecoderLanguageModel.load(path)
+        assert loaded.dictionary_size == 3
+        assert loaded.pairs_taught == m.pairs_taught
+        for q, expected in pairs:
+            assert loaded.generate(q).text == expected
+
+    def test_roundtrip_preserves_matrices(self, tmp_path):
+        m = SentenceDecoderLanguageModel(
+            vocab="abcxyz ", intent_dim=8, regularization=1e-3,
+        )
+        m.train_pairs([("a", "x"), ("b", "y")], epochs=3)
+        path = tmp_path / "m"
+        m.save(path)
+        loaded = SentenceDecoderLanguageModel.load(path)
+        assert np.allclose(loaded.intent_core._G, m.intent_core._G)
+        assert np.allclose(loaded.intent_core._B, m.intent_core._B)
+        assert np.allclose(loaded.intent_verb.E, m.intent_verb.E)
+
+    def test_reject_wrong_format_version(self, tmp_path):
+        import json as _json
+        m = SentenceDecoderLanguageModel(vocab="ab", intent_dim=8)
+        m.train_pairs([("a", "b")], epochs=2)
+        path = tmp_path / "m"
+        m.save(path)
+        with open(path.with_suffix(".json"), "r") as f:
+            meta = _json.load(f)
+        meta["format_version"] = 999
+        with open(path.with_suffix(".json"), "w") as f:
+            _json.dump(meta, f)
+        with pytest.raises(ValueError):
+            SentenceDecoderLanguageModel.load(path)
 
 
 class TestFortyPairRecall:
