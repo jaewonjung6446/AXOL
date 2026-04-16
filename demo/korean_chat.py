@@ -36,8 +36,10 @@ _REPO_ROOT = os.path.dirname(_THIS)
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
+from axol.quantum import jamo as _jamo  # noqa: E402
 from axol.quantum.conversation import vocab_from_texts  # noqa: E402
 from axol.quantum.fractal_text import FractalTextGenerator  # noqa: E402
+from axol.quantum.ngram_filter import NgramFilter  # noqa: E402
 from axol.quantum.sentence_decoder import (  # noqa: E402
     HybridResponder,
     SentenceDecoderLanguageModel,
@@ -50,19 +52,30 @@ from demo.korean_corpus import CORPUS, all_texts  # noqa: E402
 # 모델 구성
 # ---------------------------------------------------------------------------
 
-def build_model() -> SentenceDecoderLanguageModel:
-    vocab = vocab_from_texts(all_texts())
+def build_model(use_jamo: bool = False) -> SentenceDecoderLanguageModel:
+    """Build a fresh model.  With ``use_jamo=True`` the vocab is built from
+    the jamo-decomposed corpus (smaller vocab, shared suffixes)."""
+    if use_jamo:
+        texts = [_jamo.decompose(t) for t in all_texts()]
+    else:
+        texts = all_texts()
+    vocab = vocab_from_texts(texts)
     return SentenceDecoderLanguageModel(
         vocab=vocab,
-        intent_dim=28,           # 한국어 + corpus 100+ 쌍을 위해 확장
+        intent_dim=28,
         intent_window=8,
         regularization=1e-4,
         seed=0,
     )
 
 
-def train_on_corpus(m: SentenceDecoderLanguageModel, epochs: int = 4) -> None:
-    m.train_pairs(CORPUS, epochs=epochs)
+def train_on_corpus(
+    m: SentenceDecoderLanguageModel,
+    epochs: int = 4,
+    use_jamo: bool = False,
+) -> None:
+    pairs = (_jamo.decompose_pairs(CORPUS) if use_jamo else CORPUS)
+    m.train_pairs(pairs, epochs=epochs)
 
 
 # ---------------------------------------------------------------------------
@@ -150,7 +163,14 @@ def show_fractal_blends(m: SentenceDecoderLanguageModel) -> None:
 class ChatSession:
     """Stateful interactive session wrapping model + hybrid + history."""
 
-    def __init__(self, m: SentenceDecoderLanguageModel) -> None:
+    def __init__(
+        self,
+        m: SentenceDecoderLanguageModel,
+        *,
+        use_jamo: bool = False,
+        ngram_filter: "NgramFilter | None" = None,
+        autosave_path: str | None = None,
+    ) -> None:
         self.m = m
         self.fg = FractalTextGenerator(m)
         self.hybrid = HybridResponder(
@@ -160,6 +180,16 @@ class ChatSession:
         self.mode = "hybrid"    # "snap" | "hybrid" | "creative"
         self.last_response = None
         self.turn = 0
+        self.use_jamo = use_jamo
+        self.ngram_filter = ngram_filter
+        self.autosave_path = autosave_path
+
+    # --- 입출력 변환 helper ------------------------------------------
+    def _prepare_prompt(self, text: str) -> str:
+        return _jamo.decompose(text) if self.use_jamo else text
+
+    def _finalise_output(self, text: str) -> str:
+        return _jamo.compose_safely(text) if self.use_jamo else text
 
     def _respond_snap(self, prompt: str):
         return self.m.generate(prompt, top_k=3)
@@ -182,24 +212,52 @@ class ChatSession:
 
     def respond(self, prompt: str) -> None:
         self.turn += 1
-        seed = self.turn * 997   # each turn gets a different seed
+        seed = self.turn * 997
+        p = self._prepare_prompt(prompt)
         if self.mode == "snap":
-            res = self._respond_snap(prompt)
+            res = self._respond_snap(p)
             text = res.text
             tag = f"snap conf={res.confidence:.2f}"
         elif self.mode == "creative":
-            res = self._respond_creative(prompt, seed)
+            res = self._respond_creative(p, seed)
             text = res.text
             tag = f"creative sub={res.substitution_rate:.2f} conf={res.confidence:.2f}"
         else:
-            res = self._respond_hybrid(prompt, seed)
+            res = self._respond_hybrid(p, seed)
             text = res.text
             tag = f"{res.mode} conf={res.confidence:.2f}"
             if getattr(res, "substitution_rate", 0.0) > 0:
                 tag += f" sub={res.substitution_rate:.2f}"
+
+        # n-gram filter rescue: if the output scores low, try a few other
+        # seeds and pick the most grammatical one.
+        if self.ngram_filter is not None and self.mode != "snap":
+            score = self.ngram_filter.score(text)
+            if score < 0.5:
+                candidates: list[str] = [text]
+                for bump in range(1, 6):
+                    alt_seed = seed + bump * 31
+                    if self.mode == "creative":
+                        alt_res = self._respond_creative(p, alt_seed)
+                    else:
+                        alt_res = self._respond_hybrid(p, alt_seed)
+                    candidates.append(alt_res.text)
+                best, best_score = self.ngram_filter.pick_best(candidates)
+                if best_score > score:
+                    text = best
+                    tag += f" ngram={best_score:.2f}"
+
         self.last_response = res
-        print(f"AXOL: {text}")
+        print(f"AXOL: {self._finalise_output(text)}")
         print(f"      [{tag}]")
+
+    def teach(self, prompt_in: str, prompt_out: str) -> None:
+        """Teach a new pair and auto-save if configured."""
+        p_in = self._prepare_prompt(prompt_in)
+        p_out = self._prepare_prompt(prompt_out)
+        self.m.teach(p_in, p_out)
+        if self.autosave_path is not None:
+            self.m.save(self.autosave_path)
 
 
 def run_repl(session: ChatSession) -> None:
@@ -237,8 +295,12 @@ def run_repl(session: ChatSession) -> None:
             if not left or not right:
                 print("  입력과 출력 모두 있어야 합니다")
                 continue
-            session.m.teach(left, right)
-            print(f"  [배웠음] {left!r} → {right!r}  (dict size={session.m.dictionary_size})")
+            session.teach(left, right)
+            extra = ""
+            if session.autosave_path:
+                extra = f"  (auto-saved → {session.autosave_path})"
+            print(f"  [배웠음] {left!r} → {right!r}  "
+                  f"(dict size={session.m.dictionary_size}){extra}")
             continue
 
         if line.startswith("/forget"):
@@ -334,14 +396,19 @@ def run_repl(session: ChatSession) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="AXOL 한국어 실전 대화")
     parser.add_argument("--load", metavar="PATH", help="저장된 모델 불러오기")
-    parser.add_argument("--save", metavar="PATH",
-                        help="학습 후 모델 저장")
+    parser.add_argument("--save", metavar="PATH", help="학습 후 모델 저장")
     parser.add_argument("--eval", action="store_true",
                         help="평가만 출력하고 REPL 건너뛰기")
     parser.add_argument("--no-train", action="store_true",
-                        help="내장 corpus 학습 없이 실행 (fresh model)")
+                        help="내장 corpus 학습 없이 실행")
     parser.add_argument("--epochs", type=int, default=4,
                         help="corpus 학습 epoch 수")
+    parser.add_argument("--jamo", action="store_true",
+                        help="자모 단위 학습/생성 (어미 일반화 향상)")
+    parser.add_argument("--ngram-filter", action="store_true",
+                        help="프랙탈 출력에 n-gram 필터 적용")
+    parser.add_argument("--autosave", metavar="PATH",
+                        help="REPL /teach마다 자동으로 이 경로에 저장")
     args = parser.parse_args()
 
     if args.load:
@@ -349,10 +416,11 @@ def main() -> None:
         print(f"[load] {args.load}  dict size={m.dictionary_size}  "
               f"pairs={m.pairs_taught}")
     else:
-        m = build_model()
+        m = build_model(use_jamo=args.jamo)
         if not args.no_train:
-            print(f"[train] corpus {len(CORPUS)}쌍 × {args.epochs} epochs ...")
-            train_on_corpus(m, epochs=args.epochs)
+            suffix = " (자모)" if args.jamo else ""
+            print(f"[train]{suffix} corpus {len(CORPUS)}쌍 × {args.epochs} epochs ...")
+            train_on_corpus(m, epochs=args.epochs, use_jamo=args.jamo)
             print(f"[train] done  dict={m.dictionary_size}  "
                   f"intent Ω={m.omega:.3f}")
 
@@ -366,7 +434,20 @@ def main() -> None:
         show_fractal_blends(m)
         return
 
-    session = ChatSession(m)
+    # n-gram filter: build from corpus responses (jamo-decomposed if enabled)
+    ngram_filter = None
+    if args.ngram_filter:
+        pairs = _jamo.decompose_pairs(CORPUS) if args.jamo else CORPUS
+        ngram_filter = NgramFilter([a for _, a in pairs], n=2)
+        print(f"[ngram-filter] on, {ngram_filter.known_ngrams()} bigrams")
+
+    if args.autosave:
+        print(f"[autosave] on → {args.autosave}")
+
+    session = ChatSession(
+        m, use_jamo=args.jamo, ngram_filter=ngram_filter,
+        autosave_path=args.autosave,
+    )
     run_repl(session)
 
 

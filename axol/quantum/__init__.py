@@ -125,6 +125,8 @@ from axol.quantum.fractal_text import (
     FractalTextGenerator,
     FractalResult,
 )
+from axol.quantum.ngram_filter import NgramFilter
+from axol.quantum import jamo
 from axol.quantum.dsl import (
     parse_quantum,
     QuantumProgram,
@@ -184,6 +186,8 @@ __all__ = [
     "HybridResponder", "HybridResponse",
     # Fractal noise composition (Perlin/fBm-style creative blends)
     "NoiseField", "FractalTextGenerator", "FractalResult",
+    # Grammar and Korean-specific helpers
+    "NgramFilter", "jamo",
     # DSL
     "parse_quantum", "QuantumProgram",
     "ObserveStatement", "ReobserveStatement", "ConditionalBlock",
