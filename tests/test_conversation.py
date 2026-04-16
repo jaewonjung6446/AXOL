@@ -14,6 +14,7 @@ from axol.quantum.conversation import (
     ConversationReport,
     Verbalizer,
     WorkingMemory,
+    vocab_from_texts,
 )
 
 
@@ -48,6 +49,36 @@ class TestCharTokenizer:
         tok = CharTokenizer("aabbcc")
         # 2 specials + 3 unique chars
         assert tok.vocab_size == 5
+
+    def test_from_texts_builds_union_vocab(self):
+        tok = CharTokenizer.from_texts(["hello", "world!", "hello world"])
+        # 2 specials + unique chars from 'hello world!'
+        assert tok.vocab_size == 2 + len(set("hello world!"))
+
+    def test_from_texts_handles_korean(self):
+        tok = CharTokenizer.from_texts(["안녕하세요", "반갑습니다"])
+        for ch in "안녕하세요반갑습니다":
+            assert ch in tok.tok_to_id
+
+    def test_korean_roundtrip(self):
+        tok = CharTokenizer.from_texts(["안녕 반가워요"])
+        ids = tok.encode("안녕 반가워요")
+        assert tok.decode(ids) == "안녕 반가워요"
+
+
+class TestVocabFromTexts:
+    def test_preserves_first_seen_order(self):
+        v = vocab_from_texts(["cba", "ab"])
+        # 'c' seen first, then 'b', then 'a'; 'ab' adds nothing new
+        assert v == "cba"
+
+    def test_handles_mixed_scripts(self):
+        v = vocab_from_texts(["hi안녕"])
+        assert set(v) == set("hi안녕")
+
+    def test_empty(self):
+        assert vocab_from_texts([]) == ""
+        assert vocab_from_texts([""]) == ""
 
 
 # ---------------------------------------------------------------------------

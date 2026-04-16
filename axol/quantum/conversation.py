@@ -42,11 +42,31 @@ Axiom alignment
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Iterable
 
 import numpy as np
 
 from axol.core.types import FloatVec
 from axol.quantum.online import LearningReport, OnlineLearner
+
+
+# ---------------------------------------------------------------------------
+# Vocab helper — works for any language / script, Korean included.
+# ---------------------------------------------------------------------------
+
+def vocab_from_texts(texts: Iterable[str]) -> str:
+    """Return a string containing every unique character seen in ``texts``.
+
+    Preserves first-seen order (useful for deterministic tokeniser IDs).
+    Applicable to any script — Hangul, CJK, accented Latin, emoji — since
+    the tokeniser operates on Unicode code points.
+    """
+    seen: dict[str, None] = {}
+    for text in texts:
+        for ch in text:
+            if ch not in seen:
+                seen[ch] = None
+    return "".join(seen.keys())
 
 
 # ---------------------------------------------------------------------------
@@ -99,6 +119,13 @@ class CharTokenizer:
                 continue
             parts.append(t)
         return "".join(parts)
+
+    @classmethod
+    def from_texts(cls, texts: Iterable[str]) -> "CharTokenizer":
+        """Build a tokeniser whose vocab is the union of characters seen
+        in ``texts`` — convenient for ad-hoc Korean / multilingual corpora.
+        """
+        return cls(vocab_from_texts(texts))
 
 
 # ---------------------------------------------------------------------------

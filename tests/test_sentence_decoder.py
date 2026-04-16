@@ -5,6 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from axol.quantum.conversation import vocab_from_texts
 from axol.quantum.sentence_decoder import (
     SentenceDecoderLanguageModel,
     SentenceDictionary,
@@ -239,6 +240,30 @@ class TestForgetting:
 # ---------------------------------------------------------------------------
 # THE BIG TEST — 40-pair recall that previously failed 0/10
 # ---------------------------------------------------------------------------
+
+class TestKorean:
+    def test_korean_qa_pairs_recalled(self):
+        """Same snap-decoder semantics should apply to Korean characters."""
+        pairs = [
+            ("안녕",        "안녕하세요 반갑습니다"),
+            ("이름",        "저는 악솔입니다"),
+            ("잘 지내",     "네 잘 지냅니다 감사합니다"),
+            ("뭐 하고",     "대화를 하고 있습니다"),
+            ("고마워",      "천만에요"),
+        ]
+        all_text = [q for q, _ in pairs] + [a for _, a in pairs]
+        m = SentenceDecoderLanguageModel(
+            vocab=vocab_from_texts(all_text),
+            intent_dim=20, intent_window=6,
+            regularization=1e-4, seed=0,
+        )
+        m.train_pairs(pairs, epochs=4)
+        for q, expected in pairs:
+            res = m.generate(q)
+            assert res.text == expected, (
+                f"Korean recall failed for {q!r}: got {res.text!r}"
+            )
+
 
 class TestFortyPairRecall:
     def test_40_proverb_pairs_all_recalled(self):

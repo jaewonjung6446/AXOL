@@ -92,6 +92,7 @@ from axol.quantum.conversation import (
     WorkingMemory,
     ConversationalAxol,
     ConversationReport,
+    vocab_from_texts,
 )
 from axol.quantum.language_model import (
     LanguageModel,
@@ -166,6 +167,7 @@ __all__ = [
     # Conversational (dual-layer)
     "CharTokenizer", "Verbalizer", "WorkingMemory",
     "ConversationalAxol", "ConversationReport",
+    "vocab_from_texts",
     # Language model
     "LanguageModel", "GenerationResult",
     # Two-stage (intent + surface)
