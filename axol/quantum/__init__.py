@@ -102,6 +102,10 @@ from axol.quantum.two_stage import (
     TwoStageGeneration,
     TwoStageReport,
 )
+from axol.quantum.streaming import (
+    StreamingLanguageModel,
+    StreamResult,
+)
 from axol.quantum.dsl import (
     parse_quantum,
     QuantumProgram,
@@ -150,6 +154,8 @@ __all__ = [
     "LanguageModel", "GenerationResult",
     # Two-stage (intent + surface)
     "TwoStageLanguageModel", "TwoStageGeneration", "TwoStageReport",
+    # Stream-of-consciousness (recursive intent↔surface)
+    "StreamingLanguageModel", "StreamResult",
     # DSL
     "parse_quantum", "QuantumProgram",
     "ObserveStatement", "ReobserveStatement", "ConditionalBlock",
