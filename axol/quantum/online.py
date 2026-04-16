@@ -353,6 +353,56 @@ class OnlineLearner:
         self._last_residual_sq = 0.0
         self._residual_count = 0
 
+    # ------------------------------------------------------------------
+    # Explicit forgetting
+    # ------------------------------------------------------------------
+
+    def decay(self, factor: float) -> None:
+        """Uniformly decay all accumulated moments by ``factor`` in [0, 1].
+
+        Equivalent to applying ``forgetting_factor=factor`` for one "empty"
+        timestep with no new data.  Use this to model the passage of time
+        between learning events — what an animal does while it sleeps or
+        waits: nothing new comes in, but old memories fade.
+
+        ``factor=1.0`` is a no-op; ``factor=0.0`` collapses back to the
+        regularised zero state (same as ``reset()`` except ``n_samples``
+        is preserved for diagnostics).
+        """
+        if not (0.0 <= factor <= 1.0):
+            raise ValueError("factor must be in [0, 1]")
+        if factor == 1.0:
+            return
+
+        # G = reg*I + sum gamma^k u u^T.  After decay we want the
+        # regularisation floor to stay put:
+        #     G_new = factor * (G - reg*I) + reg*I
+        #           = factor*G + (1 - factor)*reg*I
+        reg_I = np.eye(self.ld, dtype=np.float64) * self.regularization
+        self._G = factor * self._G + (1.0 - factor) * reg_I
+        self._B *= factor
+        self._rebuild_H_from_G()
+        self._K_cache = None
+
+    def decay_by_time(self, elapsed: float, half_life: float) -> None:
+        """Ebbinghaus-style exponential decay over elapsed time.
+
+        ``factor = 0.5 ** (elapsed / half_life)``.  After ``half_life`` units
+        of time the moments are halved; this is the classic forgetting curve
+        (Ebbinghaus, 1885) expressed exactly.
+
+        ``elapsed`` and ``half_life`` share arbitrary time units (seconds,
+        minutes, ticks) — only their ratio matters.
+        """
+        if half_life <= 0.0:
+            raise ValueError("half_life must be > 0")
+        if elapsed < 0.0:
+            raise ValueError("elapsed must be >= 0")
+        if elapsed == 0.0:
+            return
+        factor = 0.5 ** (elapsed / half_life)
+        self.decay(factor)
+
     def _rebuild_H_from_G(self) -> None:
         """Full recompute of H = (G + lambda*I)^{-1} — only on numerical fallback."""
         G_reg = self._G + np.eye(self.ld, dtype=np.float64) * self.regularization

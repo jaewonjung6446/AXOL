@@ -243,6 +243,158 @@ class TestConversationalAxol:
 # Axiom-3 invariant: ambiguous mappings surface as low Omega
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Animal-style continual learning: converse() + forgetting
+# ---------------------------------------------------------------------------
+
+def _mean_confidence(chat: ConversationalAxol, text_in: str, max_len: int = 4) -> float:
+    """Helper: average per-token cosine confidence for ``text_in``'s response."""
+    _, confs = chat.respond_with_confidence(text_in, max_len=max_len)
+    if not confs:
+        return 0.0
+    return float(sum(confs) / len(confs))
+
+
+class TestConverseRealtime:
+    def test_converse_returns_reflex_before_learning(self):
+        """Response is produced from the *current* intuition (not post-teach)."""
+        chat = ConversationalAxol(
+            vocab="ab", embed_dim=10, window=4,
+            forgetting_factor=1.0, regularization=1e-4,
+        )
+        # Prime it with 'a' -> 'b'
+        for _ in range(30):
+            chat.teach("a", "b")
+        # Now converse with a teaching signal that would *change* the mapping.
+        # The returned response must reflect the BEFORE state.
+        r = chat.converse("a", text_out="a", learn=True)
+        assert r.startswith("b"), f"expected reflex 'b', got {r!r}"
+
+    def test_converse_learns_when_text_out_given(self):
+        """With text_out, converse should accumulate samples."""
+        chat = ConversationalAxol(
+            vocab="ab", embed_dim=8, window=3,
+            forgetting_factor=1.0, regularization=1e-3,
+        )
+        assert chat.intuition.n_samples == 0
+        chat.converse("a", text_out="b", learn=True)
+        assert chat.intuition.n_samples > 0
+
+    def test_converse_without_text_out_does_not_learn(self):
+        chat = ConversationalAxol(vocab="ab", embed_dim=8)
+        chat.converse("a", text_out=None)
+        assert chat.intuition.n_samples == 0
+
+    def test_converse_learn_false_disables_learning(self):
+        chat = ConversationalAxol(vocab="ab", embed_dim=8)
+        chat.converse("a", text_out="b", learn=False)
+        assert chat.intuition.n_samples == 0
+
+
+class TestAcquisitionForgettingRelearn:
+    """Pavlovian acquisition/extinction/re-acquisition with ``converse``."""
+
+    def _make(self) -> ConversationalAxol:
+        return ConversationalAxol(
+            vocab="abcde.! ",
+            embed_dim=16,
+            window=6,
+            forgetting_factor=1.0,      # decay only via explicit forget
+            regularization=1e-4,
+            seed=0,
+        )
+
+    def test_acquisition_raises_confidence(self):
+        chat = self._make()
+        c_before = _mean_confidence(chat, "a")
+        for _ in range(40):
+            chat.converse("a", text_out="b")
+        c_after = _mean_confidence(chat, "a")
+        assert c_after > c_before + 0.2, (
+            f"confidence did not rise enough: {c_before:.3f} -> {c_after:.3f}"
+        )
+
+    def test_time_decay_lowers_confidence(self):
+        chat = self._make()
+        for _ in range(40):
+            chat.converse("a", text_out="b")
+        c_learned = _mean_confidence(chat, "a")
+
+        # Long time passes with no new experience
+        chat.forget_by_time(elapsed=100.0, half_life=10.0)  # 10 half-lives
+        c_decayed = _mean_confidence(chat, "a")
+
+        assert c_decayed < c_learned, (
+            f"decay did not weaken confidence: {c_learned:.3f} -> {c_decayed:.3f}"
+        )
+
+    def test_full_forget_collapses_behaviour(self):
+        chat = self._make()
+        for _ in range(40):
+            chat.converse("a", text_out="b")
+        chat.forget(0.0)
+        # After total forgetting the learned operator is ~ 0 -> predict ~ 0
+        out, confs = chat.respond_with_confidence("a", max_len=3)
+        # Confidence should be ~0 because predicted vector is near zero
+        assert max(confs) < 0.05
+
+    def test_relearn_after_forget_recovers(self):
+        """After total wipe, re-teaching should restore the association."""
+        chat = self._make()
+        for _ in range(40):
+            chat.converse("a", text_out="b")
+        chat.forget(0.0)
+        for _ in range(40):
+            chat.converse("a", text_out="b")
+        out = chat.respond("a", max_len=2)
+        assert out.startswith("b")
+
+    def test_integrated_scenario_acquire_decay_reacquire(self):
+        """End-to-end story:
+            1) acquire  -> confidence high
+            2) time decays it to near zero
+            3) reacquire -> confidence high again
+        """
+        chat = self._make()
+
+        for _ in range(40):
+            chat.converse("a", text_out="b")
+        c1 = _mean_confidence(chat, "a")
+
+        chat.forget_by_time(elapsed=200.0, half_life=5.0)
+        c2 = _mean_confidence(chat, "a")
+
+        for _ in range(40):
+            chat.converse("a", text_out="b")
+        c3 = _mean_confidence(chat, "a")
+
+        assert c1 > 0.2
+        assert c2 < c1
+        assert c3 > c2
+
+
+class TestConverseWithAutoDecay:
+    """``converse`` can apply time-based decay before each turn."""
+
+    def test_elapsed_time_decays_between_turns(self):
+        chat = ConversationalAxol(
+            vocab="ab", embed_dim=12, window=4,
+            forgetting_factor=1.0, regularization=1e-3,
+        )
+        for _ in range(30):
+            chat.converse("a", text_out="b")
+        c_before = _mean_confidence(chat, "a")
+
+        # Simulate "the animal slept for 50 time units"
+        chat.converse("a", text_out=None, elapsed_time=50.0, half_life=5.0)
+        c_after = _mean_confidence(chat, "a")
+        assert c_after < c_before
+
+
+# ---------------------------------------------------------------------------
+# Ambiguity still lowers Omega (unchanged from previous suite)
+# ---------------------------------------------------------------------------
+
 class TestAmbiguityLowersOmega:
     def test_contradictory_pairs_reduce_cohesion(self):
         """Teaching (a -> b) then (a -> c) repeatedly is internally

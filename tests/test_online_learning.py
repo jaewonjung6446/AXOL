@@ -319,3 +319,85 @@ class TestPublicMatrix:
         assert isinstance(K, TransMatrix)
         ld = lifted_dim(3, 2, "poly")
         assert K.shape == (ld, ld)
+
+
+# ---------------------------------------------------------------------------
+# Explicit decay / time-based forgetting
+# ---------------------------------------------------------------------------
+
+class TestDecay:
+    def test_decay_one_is_noop(self):
+        """factor=1.0 leaves moments untouched."""
+        learner = OnlineLearner(dim=3, regularization=1e-3)
+        X, Y = _make_linear_stream(np.eye(3) * 0.5, n=30, seed=20)
+        learner.observe_batch(X, Y)
+        G_before = learner._G.copy()
+        B_before = learner._B.copy()
+        learner.decay(1.0)
+        assert np.allclose(learner._G, G_before)
+        assert np.allclose(learner._B, B_before)
+
+    def test_decay_preserves_regularisation_floor(self):
+        """After aggressive decay G still satisfies G >= reg*I."""
+        reg = 1e-3
+        learner = OnlineLearner(dim=3, regularization=reg)
+        X, Y = _make_linear_stream(np.eye(3), n=30, seed=21)
+        learner.observe_batch(X, Y)
+        learner.decay(0.01)  # near-total forgetting
+        # Diagonal should never fall below reg
+        diag_min = np.min(np.diag(learner._G))
+        assert diag_min >= reg * 0.99
+
+    def test_decay_zero_collapses_to_regularised_state(self):
+        learner = OnlineLearner(dim=3, regularization=1e-3)
+        X, Y = _make_linear_stream(np.eye(3), n=30, seed=22)
+        learner.observe_batch(X, Y)
+        learner.decay(0.0)
+        # G should equal reg*I exactly
+        expected = np.eye(learner.ld) * learner.regularization
+        assert np.allclose(learner._G, expected)
+        # K should be ~ 0 (no information)
+        assert np.allclose(learner._K(), 0.0, atol=1e-6)
+
+    def test_decay_reduces_prediction_strength(self):
+        """After partial decay, predictions move toward zero."""
+        learner = OnlineLearner(dim=3, regularization=1e-4)
+        M = np.eye(3) * 0.7
+        X, Y = _make_linear_stream(M, n=200, seed=23)
+        learner.observe_batch(X, Y)
+        x_probe = np.array([1.0, 0.5, -0.3], dtype=np.float32)
+        y_strong = learner.predict(x_probe)
+        learner.decay(0.1)  # heavy forgetting
+        y_weak = learner.predict(x_probe)
+        assert np.linalg.norm(y_weak) < np.linalg.norm(y_strong)
+
+    def test_decay_by_time_matches_formula(self):
+        """factor = 0.5 ** (elapsed / half_life) should match manual decay."""
+        reg = 1e-3
+        learner_time = OnlineLearner(dim=3, regularization=reg)
+        learner_manual = OnlineLearner(dim=3, regularization=reg)
+        X, Y = _make_linear_stream(np.eye(3), n=30, seed=24)
+        learner_time.observe_batch(X, Y)
+        learner_manual.observe_batch(X, Y)
+
+        half_life = 10.0
+        elapsed = 20.0            # two half-lives -> factor = 0.25
+        learner_time.decay_by_time(elapsed, half_life)
+        learner_manual.decay(0.25)
+
+        assert np.allclose(learner_time._G, learner_manual._G, atol=1e-10)
+        assert np.allclose(learner_time._B, learner_manual._B, atol=1e-10)
+
+    def test_decay_by_time_rejects_invalid(self):
+        learner = OnlineLearner(dim=3)
+        with pytest.raises(ValueError):
+            learner.decay_by_time(1.0, 0.0)
+        with pytest.raises(ValueError):
+            learner.decay_by_time(-1.0, 1.0)
+
+    def test_decay_rejects_invalid_factor(self):
+        learner = OnlineLearner(dim=3)
+        with pytest.raises(ValueError):
+            learner.decay(-0.1)
+        with pytest.raises(ValueError):
+            learner.decay(1.5)

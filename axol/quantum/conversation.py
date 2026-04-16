@@ -275,7 +275,7 @@ class ConversationalAxol:
         embed_dim: int = 8,
         window: int = 8,
         decay: float = 0.7,
-        forgetting_factor: float = 1.0,
+        forgetting_factor: float = 0.998,
         regularization: float = 1e-3,
         seed: int = 0,
         degree: int = 2,
@@ -402,6 +402,71 @@ class ConversationalAxol:
             self.working_memory.add(self.verbalizer.encode_id(tid))
 
         return self.tokenizer.decode(output_ids), confidences
+
+    # ------------------------------------------------------------------
+    # Real-time interaction (animal-style): respond AND learn in one turn
+    # ------------------------------------------------------------------
+
+    def converse(
+        self,
+        text_in: str,
+        text_out: str | None = None,
+        max_len: int = 64,
+        stop_on_eos: bool = True,
+        min_confidence: float = 0.0,
+        learn: bool = True,
+        elapsed_time: float = 0.0,
+        half_life: float | None = None,
+    ) -> str:
+        """One interaction turn: reflex + (optional) reinforcement.
+
+        Mirrors animal operant conditioning.  On each turn the agent:
+
+        1. Decays prior memory by ``elapsed_time`` if ``half_life`` is given
+           (time between turns passively weakens traces).
+        2. Reacts to ``text_in`` using its current intuition -> response.
+        3. If ``text_out`` is provided and ``learn`` is True, the pair
+           ``(text_in, text_out)`` is pushed into the IntuitionCore as a
+           single stream of rank-1 updates.  This is the reinforcement:
+           the teacher signal strengthens the (stimulus, response) link.
+
+        Returns the *reflexive* response (produced before learning), which
+        is what the animal actually did before the teacher corrected it.
+        """
+        if half_life is not None and elapsed_time > 0.0:
+            self.intuition.decay_by_time(elapsed_time, half_life)
+
+        response = self.respond(
+            text_in,
+            max_len=max_len,
+            stop_on_eos=stop_on_eos,
+            min_confidence=min_confidence,
+        )
+
+        if learn and text_out is not None:
+            self.teach(text_in, text_out)
+
+        return response
+
+    # ------------------------------------------------------------------
+    # Forgetting (Ebbinghaus-style)
+    # ------------------------------------------------------------------
+
+    def forget(self, factor: float) -> None:
+        """Uniformly decay the intuition's accumulated memory by ``factor``.
+
+        ``factor=1.0`` keeps everything; ``factor=0.0`` wipes the learned
+        operator while preserving the embedding and tokenizer.
+        """
+        self.intuition.decay(factor)
+
+    def forget_by_time(self, elapsed: float, half_life: float) -> None:
+        """Exponential memory decay proportional to elapsed time.
+
+        ``factor = 0.5 ** (elapsed / half_life)`` — the Ebbinghaus curve.
+        ``elapsed`` and ``half_life`` share arbitrary time units.
+        """
+        self.intuition.decay_by_time(elapsed, half_life)
 
     # ------------------------------------------------------------------
     # Diagnostics (Axiom 3)
