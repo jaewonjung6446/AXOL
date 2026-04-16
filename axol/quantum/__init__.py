@@ -112,6 +112,11 @@ from axol.quantum.hierarchical import (
     HierarchicalResult,
     HierarchicalReport,
 )
+from axol.quantum.sentence_decoder import (
+    SentenceDictionary,
+    SentenceDecoderLanguageModel,
+    SnapResult,
+)
 from axol.quantum.dsl import (
     parse_quantum,
     QuantumProgram,
@@ -165,6 +170,8 @@ __all__ = [
     # Hierarchical (N-level with chunk propagation)
     "HierarchicalLanguageModel", "LevelConfig",
     "HierarchicalResult", "HierarchicalReport",
+    # Sentence-snap decoder (Intent + Dictionary)
+    "SentenceDictionary", "SentenceDecoderLanguageModel", "SnapResult",
     # DSL
     "parse_quantum", "QuantumProgram",
     "ObserveStatement", "ReobserveStatement", "ConditionalBlock",
