@@ -1,0 +1,132 @@
+[
+  {
+    "n": 100,
+    "n_train": 500,
+    "axol": {
+      "exact_accuracy": 0.14,
+      "kendall_tau": 0.9842424242424243,
+      "spearman_rho": 0.9995199519951995,
+      "norm_displacement": 0.0217,
+      "value_cosine": 0.9999849796295166,
+      "neighbor_preservation": 0.5858585858585859
+    },
+    "random": {
+      "exact_accuracy": 0.01,
+      "kendall_tau": -0.14222222222222225,
+      "spearman_rho": -0.2201980198019802,
+      "norm_displacement": 0.3626,
+      "value_cosine": 0.7103756666183472,
+      "neighbor_preservation": 0.010101010101010102
+    },
+    "timing": {
+      "weave_s": 0.041403361999982735,
+      "observe_s": 0.045762903999957416,
+      "mean_omega": 1.0,
+      "mean_phi": 0.9998008870216879
+    }
+  },
+  {
+    "n": 300,
+    "n_train": 1500,
+    "axol": {
+      "exact_accuracy": 0.06333333333333334,
+      "kendall_tau": 0.9967892976588629,
+      "spearman_rho": 0.999953332814809,
+      "norm_displacement": 0.014688888888888888,
+      "value_cosine": 0.9999988079071045,
+      "neighbor_preservation": 0.6688963210702341
+    },
+    "random": {
+      "exact_accuracy": 0.0033333333333333335,
+      "kendall_tau": 0.07255295429208475,
+      "spearman_rho": 0.11494927721419126,
+      "norm_displacement": 0.3121555555555555,
+      "value_cosine": 0.7680909037590027,
+      "neighbor_preservation": 0.0
+    },
+    "timing": {
+      "weave_s": 0.5824510350000764,
+      "observe_s": 1.6115713619999497,
+      "mean_omega": 1.0,
+      "mean_phi": 1.0
+    }
+  },
+  {
+    "n": 1000,
+    "n_train": 5000,
+    "axol": {
+      "exact_accuracy": 0.088,
+      "kendall_tau": 0.998954954954955,
+      "spearman_rho": 0.999995787995788,
+      "norm_displacement": 0.005165,
+      "value_cosine": 0.9999998211860657,
+      "neighbor_preservation": 0.6376376376376376
+    },
+    "random": {
+      "exact_accuracy": 0.002,
+      "kendall_tau": -0.012720720720720724,
+      "spearman_rho": -0.01892034692034692,
+      "norm_displacement": 0.334368,
+      "value_cosine": 0.7399031519889832,
+      "neighbor_preservation": 0.003003003003003003
+    },
+    "timing": {
+      "weave_s": 2.8536536189999424,
+      "observe_s": 41.037487607,
+      "mean_omega": 1.0,
+      "mean_phi": 1.0
+    }
+  },
+  {
+    "n": 3000,
+    "n_train": 5000,
+    "axol": {
+      "exact_accuracy": 0.017,
+      "kendall_tau": 0.9996603312215183,
+      "spearman_rho": 0.999999536444393,
+      "norm_displacement": 0.0035314444444444443,
+      "value_cosine": 1.0,
+      "neighbor_preservation": 0.6548849616538847
+    },
+    "random": {
+      "exact_accuracy": 0.0006666666666666666,
+      "kendall_tau": 0.0018819606535511735,
+      "spearman_rho": 0.002873066097007344,
+      "norm_displacement": 0.33486333333333335,
+      "value_cosine": 0.7483569383621216,
+      "neighbor_preservation": 0.001333777925975325
+    },
+    "timing": {
+      "weave_s": 53.9366180049999,
+      "observe_s": 2.2748091429998567,
+      "mean_omega": 1.0,
+      "mean_phi": 1.0
+    }
+  },
+  {
+    "n": 5000,
+    "n_train": 20000,
+    "axol": {
+      "exact_accuracy": 0.0096,
+      "kendall_tau": 0.9997929185837168,
+      "spearman_rho": 0.999999824031993,
+      "norm_displacement": 0.00492008,
+      "value_cosine": 0.9999999403953552,
+      "neighbor_preservation": 0.6635327065413082
+    },
+    "random": {
+      "exact_accuracy": 0.0,
+      "kendall_tau": -0.00620364072814561,
+      "spearman_rho": -0.009247497489899899,
+      "norm_displacement": 0.33560288,
+      "value_cosine": 0.7444996237754822,
+      "neighbor_preservation": 0.000600120024004801
+    },
+    "timing": {
+      "weave_s": 363.2142140870001,
+      "observe_s": 8.08531742499963,
+      "mean_omega": 1.0,
+      "mean_phi": 1.0
+    }
+  }
+]
