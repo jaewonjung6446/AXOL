@@ -1,0 +1,78 @@
+[
+  {
+    "name": "LogReg",
+    "train_s": 0.04000714900001867,
+    "infer_total_s": 0.0009724229999790168,
+    "infer_per_sample_us": 75.669,
+    "accuracy": 0.9814814814814815,
+    "omega": null,
+    "phi": null
+  },
+  {
+    "name": "MLP(64-32-10)",
+    "train_s": 0.7663132169999756,
+    "infer_total_s": 0.0012763459999973747,
+    "infer_per_sample_us": 205.904,
+    "accuracy": 0.975925925925926,
+    "omega": null,
+    "phi": null
+  },
+  {
+    "name": "RF(100)",
+    "train_s": 0.33985534999999345,
+    "infer_total_s": 0.016579366000001983,
+    "infer_per_sample_us": 7293.172,
+    "accuracy": 0.9685185185185186,
+    "omega": null,
+    "phi": null
+  },
+  {
+    "name": "kNN(k=5)",
+    "train_s": 0.0010007340000015574,
+    "infer_total_s": 0.19985280399998828,
+    "infer_per_sample_us": 13916.059,
+    "accuracy": 0.9703703703703703,
+    "omega": null,
+    "phi": null
+  },
+  {
+    "name": "AXOL(dim=64)",
+    "train_s": 0.02813634399998932,
+    "infer_total_s": 0.011113759000011214,
+    "infer_per_sample_us": 17.591,
+    "accuracy": 0.8962962962962963,
+    "omega": 1.0,
+    "phi": 0.998948582768535,
+    "dim": 64
+  },
+  {
+    "name": "AXOL(dim=128)",
+    "train_s": 0.06496534999999426,
+    "infer_total_s": 0.011399509000000307,
+    "infer_per_sample_us": 20.82,
+    "accuracy": 0.8962962962962963,
+    "omega": 1.0,
+    "phi": 0.9998008870216953,
+    "dim": 128
+  },
+  {
+    "name": "AXOL(dim=256)",
+    "train_s": 0.1443589240000165,
+    "infer_total_s": 0.015308070000003227,
+    "infer_per_sample_us": 23.622,
+    "accuracy": 0.8962962962962963,
+    "omega": 1.0,
+    "phi": 0.9999690297336902,
+    "dim": 256
+  },
+  {
+    "name": "AXOL(dim=512)",
+    "train_s": 0.5893207630000177,
+    "infer_total_s": 0.0518049890000043,
+    "infer_per_sample_us": 82.479,
+    "accuracy": 0.8962962962962963,
+    "omega": 1.0,
+    "phi": 1.0,
+    "dim": 512
+  }
+]
